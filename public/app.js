@@ -1,5 +1,5 @@
 import { LANGS, t, setLocale, getLocale, applyAll } from './i18n.js';
-import { ensureSymbolDefs, symbolSvg } from './symbols.js';
+import { ensureSymbolDefs, symbolSvg, THEME_KEYS } from './symbols.js';
 
 // ---------------------------------------------------------------- plumbing
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1054,9 +1054,14 @@ async function limitsModal() {
 // ------------------------------------------------------------------ slots
 let slotInfo = null;
 let slotBusy = false;
+// Cosmetic only: the reel maths, paytable and RTP are identical across themes.
+let slotTheme = (() => {
+  try { return localStorage.getItem('slotTheme') || 'classic'; } catch { return 'classic'; }
+})();
 
 async function renderSlots() {
   ensureSymbolDefs();
+  document.body.classList.toggle('afterdark', slotTheme === 'afterdark');
   const panel = $('#betPanel');
   const amount = amountControl('0.20');
   const spin = el('button', { class: 'primary big' }, t('slots.spin'));
@@ -1076,8 +1081,20 @@ async function renderSlots() {
       el('span', { class: 'k' }, t('slots.perLineBet')),
       el('span', { class: 'v' }, perLine)),
     spin,
+    el('label', { class: 'field', style: 'margin-top:12px' },
+      el('span', {}, t('slots.theme')),
+      el('select', {
+        onchange: (e) => {
+          slotTheme = e.target.value;
+          try { localStorage.setItem('slotTheme', slotTheme); } catch { /* private mode */ }
+          document.body.classList.toggle('afterdark', slotTheme === 'afterdark');
+          renderSlots();
+        },
+      }, ...THEME_KEYS.map((k) => el('option', {
+        value: k, selected: k === slotTheme ? 'selected' : false,
+      }, t(`slots.theme.${k}`))))),
     el('button', {
-      class: 'big', style: 'margin-top:8px',
+      class: 'big',
       onclick: () => slotPaytableModal(),
     }, t('slots.paytable')),
   );
@@ -1153,7 +1170,7 @@ async function settleReels(screen) {
 function paintReel(reelNode, symbols, litRows) {
   reelNode.replaceChildren(...symbols.map((sym, row) => {
     const cell = el('div', { class: `cell sym-${sym} ${litRows.includes(row) ? 'win' : ''}` });
-    cell.innerHTML = symbolSvg(sym);
+    cell.innerHTML = symbolSvg(sym, slotTheme);
     return cell;
   }));
 }
@@ -1282,7 +1299,7 @@ function slotPaytableModal() {
     if (!slotInfo) { body.append(el('p', { class: 'hint' }, t('common.loading'))); return; }
     const symCell = (key) => {
       const d = el('div', { class: 'sym' });
-      d.innerHTML = symbolSvg(key);
+      d.innerHTML = symbolSvg(key, slotTheme);
       return d;
     };
     const rows = [el('div', { class: 'sym' }, ''),

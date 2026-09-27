@@ -97,6 +97,9 @@ const STRINGS = {
   'slots.bigWin': { en: 'Big win! {mult}x', ru: 'Крупный выигрыш! {mult}x' },
   'slots.bigWinLabel': { en: 'Big win', ru: 'Крупный выигрыш' },
   'slots.returned': { en: 'returned', ru: 'возврат' },
+  'slots.theme': { en: 'Machine', ru: 'Автомат' },
+  'slots.theme.classic': { en: 'Golden Vault', ru: 'Золотой сейф' },
+  'slots.theme.afterdark': { en: 'After Dark', ru: 'После полуночи' },
 
   // ---- preferans
   'game.preferans': { en: 'Preferans', ru: 'Преферанс' },

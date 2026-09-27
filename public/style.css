@@ -607,3 +607,32 @@ body.practice .balance .value { color: #8fe3ff; }
   background: linear-gradient(180deg, #0f2733, #0a1a22);
   border-color: #23566b; color: #8fe3ff;
 }
+
+/* ------------------------------------------------- slots: After Dark theme */
+/* Only the cabinet dressing changes with the theme. The reel maths, paytable and
+   published RTP are identical, so the skin is never a different game. */
+body.afterdark .slot-cabinet {
+  background:
+    radial-gradient(520px 200px at 50% 0%, rgba(255, 79, 163, .16), transparent 70%),
+    linear-gradient(180deg, #24123a 0%, #180c28 60%, #0d0616 100%);
+  border-color: rgba(255, 79, 163, .30);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, .6) inset,
+    0 18px 48px rgba(0, 0, 0, .6),
+    inset 0 1px 0 rgba(255, 255, 255, .07);
+}
+body.afterdark .reels { background: linear-gradient(180deg, #0f0718, #070310); }
+body.afterdark .cell { background: linear-gradient(180deg, #1d1229 0%, #120a1b 100%); border-color: #33224a; }
+body.afterdark .cell.win {
+  border-color: #ff4fa3;
+  box-shadow: 0 0 22px rgba(255, 79, 163, .45), inset 0 0 18px rgba(255, 79, 163, .20);
+}
+body.afterdark .payline-layer path {
+  stroke: #ff4fa3; filter: drop-shadow(0 0 6px rgba(255, 79, 163, .6));
+}
+body.afterdark .slot-banner.free { color: #ffa8d8; text-shadow: 0 0 26px rgba(255, 79, 163, .5); }
+body.afterdark .bigwin {
+  background: radial-gradient(circle at 50% 45%, rgba(255, 79, 163, .26), rgba(8, 4, 12, .93) 68%);
+}
+body.afterdark .bigwin .label { color: #ff8ecb; }
+body.afterdark .bigwin .amount { color: #ffd9ec; text-shadow: 0 0 44px rgba(255, 79, 163, .55); }

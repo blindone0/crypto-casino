@@ -132,6 +132,11 @@ that misses its target**. That guard is not theoretical. An early version had a 
 search ceiling, silently clamped, and produced a 35% RTP machine that looked perfectly
 normal. A test now asserts the closed-form RTP agrees with simulated play.
 
+**Two machines, one engine.** The Machine selector switches between *Golden Vault* and
+*After Dark*, a late-night cocktail-bar skin. Only the artwork and the cabinet palette
+change: the reel strips, the paytable and the published RTP are identical, so a theme is
+never secretly a different game.
+
 ### Preferans
 
 The simplest form of the card game: 32 cards, ten each to you and two bots, two in the
