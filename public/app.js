@@ -1,5 +1,8 @@
 import { LANGS, t, setLocale, getLocale, applyAll } from './i18n.js';
 import { ensureSymbolDefs, symbolSvg, THEME_KEYS } from './symbols.js';
+import { pictureSvg } from './pictures.js';
+import { createCut } from './jigsaw.js';
+import * as audio from './audio.js';
 
 // ---------------------------------------------------------------- plumbing
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -14,6 +17,15 @@ const el = (tag, attrs = {}, ...kids) => {
   for (const kid of kids.flat()) {
     if (kid == null || kid === false) continue;
     n.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  return n;
+};
+
+/** Same idea as el(), for the SVG namespace. */
+const svgEl = (tag, attrs = {}) => {
+  const n = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v !== null && v !== undefined && v !== false) n.setAttribute(k, v);
   }
   return n;
 };
@@ -323,6 +335,7 @@ function renderDice() {
         body: { amount: amount.get(), target: target(), mode: mode.value },
       });
       showDiceResult(out);
+      audio.sfx(out.won ? 'win' : 'lose');
       state.user.balance = out.balance;
       setBalance(out.balance, out.profit);
       loadFeed();
@@ -402,6 +415,7 @@ function renderLimbo() {
       $('#limboVerdict').textContent = out.won
         ? `${t('bet.won')} +${fmtShort(out.profit)}`
         : `${t('bet.lost')} ${fmtShort(out.wager)}`;
+      audio.sfx(out.won ? (out.drawn >= 10 ? 'bigWin' : 'win') : 'lose');
       state.user.balance = out.balance;
       setBalance(out.balance, out.profit);
       loadFeed();
@@ -539,6 +553,7 @@ async function revealTile(tile) {
       setBalance(out.balance, out.safe ? 0 : -1);
     }
     paintMines();
+    audio.sfx(out.safe ? 'tileOpen' : 'crack');
     if (!out.safe) { toast(t('mines.boom'), 'bad'); loadFeed(); }
     if (out.autoCashout) { toast(t('mines.cashedOut', { mult: out.multiplier.toFixed(2) })); loadFeed(); }
   } catch (e) {
@@ -576,6 +591,7 @@ function renderCrash() {
     try {
       const out = await api('/api/crash/cashout', { method: 'POST' });
       toast(`${t('bet.won')} ${out.cashedAt.toFixed(2)}× +${fmtShort(out.profit)}`);
+      audio.sfx('cashout');
       state.user.balance = out.balance;
       setBalance(out.balance, 1);
       state.crashBet = null;
@@ -690,15 +706,20 @@ function connectCrash() {
     setPhase('running');
     if ($('#crashStatus')) $('#crashStatus').textContent = t('crash.running');
   });
+  let lastTickSound = 0;
   es.addEventListener('tick', (e) => {
     const { m } = JSON.parse(e.data);
     setMult(m, 'running');
     drawCurve(m, false);
+    // One tick per 0.25x so the pace tracks the climb, not the frame rate.
+    if (m - lastTickSound >= 0.25) { audio.sfx('tick'); lastTickSound = m; }
   });
   es.addEventListener('crash', (e) => {
     const s = JSON.parse(e.data);
     setMult(s.crashPoint, 'busted');
     drawCurve(s.crashPoint, true);
+    audio.sfx('crack');
+    lastTickSound = 0;
     setPhase('ended');
     showHistory(s.history);
     if ($('#crashStatus')) {
@@ -1128,6 +1149,9 @@ async function doSpin(amount, spin) {
   clearPaylines();
   removeBigWin();
   setReelsSpinning(true);
+  audio.sfx('spin');
+  // Keep the whirr going for as long as the reels are actually turning.
+  const whirr = setInterval(() => audio.sfx('spin'), 130);
 
   try {
     const out = await api('/api/bet/slots', { method: 'POST', body: { amount: amount.get() } });
@@ -1142,6 +1166,7 @@ async function doSpin(amount, spin) {
     toast(e.message, 'bad');
     setReelsSpinning(false);
   } finally {
+    clearInterval(whirr);
     slotBusy = false;
     spin.disabled = false;
   }
@@ -1163,6 +1188,7 @@ async function settleReels(screen) {
     reel.classList.remove('spinning');
     reel.classList.add('landing');
     paintReel(reel, screen[i], []);
+    audio.sfx('reelStop');
     await new Promise((r) => setTimeout(r, 130));
   }
 }
@@ -1268,6 +1294,7 @@ async function showSlotResult(out) {
       await new Promise((r) => setTimeout(r, 520));
       paintReels(fs.screen, fs.wins);
       drawPaylines(fs.wins);
+      audio.sfx(fs.wins.length ? 'win' : 'reelStop');
       banner.textContent = t('slots.freeSpinRun', { i: i + 1, n: out.freeSpins.length });
     }
     await new Promise((r) => setTimeout(r, 420));
@@ -1283,13 +1310,15 @@ async function showSlotResult(out) {
   if (out.profit > 0) {
     banner.className = 'slot-banner win';
     banner.textContent = `+${fmtShort(out.profit)}  (${out.multiplier.toFixed(2)}x)`;
-    if (out.multiplier >= 10) showBigWin(out.profit, out.multiplier);
+    if (out.multiplier >= 10) { showBigWin(out.profit, out.multiplier); audio.sfx('bigWin'); }
+    else audio.sfx('win');
   } else if (out.payout > 0) {
     banner.className = 'slot-banner';
     banner.textContent = `${fmtShort(out.payout)} ${t('slots.returned')}  (${out.multiplier.toFixed(2)}x)`;
   } else {
     banner.className = 'slot-banner';
     banner.textContent = '';
+    audio.sfx('lose');
   }
 }
 
@@ -1324,6 +1353,173 @@ function slotPaytableModal() {
         el('span', { class: 'v pos' }, `${(slotInfo.rtp * 100).toFixed(2)}%`)),
     );
   });
+}
+
+
+// ----------------------------------------------------------------- puzzle
+let puzzleInfo = null;
+
+async function renderPuzzle() {
+  if (!puzzleInfo) {
+    try { puzzleInfo = await api('/api/bet/puzzle/info'); } catch { /* offline */ }
+  }
+  let game = { state: 'none' };
+  if (state.user) {
+    try { game = await api('/api/bet/puzzle/current'); } catch { /* nothing open */ }
+  }
+  state.puzzle = game;
+  paintPuzzle();
+}
+
+function paintPuzzle() {
+  const g = state.puzzle || { state: 'none' };
+  const live = g.state === 'active';
+  const panel = $('#betPanel');
+
+  if (!live) {
+    const amount = amountControl('0.10');
+    const diff = el('select', {}, ...(puzzleInfo?.tiers || []).map((tier) => el('option', {
+      value: tier.key, selected: tier.key === (state.puzzleTier || 'medium') ? 'selected' : false,
+    }, `${t(`puzzle.${tier.key}`)} — ${tier.cols}x${tier.rows}, ${tier.broken} broken`)));
+    diff.addEventListener('change', () => { state.puzzleTier = diff.value; paintPuzzle(); });
+
+    const tier = (puzzleInfo?.tiers || []).find((x) => x.key === (state.puzzleTier || 'medium'));
+    const start = el('button', { class: 'primary big' }, t('puzzle.start'));
+    start.addEventListener('click', async () => {
+      if (!requireLogin()) return;
+      start.disabled = true;
+      try {
+        state.puzzle = await api('/api/bet/puzzle/start', {
+          method: 'POST', body: { amount: amount.get(), difficulty: diff.value },
+        });
+        setBalance(state.puzzle.balance, -1);
+        paintPuzzle();
+      } catch (e) {
+        toast(e.message, 'bad');
+        start.disabled = false;
+      }
+    });
+
+    panel.replaceChildren(
+      amount.node,
+      el('label', { class: 'field' }, el('span', {}, t('puzzle.difficulty')), diff),
+      tier ? statRow('puzzle.topPrize', el('span', {}, `${tier.complete.toFixed(2)}x`)) : null,
+      tier ? statRow('puzzle.broken', el('span', {}, String(tier.broken))) : null,
+      start,
+      el('p', { class: 'hint' }, t('puzzle.sameEdge')),
+    );
+  } else {
+    const cash = el('button', { class: 'primary big' },
+      t('puzzle.cashout', { amount: fmtShort(g.cashoutValue || 0) }));
+    cash.disabled = !g.picks?.length;
+    cash.addEventListener('click', async () => {
+      cash.disabled = true;
+      try {
+        const out = await api('/api/bet/puzzle/cashout', { method: 'POST' });
+        state.puzzle = out;
+        setBalance(out.balance, 1);
+        paintPuzzle();
+        loadFeed();
+      } catch (e) { toast(e.message, 'bad'); cash.disabled = false; }
+    });
+    panel.replaceChildren(
+      statRow('bet.multiplier', el('span', {}, `${(g.multiplier || 0).toFixed(2)}x`)),
+      statRow('puzzle.next', el('span', {}, g.nextMultiplier ? `${g.nextMultiplier.toFixed(2)}x` : '-')),
+      statRow('puzzle.pieces', el('span', {}, String(g.remaining ?? 0))),
+      cash,
+      ladderList(g),
+    );
+  }
+  applyAll(panel);
+
+  // ---- the stage: artwork underneath, covers on top
+  const tier = (puzzleInfo?.tiers || []).find((x) => x.key === (g.difficulty || state.puzzleTier || 'medium'))
+    || { cols: 4, rows: 3, tiles: 12 };
+  const cols = g.cols || tier.cols;
+  const rows = g.rows || tier.rows;
+  const total = g.tiles || tier.tiles;
+  const picks = new Set(g.picks || []);
+  const broken = new Set(g.state && g.state !== 'active' ? (g.broken || []) : []);
+
+  const art = el('div', { class: 'puzzle-art' });
+  art.innerHTML = pictureSvg(g.picture || 'deco');
+
+  // Real jigsaw pieces rather than a grid of squares: neighbouring pieces share an edge
+  // exactly, so a tab on one is the blank on the other. The cut is seeded from the round
+  // so it stays put across re-renders; which pieces are broken still comes from the
+  // server, never from here.
+  const BOARD = 1000;
+  const boardH = Math.round((BOARD * rows) / cols);
+  const cut = createCut({
+    cols, rows, width: BOARD, height: boardH, seed: (g.nonce || 1) * 2654435761,
+  });
+  const grid = svgEl('svg', {
+    class: 'puzzle-pieces',
+    viewBox: `0 0 ${BOARD} ${boardH}`,
+    preserveAspectRatio: 'none',
+  });
+  for (let i = 0; i < total; i += 1) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const open = picks.has(i);
+    const cracked = broken.has(i);
+    const piece = svgEl('path', {
+      d: cut.path(col, row),
+      class: `piece ${open ? 'open' : ''} ${cracked ? 'cracked' : ''}`,
+    });
+    if (g.state === 'active' && !open) {
+      piece.addEventListener('click', () => revealPiece(i));
+    }
+    grid.append(piece);
+  }
+
+  const status = g.state === 'lost' ? t('puzzle.cracked')
+    : (g.state === 'cashed'
+      ? t('puzzle.complete', { mult: (g.multiplier || 0).toFixed(2) })
+      : (g.state === 'active' ? `${(g.multiplier || 0).toFixed(2)}x` : t('puzzle.pick')));
+
+  const shape = cols / rows >= 1.6 ? 'widest' : (cols / rows > 1.05 ? 'wide' : '');
+  $('#stage').replaceChildren(
+    el('div', {
+      class: `puzzle-status ${g.state === 'lost' ? 'lost' : (g.state === 'cashed' ? 'won' : '')}`,
+    }, status),
+    el('div', { class: `puzzle-frame ${shape}` }, art, grid),
+  );
+
+  infoPanel(puzzleInfo ? [
+    el('div', { class: 'stat-row' },
+      el('span', { class: 'k' }, t('bet.edge')),
+      el('span', { class: 'v' }, `${(puzzleInfo.edge * 100).toFixed(2)}%`)),
+  ] : []);
+}
+
+/** The payout ladder, with the rung already reached marked. */
+function ladderList(g) {
+  const rungs = g.ladder || [];
+  const at = (g.picks || []).length;
+  return el('div', {},
+    el('h3', { style: 'margin-top:14px' }, t('puzzle.ladder')),
+    el('div', { class: 'ladder-list' }, ...rungs.map((m, i) => el('span', {
+      class: i + 1 < at ? 'done' : (i + 1 === at ? 'now' : ''),
+    }, `${m.toFixed(2)}x`))));
+}
+
+async function revealPiece(tile) {
+  try {
+    const out = await api('/api/bet/puzzle/reveal', { method: 'POST', body: { tile } });
+    state.puzzle = out;
+    if (out.balance != null) setBalance(out.balance, out.safe ? 0 : -1);
+    paintPuzzle();
+    audio.sfx(out.safe ? 'tileOpen' : 'crack');
+    if (out.completed) audio.sfx('bigWin');
+    if (!out.safe) { toast(t('puzzle.cracked'), 'bad'); loadFeed(); }
+    if (out.completed) {
+      toast(t('puzzle.complete', { mult: (out.multiplier || 0).toFixed(2) }));
+      loadFeed();
+    }
+  } catch (e) {
+    toast(e.message, 'bad');
+  }
 }
 
 // -------------------------------------------------------------- preferans
@@ -1523,16 +1719,18 @@ async function playPrefCard(card) {
     const out = await api('/api/bet/preferans/play', { method: 'POST', body: { card } });
     state.pref = out;
     paintPreferans();
+    audio.sfx('card');
     if (out.finished) {
       state.user.balance = out.balance;
       setBalance(out.balance, out.profit);
+      audio.sfx(out.outcome === 'won' ? 'win' : (out.outcome === 'push' ? 'click' : 'lose'));
       loadFeed();
     }
   } catch (e) { toast(e.message, 'bad'); }
 }
 
 // ------------------------------------------------------------------- boot
-const GAMES = ['dice', 'limbo', 'mines', 'crash', 'slots', 'preferans'];
+const GAMES = ['dice', 'limbo', 'mines', 'crash', 'slots', 'puzzle', 'preferans'];
 
 function renderGame() {
   if (state.es && state.game !== 'crash') { state.es.close(); state.es = null; }
@@ -1547,6 +1745,7 @@ function renderGame() {
   else if (state.game === 'limbo') renderLimbo();
   else if (state.game === 'mines') { state.mines = null; renderMines(); loadMinesState(); }
   else if (state.game === 'slots') renderSlots();
+  else if (state.game === 'puzzle') renderPuzzle();
   else if (state.game === 'preferans') renderPreferans();
   else renderCrash();
 }
@@ -1627,6 +1826,27 @@ async function boot() {
   for (const b of document.querySelectorAll('#modeSwitch button')) {
     b.onclick = () => setWallet(b.dataset.wallet);
   }
+
+  audio.armOnFirstGesture();
+  const soundBtn = $('#btnSound');
+  const paintSound = () => {
+    const on = audio.isEnabled();
+    const music = audio.isMusicOn();
+    soundBtn.textContent = on ? (music ? '♫' : '♪') : '✕';
+    soundBtn.classList.toggle('muted', !on);
+    soundBtn.classList.toggle('music-off', on && !music);
+    soundBtn.title = on ? (music ? t('sound.musicOn') : t('sound.musicOff')) : t('sound.off');
+  };
+  soundBtn.onclick = () => {
+    // Three states, because wanting effects without music is a normal preference.
+    if (audio.isEnabled() && audio.isMusicOn()) audio.setMusic(false);
+    else if (audio.isEnabled()) audio.setEnabled(false);
+    else { audio.setEnabled(true); audio.setMusic(true); }
+    paintSound();
+    audio.sfx('click');
+  };
+  paintSound();
+  document.addEventListener('localechange', paintSound);
 
   $('#btnSignin').onclick = () => authModal('login');
   $('#btnSignup').onclick = () => authModal('register');

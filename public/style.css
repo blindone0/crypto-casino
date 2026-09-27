@@ -636,3 +636,55 @@ body.afterdark .bigwin {
 }
 body.afterdark .bigwin .label { color: #ff8ecb; }
 body.afterdark .bigwin .amount { color: #ffd9ec; text-shadow: 0 0 44px rgba(255, 79, 163, .55); }
+
+/* ---------------------------------------------------------------- puzzle */
+/* The artwork sits underneath and never moves; the grid on top is a set of covers that
+   are removed as pieces are uncovered. Slicing an image into tiles would misalign the
+   moment the container resized, so nothing is sliced. */
+.puzzle-frame {
+  position: relative; width: 100%; max-width: 440px; margin: 0 auto;
+  aspect-ratio: 1; border-radius: 12px; overflow: hidden;
+  border: 1px solid var(--gold-line);
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, .06);
+}
+.puzzle-frame.wide { max-width: 560px; aspect-ratio: 4 / 3; }
+.puzzle-frame.widest { max-width: 620px; aspect-ratio: 5 / 3; }
+.puzzle-art { position: absolute; inset: 0; }
+.puzzle-art svg { width: 100%; height: 100%; display: block; }
+/* Pieces are SVG paths, not boxes, so the cut can interlock. */
+.puzzle-pieces { position: absolute; inset: 0; width: 100%; height: 100%; }
+.puzzle-pieces .piece {
+  fill: #1c1813;
+  stroke: #0a0806;
+  stroke-width: 2;
+  cursor: pointer;
+  transition: opacity .35s ease, fill .2s;
+}
+.puzzle-pieces .piece:hover { fill: #2c2621; }
+.puzzle-pieces .piece.open { opacity: 0; pointer-events: none; }
+.puzzle-pieces .piece.cracked {
+  fill: #3a1620; stroke: #7b2c3c; stroke-width: 3;
+  cursor: default; pointer-events: none;
+}
+.puzzle-status {
+  text-align: center; font-family: var(--mono); font-size: 20px;
+  padding: 8px 0 10px; color: var(--gold-bright);
+  font-variant-numeric: tabular-nums;
+}
+.puzzle-status.lost { color: var(--danger); }
+.puzzle-status.won { color: var(--win); }
+.ladder-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.ladder-list span {
+  font-family: var(--mono); font-size: 11px; padding: 3px 7px; border-radius: 999px;
+  background: #16130f; border: 1px solid var(--line-soft); color: var(--text-dim);
+}
+.ladder-list span.done { color: var(--win); border-color: #1d6b52; }
+.ladder-list span.now { color: var(--gold-bright); border-color: var(--gold); }
+
+/* ----------------------------------------------------------------- sound */
+.sound-toggle {
+  font-size: 15px; line-height: 1; padding: 6px 10px; min-width: 36px;
+  color: var(--gold); border: 1px solid var(--gold-line); background: var(--bg-input);
+}
+.sound-toggle.muted { color: var(--text-faint); border-color: var(--line); }
+.sound-toggle.music-off { color: var(--text-dim); }

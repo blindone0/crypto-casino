@@ -33,6 +33,9 @@ const DEFAULTS = {
     // Slots run a wider edge than the originals because that is the market norm and
     // because their variance is far higher; 0.03 means a 97% return to player.
     slots: 0.03,
+    // Puzzle uses the same combinatorial pricing as mines, so the edge is exact and
+    // identical across every difficulty tier. Difficulty buys variance, not worse odds.
+    puzzle: 0.01,
     // Preferans is a game of SKILL, so this edge is not guaranteed the way the others
     // are. It is calibrated against the bot's own play: a player who plays better than
     // the bot erodes it, a weaker one loses more. Keep it wide to absorb that, and watch

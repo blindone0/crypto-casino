@@ -101,6 +101,28 @@ const STRINGS = {
   'slots.theme.classic': { en: 'Golden Vault', ru: 'Золотой сейф' },
   'slots.theme.afterdark': { en: 'After Dark', ru: 'После полуночи' },
 
+  // ---- puzzle
+  'game.puzzle': { en: 'Puzzle', ru: 'Пазл' },
+  'puzzle.difficulty': { en: 'Difficulty', ru: 'Сложность' },
+  'puzzle.easy': { en: 'Easy', ru: 'Лёгкий' },
+  'puzzle.medium': { en: 'Medium', ru: 'Средний' },
+  'puzzle.hard': { en: 'Hard', ru: 'Сложный' },
+  'puzzle.expert': { en: 'Expert', ru: 'Эксперт' },
+  'puzzle.start': { en: 'Start puzzle', ru: 'Начать пазл' },
+  'puzzle.cashout': { en: 'Collect {amount}', ru: 'Забрать {amount}' },
+  'puzzle.next': { en: 'Next piece pays', ru: 'Следующий фрагмент' },
+  'puzzle.broken': { en: 'Broken pieces', ru: 'Битых фрагментов' },
+  'puzzle.pieces': { en: 'Pieces to complete', ru: 'Фрагментов до конца' },
+  'puzzle.complete': { en: 'Completed! {mult}x', ru: 'Собран! {mult}x' },
+  'puzzle.cracked': { en: 'Broken piece. Round over.', ru: 'Битый фрагмент. Раунд окончен.' },
+  'puzzle.pick': { en: 'Uncover a piece', ru: 'Откройте фрагмент' },
+  'puzzle.ladder': { en: 'Payout ladder', ru: 'Лестница выплат' },
+  'puzzle.sameEdge': {
+    en: 'Every difficulty carries the same house edge. Harder grids buy variance, not worse odds.',
+    ru: 'У всех уровней одинаковое преимущество казино. Сложность меняет разброс, а не шансы.',
+  },
+  'puzzle.topPrize': { en: 'Complete the picture', ru: 'Собрать всю картину' },
+
   // ---- preferans
   'game.preferans': { en: 'Preferans', ru: 'Преферанс' },
   'pref.deal': { en: 'Deal', ru: 'Раздать' },
@@ -132,6 +154,13 @@ const STRINGS = {
     ru: 'Здесь важно умение: выплаты рассчитаны по игре бота, поэтому играя лучше него, вы повышаете свой возврат.',
   },
   'pref.newHand': { en: 'New hand', ru: 'Новая раздача' },
+
+  // ---- sound
+  'sound.toggle': { en: 'Sound', ru: 'Звук' },
+  'sound.on': { en: 'Sound on', ru: 'Звук включён' },
+  'sound.off': { en: 'Sound off', ru: 'Звук выключен' },
+  'sound.musicOn': { en: 'Music on', ru: 'Музыка включена' },
+  'sound.musicOff': { en: 'Music off', ru: 'Музыка выключена' },
 
   // ---- free play
   'demo.real': { en: 'Real', ru: 'На деньги' },
