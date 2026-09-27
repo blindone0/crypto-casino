@@ -16,6 +16,7 @@ const adminApi = require('./admin');
 const walletApi = require('./wallet');
 const treasury = require('./treasury');
 const bankMod = require('./bank');
+const tokenchain = require('./tokenchain');
 const geoMod = require('./geo');
 const dice = require('./games/dice');
 const limbo = require('./games/limbo');
@@ -132,6 +133,7 @@ function build(cfg) {
     rakeback: cfg.rakeback,
     referralCommission: cfg.referralCommission,
     demo: { enabled: cfg.demo.enabled, startingUnits: cfg.demo.startingUnits },
+    token: { enabled: cfg.token.enabled, symbol: cfg.token.symbol },
     crashCommitment: crash.commitment,
     dice: { minWinCount: dice.MIN_WIN_COUNT, maxWinCount: dice.MAX_WIN_COUNT },
     slots: { rtp: slots.machineFor(cfg.houseEdge.slots).rtp, lines: slots.LINES },
@@ -466,6 +468,74 @@ function build(cfg) {
     checkCsrf(req, ctx);
     if (!cfg.demo.enabled) throw new U.BadRequest('practice mode is disabled');
     return bankMod.demoBank(db, cfg).topUp(user.id);
+  });
+
+  // ------------------------------------------------------------ site token
+  add('GET', '/api/token', async (ctx) => {
+    const user = requireUser(ctx);
+    if (!cfg.token.enabled) return { enabled: false };
+    const key = tokenchain.keyFor(db, user.id);
+    const tip = tokenchain.head(db);
+    return {
+      enabled: true,
+      symbol: cfg.token.symbol,
+      welcomeGrant: cfg.token.welcomeGrant,
+      serverKey: tokenchain.serverKey(db).publicRaw,
+      chain: tokenchain.CHAIN_ID,
+      pubkey: key ? key.pubkey : null,
+      balance: key ? tokenchain.balanceOf(db, key.pubkey) : 0,
+      nextNonce: key ? tokenchain.nextNonce(db, key.pubkey) : 0,
+      height: tip ? tip.height : -1,
+      head: tip ? tip.hash : null,
+    };
+  });
+
+  add('POST', '/api/token/key', async (ctx, req) => {
+    const user = requireUser(ctx);
+    checkCsrf(req, ctx);
+    if (!cfg.token.enabled) throw new U.BadRequest('the site token is disabled');
+    const body = await U.readJsonBody(req);
+    return tokenchain.registerKey(db, user.id, body.pubkey, cfg);
+  });
+
+  add('POST', '/api/token/transfer', async (ctx, req) => {
+    const user = requireUser(ctx);
+    checkCsrf(req, ctx);
+    if (!cfg.token.enabled) throw new U.BadRequest('the site token is disabled');
+    const body = await U.readJsonBody(req);
+    const key = tokenchain.keyFor(db, user.id);
+    // The signature is what authorises the move, but a session may only submit its own
+    // key: otherwise one account could spend another account rate limit and quota.
+    if (!key || key.pubkey !== String(body.from || '').toLowerCase()) {
+      throw new U.Forbidden('that key is not registered to this account');
+    }
+    return tokenchain.submitTransfer(db, body);
+  });
+
+  add('GET', '/api/token/chain', async (ctx, req) => {
+    const url = new URL(req.url, 'http://x');
+    return tokenchain.chainSlice(db, url.searchParams.get('from'), url.searchParams.get('limit'));
+  });
+
+  add('GET', '/api/token/head', async () => {
+    const tip = tokenchain.head(db);
+    return {
+      chain: tokenchain.CHAIN_ID,
+      serverKey: tokenchain.serverKey(db).publicRaw,
+      height: tip ? tip.height : -1,
+      head: tip ? tip.hash : null,
+      signature: tip ? tip.signature : null,
+    };
+  });
+
+  add('GET', '/api/admin/token', async (ctx, req) => {
+    requireAdmin(req, ctx);
+    return {
+      ...tokenchain.verifyChain(db),
+      serverKey: tokenchain.serverKey(db).publicRaw,
+      accounts: db.get('SELECT COUNT(*) AS n FROM token_balances').n,
+      supply: db.get('SELECT COALESCE(SUM(balance),0) AS n FROM token_balances').n,
+    };
   });
 
   // -------------------------------------------------------------- fairness

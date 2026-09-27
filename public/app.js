@@ -3,6 +3,8 @@ import { ensureSymbolDefs, symbolSvg, THEME_KEYS } from './symbols.js';
 import { pictureSvg } from './pictures.js';
 import { createCut } from './jigsaw.js';
 import * as audio from './audio.js';
+import * as tokenKeys from './tokenkeys.js';
+import { verifyChain, compareHeads } from './chainverify.js';
 
 // ---------------------------------------------------------------- plumbing
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1926,6 +1928,222 @@ async function debPlay(card) {
   } catch (e) { toast(e.message, 'bad'); }
 }
 
+
+// ------------------------------------------------------------- site token
+// The unlocked key lives only in this tab, in a module variable. It is deliberately not
+// put in localStorage: a phrase written to disk by a web page is a phrase that outlives
+// the session and the user's expectations.
+let tokenKey = null;
+
+async function tokenModal() {
+  if (!requireLogin()) return;
+  const body = openModal(t('tok.title'), (b) => b.append(el('p', { class: 'hint' }, t('common.loading'))));
+
+  if (!(await tokenKeys.supported())) {
+    body.replaceChildren(el('div', { class: 'banner' }, t('tok.unsupported')));
+    return;
+  }
+
+  let info;
+  try { info = await api('/api/token'); } catch (e) {
+    body.replaceChildren(el('p', { class: 'hint neg' }, e.message));
+    return;
+  }
+  if (!info.enabled) {
+    body.replaceChildren(el('p', { class: 'hint' }, 'The site token is switched off.'));
+    return;
+  }
+
+  body.replaceChildren();
+  body.append(el('p', { class: 'hint' }, t('tok.what')));
+
+  if (!info.pubkey) {
+    renderTokenSetup(body, info);
+  } else {
+    renderTokenWallet(body, info);
+  }
+}
+
+/** First run: make a phrase, or restore one made earlier. */
+function renderTokenSetup(body, info) {
+  const create = el('button', { class: 'primary big' }, t('tok.create'));
+  create.addEventListener('click', async () => {
+    const phrase = tokenKeys.generatePhrase();
+    const words = phrase.split(' ');
+    const box = el('div', { class: 'phrase-box' },
+      ...words.map((w, i) => el('span', {}, el('b', {}, String(i + 1)), w)));
+
+    const confirm = el('button', { class: 'primary big' }, t('tok.saved'));
+    confirm.addEventListener('click', async () => {
+      confirm.disabled = true;
+      try {
+        tokenKey = await tokenKeys.keyFromPhrase(phrase);
+        await api('/api/token/key', { method: 'POST', body: { pubkey: tokenKey.publicKey } });
+        tokenModal();
+      } catch (e) { toast(e.message, 'bad'); confirm.disabled = false; }
+    });
+
+    body.replaceChildren(
+      el('h3', {}, t('tok.phrase')),
+      el('div', { class: 'banner' }, t('tok.phraseWarn')),
+      box,
+      el('div', { class: 'row' },
+        el('button', {
+          class: 'tiny',
+          onclick: async () => {
+            try { await navigator.clipboard.writeText(phrase); toast(t('wallet.copied')); }
+            catch { toast(t('common.error'), 'bad'); }
+          },
+        }, t('wallet.copy'))),
+      confirm,
+    );
+  });
+
+  const restore = el('input', { class: 'mono', placeholder: t('tok.enterPhrase') });
+  body.append(
+    create,
+    el('h3', { style: 'margin-top:18px' }, t('tok.restore')),
+    el('div', { class: 'input-row' }, restore,
+      el('button', {
+        class: 'tiny',
+        onclick: async () => {
+          try {
+            tokenKey = await tokenKeys.keyFromPhrase(restore.value);
+            await api('/api/token/key', { method: 'POST', body: { pubkey: tokenKey.publicKey } });
+            tokenModal();
+          } catch (e) { toast(e.message, 'bad'); }
+        },
+      }, t('tok.unlock'))),
+  );
+}
+
+/** Normal view: balance, address, sending, and the chain verifier. */
+function renderTokenWallet(body, info) {
+  const unlocked = tokenKey && tokenKey.publicKey === info.pubkey;
+
+  body.append(
+    el('div', { class: 'stat-grid' },
+      el('div', { class: 'stat-card' },
+        el('div', { class: 'k' }, t('tok.balance')),
+        el('div', { class: 'v pos' }, `${info.balance} ${info.symbol}`)),
+      el('div', { class: 'stat-card' },
+        el('div', { class: 'k' }, t('tok.height')),
+        el('div', { class: 'v' }, String(info.height)))),
+    el('h3', { style: 'margin-top:16px' }, t('tok.address')),
+    el('div', { class: 'addr' }, info.pubkey),
+  );
+
+  if (!unlocked) {
+    const phrase = el('input', { class: 'mono', placeholder: t('tok.enterPhrase') });
+    body.append(
+      el('p', { class: 'hint' }, t('tok.locked')),
+      el('div', { class: 'input-row' }, phrase,
+        el('button', {
+          class: 'tiny',
+          onclick: async () => {
+            try {
+              const k = await tokenKeys.keyFromPhrase(phrase.value);
+              if (k.publicKey !== info.pubkey) throw new Error('that phrase belongs to a different wallet');
+              tokenKey = k;
+              toast(t('tok.unlocked'));
+              tokenModal();
+            } catch (e) { toast(e.message, 'bad'); }
+          },
+        }, t('tok.unlock'))),
+    );
+  } else {
+    const to = el('input', { class: 'mono', placeholder: '64 hex characters' });
+    const amount = el('input', { class: 'mono', value: '100', inputmode: 'numeric' });
+    body.append(
+      el('h3', { style: 'margin-top:16px' }, t('tok.send')),
+      el('label', { class: 'field' }, el('span', {}, t('tok.to')), to),
+      el('label', { class: 'field' }, el('span', {}, t('tok.amount')), amount),
+      el('button', {
+        class: 'primary big',
+        onclick: async (e) => {
+          e.target.disabled = true;
+          try {
+            const fresh = await api('/api/token');
+            const tx = {
+              from: tokenKey.publicKey,
+              to: to.value.trim().toLowerCase(),
+              amount: Number(amount.value),
+              nonce: fresh.nextNonce,
+            };
+            // Signed here, in the browser. The server can check it and cannot make it.
+            const sig = await tokenKeys.signTransfer(tokenKey, tx);
+            const out = await api('/api/token/transfer', { method: 'POST', body: { ...tx, sig } });
+            toast(t('tok.sent', { n: out.height }));
+            audio.sfx('cashout');
+            tokenModal();
+          } catch (err) { toast(err.message, 'bad'); e.target.disabled = false; }
+        },
+      }, t('tok.signSend')),
+    );
+  }
+
+  // ---- the verifier
+  const bar = el('i');
+  const progress = el('div', { class: 'verify-bar' }, bar);
+  const result = el('div', {});
+  const pinNote = el('p', { class: 'hint' });
+
+  let pinned = null;
+  try { pinned = JSON.parse(localStorage.getItem('tokenHead') || 'null'); } catch { /* ignore */ }
+  if (pinned) {
+    const cmp = compareHeads(pinned, { height: info.height, head: info.head });
+    pinNote.textContent = t('tok.pinCheck', { msg: cmp.message });
+    pinNote.className = `hint ${cmp.status === 'ok' ? 'pos' : 'neg'}`;
+  }
+
+  body.append(
+    el('h3', { style: 'margin-top:20px' }, t('tok.verify')),
+    el('div', { class: 'addr', style: 'font-size:11px' }, info.head || '-'),
+    progress,
+    result,
+    el('div', { class: 'row' },
+      el('button', {
+        class: 'big',
+        onclick: async (e) => {
+          e.target.disabled = true;
+          result.className = '';
+          result.textContent = '';
+          try {
+            const out = await verifyChain({
+              onProgress: (done, total) => {
+                bar.style.width = `${total ? (done / total) * 100 : 0}%`;
+                result.className = 'hint';
+                result.textContent = t('tok.verifying', { n: done, total });
+              },
+            });
+            if (out.ok) {
+              result.className = 'verify-result ok';
+              result.textContent = t('tok.verifyOk', { n: out.checked });
+            } else {
+              result.className = 'verify-result bad';
+              result.textContent = t('tok.verifyFail', { h: out.height, why: out.reason });
+            }
+          } catch (err) {
+            result.className = 'verify-result bad';
+            result.textContent = err.message;
+          } finally {
+            e.target.disabled = false;
+          }
+        },
+      }, t('tok.verify')),
+      el('button', {
+        class: 'tiny',
+        onclick: () => {
+          try {
+            localStorage.setItem('tokenHead', JSON.stringify({ height: info.height, head: info.head }));
+            toast(t('tok.pinned'));
+          } catch { toast(t('common.error'), 'bad'); }
+        },
+      }, t('tok.pin'))),
+    pinNote,
+  );
+}
+
 // ------------------------------------------------------------------- boot
 const GAMES = ['dice', 'limbo', 'mines', 'crash', 'slots', 'puzzle', 'preferans', 'debertz'];
 
@@ -2053,6 +2271,7 @@ async function boot() {
   $('#btnFair').onclick = fairModal;
   $('#btnAff').onclick = affiliateModal;
   $('#btnLimits').onclick = limitsModal;
+  $('#btnToken').onclick = tokenModal;
 
   for (const b of document.querySelectorAll('#feedTabs button')) {
     b.onclick = () => {

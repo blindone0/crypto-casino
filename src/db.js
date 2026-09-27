@@ -219,6 +219,39 @@ CREATE TABLE IF NOT EXISTS debertz_games (
 );
 CREATE INDEX IF NOT EXISTS ix_debertz_active ON debertz_games(user_id, state);
 
+-- The site token ledger: a hash-linked chain of signed blocks. The chain is the source
+-- of truth; token_balances is a materialised view of it, updated in the same transaction
+-- that appends a block so the two can never disagree.
+CREATE TABLE IF NOT EXISTS token_blocks (
+  height     INTEGER PRIMARY KEY,
+  prev_hash  TEXT NOT NULL,
+  hash       TEXT NOT NULL UNIQUE,
+  txs        TEXT NOT NULL,
+  signature  TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS token_balances (
+  pubkey     TEXT PRIMARY KEY,
+  balance    INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0),
+  updated_at INTEGER NOT NULL
+);
+
+-- Which account a player key belongs to. The private half never reaches the server.
+CREATE TABLE IF NOT EXISTS token_keys (
+  user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  pubkey     TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL
+);
+
+-- Spent nonces, so a captured signature cannot be replayed to send the same tokens twice.
+CREATE TABLE IF NOT EXISTS token_nonces (
+  pubkey     TEXT NOT NULL,
+  nonce      INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (pubkey, nonce)
+);
+
 -- Play money. Deliberately NOT in the accounts/ledger tables: demo wins must never be
 -- paid from the bankroll, and demo balances must never count as money owed to players.
 CREATE TABLE IF NOT EXISTS demo_balances (

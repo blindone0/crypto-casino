@@ -58,6 +58,17 @@ const DEFAULTS = {
     maxMultiplier: 10000,        // cap on limbo/crash multipliers
   },
 
+  // ---- SITE TOKEN -------------------------------------------------------
+  // A hash-linked, signed ledger that any player can verify in their browser. Balances
+  // are controlled by keys derived from a word phrase the player holds, so the operator
+  // cannot move someone else's tokens. See src/tokenchain.js for what this does and,
+  // just as importantly, what it does not do.
+  token: {
+    enabled: true,
+    symbol: 'NUL',
+    welcomeGrant: 1000,   // minted on-chain the first time a player registers a key
+  },
+
   // ---- FREE PLAY --------------------------------------------------------
   // Practice mode for people with no money to deposit. Play money is a completely
   // separate ledger: it never touches the bankroll, never counts as a liability, and can

@@ -25,7 +25,7 @@ start and saved to `config.json`.
 ```bash
 node src/server.js                  # start; first run writes config.json
 node tools/admin-token.js           # show the operator token
-npm test                            # 115 tests
+npm test                            # 131 tests
 node tools/simulate.js              # will this actually make money?
 ```
 
@@ -157,6 +157,44 @@ with a wider default edge (5%) to absorb that, and the per-game hold in the oper
 is what tells you whether real players are beating the calibration. If you change the
 bot's play, re-run `node tools/calibrate-preferans.js` — a test fails if the stored table
 has drifted from how the bot actually plays.
+
+---
+
+## The site token
+
+A second, separate currency on a hash-linked ledger that any player can verify in their
+own browser. Balances are controlled by an Ed25519 key derived from a sixteen-word phrase
+the player holds, and the private half never reaches the server.
+
+What that buys, stated precisely:
+
+1. **The operator cannot move your tokens.** A transfer needs your signature, and the
+   server can check one without being able to produce one. A test signs a theft with the
+   operator's own key and asserts it is refused.
+2. **History cannot be quietly rewritten.** Each block carries the hash of the one before
+   it and is signed. Altering any past transaction changes that block's hash and breaks
+   every link after it.
+3. **Anyone can audit the whole ledger**, in the browser, without trusting a word the
+   server says about itself. Open the token wallet and press verify: it recomputes every
+   hash, checks every signature, and replays every balance from zero.
+
+What it is **not**, equally precisely:
+
+- **Not decentralised.** One server decides what goes into a block and in what order. It
+  cannot forge your signature, but it can refuse to include you.
+- **Not a consensus network.** Browsers cannot do consensus: they are offline most of the
+  time, hold no stake, and anyone can run ten thousand of them.
+- **Not unhackable.** Nothing is. Someone who steals the server key can sign new blocks.
+  What they still cannot do is move tokens out of an account whose phrase they lack, or
+  change history without every saved copy of the head disagreeing.
+
+That last point has a practical answer: the wallet lets you **pin the current head**.
+If the chain is ever rebuilt from scratch, the height will match but the head will not,
+and two validly signed heads at the same height are proof of exactly what happened.
+
+The word list is deliberately **not** BIP-39, so a phrase from here will not restore in
+Electrum and a real wallet phrase will not work here. Using the real list would invite
+somebody to type their actual savings phrase into a casino.
 
 ---
 
@@ -335,7 +373,7 @@ src/
   games/           dice, limbo, mines, crash, slots, preferans
   wallet/          mock, manual, bitcoind, monero drivers
 public/            the site: casino, /admin panel, /verify verifier, i18n
-test/             115 tests
+test/             131 tests
 tools/             simulator, preferans calibration, treasury setup, admin token
 ```
 
