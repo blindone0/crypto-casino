@@ -67,6 +67,30 @@ const DEFS = `
     <stop offset="70%" stop-color="#8b3fd8" stop-opacity=".18"/>
     <stop offset="100%" stop-color="#8b3fd8" stop-opacity="0"/>
   </radialGradient>
+  <linearGradient id="sgKhokhRed" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#ff7a5c"/>
+    <stop offset="45%" stop-color="#cc2417"/>
+    <stop offset="100%" stop-color="#78100c"/>
+  </linearGradient>
+  <linearGradient id="sgBirch" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#fdf3dc"/>
+    <stop offset="55%" stop-color="#e4cfa2"/>
+    <stop offset="100%" stop-color="#9c7e4e"/>
+  </linearGradient>
+  <linearGradient id="sgBrass" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0%" stop-color="#ffe9a8"/>
+    <stop offset="40%" stop-color="#d79f3c"/>
+    <stop offset="100%" stop-color="#7d5514"/>
+  </linearGradient>
+  <linearGradient id="sgGlass" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#e8f6ff" stop-opacity=".9"/>
+    <stop offset="100%" stop-color="#9dc4d8" stop-opacity=".75"/>
+  </linearGradient>
+  <radialGradient id="sgRusHalo" cx="50%" cy="45%" r="55%">
+    <stop offset="0%" stop-color="#ffd9a1" stop-opacity=".75"/>
+    <stop offset="70%" stop-color="#cc2417" stop-opacity=".16"/>
+    <stop offset="100%" stop-color="#cc2417" stop-opacity="0"/>
+  </radialGradient>
   <radialGradient id="sgHalo" cx="50%" cy="45%" r="55%">
     <stop offset="0%" stop-color="#fff3cc" stop-opacity=".9"/>
     <stop offset="70%" stop-color="#e6bf63" stop-opacity=".18"/>
@@ -243,7 +267,110 @@ function neonRank(letter, fill) {
           font-size="${letter.length > 1 ? 36 : 44}" font-weight="700" fill="${fill}">${letter}</text>`);
 }
 
-const THEMES = { classic: CLASSIC, afterdark: AFTER_DARK };
+/**
+ * Zolotoye Koltso: a khokhloma-lacquer machine. Black and red ground with gold
+ * detailing, the way the painted woodenware actually looks. The symbols are a bowl of
+ * kasha, painted eggs, vodka, an old bearded genie for the wild, and a balalaika for
+ * the scatter, whose silhouette is the most distinctive thing on the reel.
+ *
+ * The genie is drawn as the folklore djinn, not as any named character. The archetype
+ * is common property; a specific literary creation from 1938 is somebody's copyright.
+ */
+const RUSSIAN = {
+  T: () => lacquerRank('10', 'url(#sgBirch)'),
+  J: () => lacquerRank('J', 'url(#sgBirch)'),
+  Q: () => lacquerRank('Q', 'url(#sgKhokhRed)'),
+  K: () => lacquerRank('K', 'url(#sgKhokhRed)'),
+  A: () => lacquerRank('A', 'url(#sgGold)'),
+
+  // mid value: a bowl of kasha with a wooden spoon
+  BELL: () => wrap(`
+    <ellipse cx="50" cy="54" rx="44" ry="44" fill="url(#sgRusHalo)"/>
+    <path d="M74 30c7 0 11 6 8 12s-11 7-14 2 0-14 6-14z" fill="#a9772f" stroke="#4d3314" stroke-width="1.8"/>
+    <path d="M70 44L58 70" stroke="#a9772f" stroke-width="5" stroke-linecap="round"/>
+    <path d="M18 54h64c0 16-14 26-32 26S18 70 18 54z"
+          fill="url(#sgKhokhRed)" stroke="#5d0c08" stroke-width="2.5" stroke-linejoin="round"/>
+    <ellipse cx="50" cy="54" rx="32" ry="9" fill="#f2e2be" stroke="#b39b6a" stroke-width="2"/>
+    <ellipse cx="42" cy="53" rx="5" ry="3" fill="#d8c399"/>
+    <ellipse cx="58" cy="55" rx="6" ry="3" fill="#d8c399"/>
+    <ellipse cx="50" cy="50" rx="4" ry="2.4" fill="#e8d9b4"/>
+    <path d="M24 64h52" stroke="url(#sgGold)" stroke-width="2" stroke-opacity=".75"/>
+  `),
+
+  // high value: painted eggs in a nest
+  GEM: () => wrap(`
+    <ellipse cx="50" cy="52" rx="44" ry="44" fill="url(#sgRusHalo)"/>
+    <path d="M14 72c6-10 22-14 36-14s30 4 36 14c-8 10-22 14-36 14s-28-4-36-14z"
+          fill="#6b4a22" stroke="#3e2a12" stroke-width="2"/>
+    <ellipse cx="36" cy="52" rx="13" ry="17" fill="url(#sgKhokhRed)" stroke="#5d0c08" stroke-width="2"/>
+    <ellipse cx="64" cy="50" rx="13" ry="17" fill="url(#sgGold)" stroke="#6d5520" stroke-width="2"/>
+    <path d="M28 52h16M30 45h12M30 59h12" stroke="#ffd9a1" stroke-width="1.8" stroke-opacity=".8" stroke-linecap="round"/>
+    <path d="M56 50h16M58 43h12M58 57h12" stroke="#7d5514" stroke-width="1.8" stroke-opacity=".7" stroke-linecap="round"/>
+    <ellipse cx="32" cy="45" rx="3" ry="4" fill="#ffffff" fill-opacity=".45"/>
+  `),
+
+  // top value: vodka and a shot glass
+  CROWN: () => wrap(`
+    <ellipse cx="50" cy="52" rx="44" ry="44" fill="url(#sgRusHalo)"/>
+    <rect x="28" y="34" width="26" height="52" rx="5" fill="url(#sgGlass)" stroke="#5c7f90" stroke-width="2"/>
+    <rect x="36" y="14" width="10" height="22" rx="2" fill="url(#sgGlass)" stroke="#5c7f90" stroke-width="2"/>
+    <rect x="34" y="10" width="14" height="7" rx="2" fill="url(#sgKhokhRed)" stroke="#5d0c08" stroke-width="1.5"/>
+    <rect x="30" y="46" width="22" height="20" rx="2" fill="url(#sgKhokhRed)" stroke="#5d0c08" stroke-width="1.5"/>
+    <path d="M34 52h14M34 58h10" stroke="#ffd9a1" stroke-width="1.6" stroke-linecap="round"/>
+    <path d="M62 56h20l-3 20c-.5 4-3 6-7 6s-6.5-2-7-6z"
+          fill="url(#sgGlass)" stroke="#5c7f90" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M64 64h16l-2 12c-.3 2.5-2 4-6 4s-5.7-1.5-6-4z" fill="#dff0fa" fill-opacity=".85"/>
+    <ellipse cx="72" cy="56" rx="10" ry="2.6" fill="#ffffff" fill-opacity=".5"/>
+  `),
+
+  // wild: an old bearded genie rising out of the lamp.
+  // Drawn as the folklore djinn rather than any named character: the archetype is
+  // common property, a specific literary creation from 1938 is not.
+  WILD: () => wrap(`
+    <ellipse cx="50" cy="50" rx="46" ry="46" fill="url(#sgRusHalo)"/>
+    <path d="M18 84q8-10 22-10h20q14 0 22 10z" fill="url(#sgBrass)" stroke="#5c3f10" stroke-width="2"/>
+    <path d="M70 76q14-2 16-10" fill="none" stroke="url(#sgBrass)" stroke-width="4" stroke-linecap="round"/>
+    <path d="M34 74q-4-16 6-24t20 0q10 8 6 24z" fill="#cfd8e6" fill-opacity=".22"/>
+    <circle cx="50" cy="34" r="13" fill="url(#sgBirch)" stroke="#6d4f22" stroke-width="2"/>
+    <path d="M37 32q-3-14 13-14t13 14q-4-7-13-7t-13 7z" fill="url(#sgKhokhRed)" stroke="#5d0c08" stroke-width="1.8"/>
+    <circle cx="50" cy="17" r="3.5" fill="url(#sgGold)"/>
+    <circle cx="45" cy="33" r="1.9" fill="#2a1a10"/>
+    <circle cx="55" cy="33" r="1.9" fill="#2a1a10"/>
+    <path d="M38 42q12 26 24 0q-2 20-12 22t-12-22z" fill="#eef3f8" stroke="#9fb0c2" stroke-width="1.6"/>
+    <path d="M44 48q6 6 12 0" fill="none" stroke="#9fb0c2" stroke-width="1.4"/>
+    <path d="M30 24q-8-4-10-10M70 24q8-4 10-10" stroke="url(#sgGold)" stroke-width="2" stroke-linecap="round" stroke-opacity=".7"/>
+  `),
+
+  // scatter: the balalaika, the most recognisable silhouette on the reel
+  SCAT: () => wrap(`
+    <ellipse cx="50" cy="50" rx="46" ry="46" fill="url(#sgRusHalo)"/>
+    <path d="M50 44L22 90h56z" fill="url(#sgBirch)" stroke="#6d4f22" stroke-width="2.5" stroke-linejoin="round"/>
+    <circle cx="50" cy="74" r="8" fill="#41240d"/>
+    <rect x="46" y="12" width="8" height="34" rx="2" fill="#7a5322" stroke="#4a3013" stroke-width="1.8"/>
+    <rect x="42" y="6" width="16" height="10" rx="3" fill="url(#sgGold)" stroke="#6d5520" stroke-width="1.8"/>
+    <g stroke="#3a2a12" stroke-width="1.1" stroke-opacity=".85">
+      <path d="M47 16v58"/><path d="M50 16v58"/><path d="M53 16v58"/>
+    </g>
+    <path d="M30 84h40" stroke="url(#sgKhokhRed)" stroke-width="3" stroke-linecap="round"/>
+    <path d="M36 62c6-4 22-4 28 0" fill="none" stroke="url(#sgKhokhRed)" stroke-width="2" stroke-opacity=".8"/>
+  `),
+};
+
+/** A card rank painted on a lacquered wooden plaque. */
+function lacquerRank(letter, fill) {
+  return wrap(`
+    <rect x="14" y="12" width="72" height="76" rx="10"
+          fill="#18100c" stroke="#5d3a18" stroke-width="2"/>
+    <rect x="19" y="17" width="62" height="66" rx="7" fill="none"
+          stroke="url(#sgGold)" stroke-width="1.6" stroke-opacity=".65"/>
+    <path d="M24 24q10 8 0 16M76 24q-10 8 0 16M24 76q10-8 0-16M76 76q-10-8 0-16"
+          fill="none" stroke="url(#sgKhokhRed)" stroke-width="2" stroke-opacity=".75"/>
+    <text x="50" y="64" text-anchor="middle"
+          font-family="Hoefler Text, Baskerville, Georgia, serif"
+          font-size="${letter.length > 1 ? 36 : 44}" font-weight="700" fill="${fill}">${letter}</text>`);
+}
+
+const THEMES = { classic: CLASSIC, afterdark: AFTER_DARK, russian: RUSSIAN };
 
 export const THEME_KEYS = Object.keys(THEMES);
 

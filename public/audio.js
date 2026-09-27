@@ -6,9 +6,14 @@
 // Everything below is built from oscillators and filtered noise with the Web Audio API,
 // which costs bytes measured in kilobytes of code and stays in tune at any length.
 //
-// The music is a slow noir jazz loop: walking upright bass, brushed drums, sparse piano
-// chords and an occasional muted-trumpet line, scheduled a beat ahead so it does not
-// stutter when the main thread is busy animating reels.
+// The music is a slow noir jazz trio in C minor: walking upright bass with chromatic
+// approach notes, brushed drums with a swung ride, rootless piano voicings over a
+// half-diminished ii and an altered dominant, and a muted horn that only enters every
+// other chorus. It runs through a synthesised room reverb over a bed of vinyl surface
+// noise, and is scheduled a beat ahead so animating reels cannot make it stutter.
+//
+// The room and the rests are what make it noir. Four oscillators playing the right
+// notes in a dry signal chain just sound like four oscillators.
 //
 // Nothing starts until the player interacts, because browsers refuse to start audio
 // before a gesture, and because a casino that makes noise at you unprompted is obnoxious.
@@ -24,13 +29,16 @@ let musicOn = true;
 let musicTimer = null;
 let beat = 0;
 let nextNoteTime = 0;
+let reverb = null;
+let reverbGain = null;
+let vinyl = null;
 
 try {
   enabled = localStorage.getItem('sound') !== 'off';
   musicOn = localStorage.getItem('music') !== 'off';
 } catch { /* private mode */ }
 
-const BPM = 72;
+const BPM = 62;   // slower than a standard swing tune; noir is mostly space
 const BEAT = 60 / BPM;
 const SWING = 0.12; // how far the off-beat is pushed late, which is what makes it swing
 
@@ -45,9 +53,29 @@ function ensureContext() {
   master.gain.value = 0.9;
   master.connect(ctx.destination);
 
+  // Music runs through a reverb send and a gentle lowpass. The room is what makes a
+  // jazz trio sound like a bar at 2am instead of four oscillators in a spreadsheet, and
+  // rolling off the top end is what makes it sound recorded rather than generated.
   musicGain = ctx.createGain();
-  musicGain.gain.value = 0.16;   // music sits well under the effects
-  musicGain.connect(master);
+  musicGain.gain.value = 0.16;
+
+  const musicTone = ctx.createBiquadFilter();
+  musicTone.type = 'lowpass';
+  musicTone.frequency.value = 2600;
+  musicTone.Q.value = 0.6;
+
+  reverb = ctx.createConvolver();
+  reverb.buffer = makeRoom(2.6, 2.4);
+  reverbGain = ctx.createGain();
+  reverbGain.gain.value = 0.55;
+
+  musicGain.connect(musicTone);
+  musicTone.connect(master);
+  musicTone.connect(reverbGain);
+  reverbGain.connect(reverb);
+  reverb.connect(master);
+
+  startVinyl();
 
   sfxGain = ctx.createGain();
   sfxGain.gain.value = 0.5;
@@ -59,6 +87,48 @@ function ensureContext() {
   for (let i = 0; i < data.length; i += 1) data[i] = Math.random() * 2 - 1;
 
   return ctx;
+}
+
+/**
+ * A synthetic room impulse: exponentially decaying noise, slightly darker on the tail.
+ * Cheaper than shipping an impulse-response file and close enough for a smoky bar.
+ */
+function makeRoom(seconds, decay) {
+  const len = Math.floor(ctx.sampleRate * seconds);
+  const buf = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch += 1) {
+    const data = buf.getChannelData(ch);
+    let last = 0;
+    for (let i = 0; i < len; i += 1) {
+      const env = (1 - i / len) ** decay;
+      // A one-pole lowpass on the noise makes the tail darken as it dies away.
+      last = last * 0.72 + (Math.random() * 2 - 1) * 0.28;
+      data[i] = last * env;
+    }
+  }
+  return buf;
+}
+
+/** A quiet bed of vinyl surface noise. Barely audible, and doing a lot of the work. */
+function startVinyl() {
+  if (vinyl) return;
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuffer;
+  src.loop = true;
+
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = 1800;
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 7000;
+
+  const g = ctx.createGain();
+  g.gain.value = 0.012;
+
+  src.connect(hp); hp.connect(lp); lp.connect(g); g.connect(master);
+  src.start();
+  vinyl = { src, gain: g };
 }
 
 /** A plain oscillator voice with an exponential decay envelope. */
@@ -103,89 +173,167 @@ function noise({ start, dur, gain = 0.2, type = 'bandpass', freq = 2000, q = 1, 
 }
 
 // ------------------------------------------------------------------- music
-// A minor ii-V-i turnaround, which is about as noir as four bars get.
-// Each entry: root midi note, and the chord tones above it.
-const PROGRESSION = [
-  { root: 50, chord: [53, 57, 60] },  // Dm7
-  { root: 43, chord: [50, 53, 59] },  // G7
-  { root: 48, chord: [52, 55, 59] },  // Cmaj7
-  { root: 45, chord: [49, 52, 55] },  // A7
-];
+// C minor, the way a noir cue actually moves: minor ii-V-i with a half-diminished ii and
+// an altered dominant, a flat-six substitution, and a lot of silence between events.
+//
+// Chords are ROOTLESS voicings (3rd, 5th, 7th, 9th and no root), which is how a pianist
+// comps behind a bass player. Voicing the root in both hands is what makes synthesised
+// jazz sound like a MIDI file.
 const midi = (n) => 440 * (2 ** ((n - 69) / 12));
 
-// A sparse motif, played once every few bars so it never becomes a jingle.
-const MOTIF = [0, 3, 5, 7, 5, 3];
+const PROG = [
+  { root: 36, voice: [51, 55, 58, 62], next: 41 },  // Cm9
+  { root: 41, voice: [51, 56, 60, 63], next: 38 },  // Fm9
+  { root: 38, voice: [53, 56, 60, 63], next: 43 },  // Dm7b5
+  { root: 43, voice: [50, 53, 59, 63], next: 36 },  // G7b9
+  { root: 36, voice: [51, 55, 58, 62], next: 44 },  // Cm9
+  { root: 44, voice: [50, 54, 57, 62], next: 38 },  // Ab13
+  { root: 38, voice: [53, 56, 60, 63], next: 43 },  // Dm7b5
+  { root: 43, voice: [50, 53, 59, 63], next: 36 },  // G7b9
+];
+
+// A plaintive line in the C minor blues scale, played on the muted horn.
+// Each entry is [scale degree, beats], and rests are nulls, because the rests are the
+// point: a noir melody is mostly the space where the melody is not.
+const BLUES = [0, 3, 5, 6, 7, 10, 12];
+const PHRASES = [
+  [[12, 1], [10, 0.5], [null, 0.5], [7, 1.5], [null, 0.5]],
+  [[7, 0.5], [6, 0.5], [5, 1], [3, 1.5], [null, 0.5]],
+  [[10, 1.5], [12, 0.5], [null, 1], [7, 1]],
+  [[3, 0.5], [5, 0.5], [7, 1], [10, 2]],
+];
+
+/** Walking bass: land on the root, then step chromatically toward the next chord. */
+function walkNote(bar, inBar) {
+  const step = PROG[bar];
+  if (inBar === 0) return step.root;
+  if (inBar === 1) return step.root + 7;
+  if (inBar === 2) return step.root + 3;
+  // Approach the next root from a semitone above or below.
+  const target = step.next;
+  return target + (target > step.root ? -1 : 1);
+}
+
+function pluck(freq, time, dur, gain) {
+  // Upright bass: a triangle through a lowpass, with a short noisy attack for the finger.
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  const lp = ctx.createBiquadFilter();
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(freq * 1.01, time);
+  osc.frequency.exponentialRampToValueAtTime(freq, time + 0.05);
+  lp.type = 'lowpass';
+  lp.frequency.setValueAtTime(1100, time);
+  lp.frequency.exponentialRampToValueAtTime(320, time + dur);
+
+  g.gain.setValueAtTime(0.0001, time);
+  g.gain.exponentialRampToValueAtTime(gain, time + 0.025);
+  g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+
+  osc.connect(lp); lp.connect(g); g.connect(musicGain);
+  osc.start(time); osc.stop(time + dur + 0.05);
+
+  noise({ start: time, dur: 0.035, gain: 0.05, type: 'bandpass', freq: 500, q: 1.4, dest: musicGain });
+}
+
+/** Muted horn: a filtered saw with vibrato and a soft, late attack. */
+function horn(freq, time, dur, gain) {
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  const lp = ctx.createBiquadFilter();
+  const vib = ctx.createOscillator();
+  const vibAmt = ctx.createGain();
+
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(freq * 0.985, time);
+  osc.frequency.exponentialRampToValueAtTime(freq, time + 0.09);
+
+  vib.frequency.value = 5.2;
+  vibAmt.gain.value = freq * 0.011;
+  vib.connect(vibAmt); vibAmt.connect(osc.frequency);
+
+  lp.type = 'lowpass';
+  lp.frequency.setValueAtTime(1500, time);
+  lp.frequency.linearRampToValueAtTime(2300, time + dur * 0.4);
+  lp.Q.value = 3;
+
+  g.gain.setValueAtTime(0.0001, time);
+  g.gain.exponentialRampToValueAtTime(gain, time + 0.12);
+  g.gain.setValueAtTime(gain, time + dur * 0.7);
+  g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+
+  osc.connect(lp); lp.connect(g); g.connect(musicGain);
+  osc.start(time); osc.stop(time + dur + 0.1);
+  vib.start(time); vib.stop(time + dur + 0.1);
+}
+
+/** Rhodes-ish comp voice: two detuned sines with a bell-like attack. */
+function comp(freq, time, dur, gain) {
+  for (const [i, d] of [-5, 5].entries()) {
+    tone({
+      freq, start: time + i * 0.006, dur, type: 'sine', gain: gain * 0.7,
+      detune: d, dest: musicGain,
+    });
+  }
+  tone({ freq: freq * 2, start: time, dur: dur * 0.3, type: 'sine', gain: gain * 0.18, dest: musicGain });
+}
+
+let phraseIndex = 0;
 
 function scheduleBeat(time, index) {
-  const bar = Math.floor(index / 4) % PROGRESSION.length;
+  const bar = Math.floor(index / 4) % PROG.length;
   const inBar = index % 4;
-  const step = PROGRESSION[bar];
+  const step = PROG[bar];
 
-  // --- upright bass, walking a quarter note on every beat
-  const walk = [0, 7, 5, 3][inBar];
-  tone({
-    freq: midi(step.root + walk - 12),
-    start: time,
-    dur: BEAT * 0.9,
-    type: 'triangle',
-    gain: 0.5,
-    dest: musicGain,
-  });
+  // --- upright bass on every beat, walking
+  pluck(midi(walkNote(bar, inBar)), time, BEAT * 0.82, 0.42);
 
-  // --- brushed ride on every eighth, swung
+  // --- brushed ride, swung, accented on 2 and 4
   for (const half of [0, 1]) {
     const t = time + (half ? BEAT * (0.5 + SWING) : 0);
+    const accent = !half && (inBar === 1 || inBar === 3);
     noise({
-      start: t,
-      dur: 0.16,
-      gain: half ? 0.05 : 0.08,
-      type: 'highpass',
-      freq: 6000,
-      dest: musicGain,
+      start: t, dur: 0.20, gain: accent ? 0.075 : (half ? 0.028 : 0.045),
+      type: 'highpass', freq: 7000, dest: musicGain,
     });
   }
-  // --- brush swish on 2 and 4
+  // --- brush swish across the snare on 2 and 4
   if (inBar === 1 || inBar === 3) {
     noise({
-      start: time, dur: 0.30, gain: 0.10, type: 'bandpass', freq: 1800, q: 0.7,
-      sweepTo: 600, dest: musicGain,
+      start: time, dur: 0.34, gain: 0.075, type: 'bandpass', freq: 1500, q: 0.6,
+      sweepTo: 420, dest: musicGain,
     });
   }
 
-  // --- piano-ish chord stabs, only on beat 1 and the and-of-3, so it breathes
-  if (inBar === 0 || inBar === 2) {
-    for (const [i, n] of step.chord.entries()) {
-      tone({
-        freq: midi(n),
-        start: time + i * 0.012,
-        dur: BEAT * 1.4,
-        type: 'sine',
-        gain: 0.10,
-        detune: (i % 2 ? 4 : -4),
-        dest: musicGain,
-      });
+  // --- comping. Beat 1 of each bar, plus a pushed stab before the turnaround, and
+  //     nothing at all in bar 5, so the tune breathes.
+  const pushed = inBar === 2 && (bar === 3 || bar === 7);
+  if ((inBar === 0 && bar !== 4) || pushed) {
+    const at = pushed ? time + BEAT * (0.5 + SWING) : time + 0.01;
+    for (const [i, n] of step.voice.entries()) {
+      comp(midi(n), at + i * 0.011, BEAT * (pushed ? 1.1 : 1.9), 0.065);
     }
   }
 
-  // --- a muted trumpet line once every four bars
-  const cycle = Math.floor(index / 16) % 3;
-  if (cycle === 0 && bar === 3) {
-    const n = MOTIF[inBar % MOTIF.length];
-    tone({
-      freq: midi(step.root + 12 + n),
-      start: time + BEAT * 0.25,
-      dur: BEAT * 0.7,
-      type: 'sawtooth',
-      gain: 0.05,
-      dest: musicGain,
-    });
+  // --- the horn enters for the second half of every other chorus
+  const chorus = Math.floor(index / 32) % 2;
+  if (chorus === 1 && bar >= 4) {
+    if (inBar === 0) phraseIndex = (bar - 4) % PHRASES.length;
+    const phrase = PHRASES[phraseIndex];
+    let cursor = 0;
+    for (const [deg, len] of phrase) {
+      if (cursor >= inBar && cursor < inBar + 1 && deg !== null) {
+        const semis = BLUES.includes(deg) ? deg : 0;
+        horn(midi(60 + semis), time + (cursor - inBar) * BEAT, BEAT * len * 0.85, 0.055);
+      }
+      cursor += len;
+    }
   }
 }
-
 /** Lookahead scheduler: queue notes slightly ahead so animation cannot make it stutter. */
 function musicLoop() {
   if (!ctx) return;
-  while (nextNoteTime < ctx.currentTime + 0.25) {
+  while (nextNoteTime < ctx.currentTime + 0.3) {
     scheduleBeat(nextNoteTime, beat);
     nextNoteTime += BEAT;
     beat += 1;
@@ -195,7 +343,7 @@ function musicLoop() {
 function startMusic() {
   if (!enabled || !musicOn || musicTimer || !ensureContext()) return;
   if (ctx.state === 'suspended') ctx.resume();
-  nextNoteTime = ctx.currentTime + 0.1;
+  nextNoteTime = ctx.currentTime + 0.15;
   musicLoop();
   musicTimer = setInterval(musicLoop, 60);
 }

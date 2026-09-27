@@ -688,3 +688,27 @@ body.afterdark .bigwin .amount { color: #ffd9ec; text-shadow: 0 0 44px rgba(255,
 }
 .sound-toggle.muted { color: var(--text-faint); border-color: var(--line); }
 .sound-toggle.music-off { color: var(--text-dim); }
+
+/* ----------------------------------------------- slots: Golden Ring theme */
+/* Khokhloma lacquerware: black ground, red and gold. Cosmetic only, like every
+   other theme; the reel strips, paytable and RTP are shared. */
+body.russian .slot-cabinet {
+  background:
+    radial-gradient(520px 200px at 50% 0%, rgba(255, 190, 110, .14), transparent 70%),
+    linear-gradient(180deg, #2a0f0a 0%, #1a0906 60%, #0d0402 100%);
+  border-color: rgba(217, 160, 60, .34);
+}
+body.russian .reels { background: linear-gradient(180deg, #120604, #080202); }
+body.russian .cell { background: linear-gradient(180deg, #23120c 0%, #150806 100%); border-color: #4a2a16; }
+body.russian .cell.win {
+  border-color: #e8a83c;
+  box-shadow: 0 0 22px rgba(232, 168, 60, .45), inset 0 0 18px rgba(204, 36, 23, .22);
+}
+body.russian .payline-layer path {
+  stroke: #e8a83c; filter: drop-shadow(0 0 6px rgba(232, 168, 60, .6));
+}
+body.russian .bigwin {
+  background: radial-gradient(circle at 50% 45%, rgba(232, 168, 60, .26), rgba(10, 3, 2, .93) 68%);
+}
+body.russian .bigwin .label { color: #e8a83c; }
+body.russian .bigwin .amount { color: #ffe0a8; text-shadow: 0 0 44px rgba(232, 168, 60, .55); }

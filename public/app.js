@@ -1080,9 +1080,14 @@ let slotTheme = (() => {
   try { return localStorage.getItem('slotTheme') || 'classic'; } catch { return 'classic'; }
 })();
 
+/** Each theme paints the cabinet through a body class; only one may be on at a time. */
+function applySlotTheme() {
+  for (const k of THEME_KEYS) document.body.classList.toggle(k, slotTheme === k);
+}
+
 async function renderSlots() {
   ensureSymbolDefs();
-  document.body.classList.toggle('afterdark', slotTheme === 'afterdark');
+  applySlotTheme();
   const panel = $('#betPanel');
   const amount = amountControl('0.20');
   const spin = el('button', { class: 'primary big' }, t('slots.spin'));
@@ -1108,7 +1113,7 @@ async function renderSlots() {
         onchange: (e) => {
           slotTheme = e.target.value;
           try { localStorage.setItem('slotTheme', slotTheme); } catch { /* private mode */ }
-          document.body.classList.toggle('afterdark', slotTheme === 'afterdark');
+          applySlotTheme();
           renderSlots();
         },
       }, ...THEME_KEYS.map((k) => el('option', {
