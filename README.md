@@ -291,3 +291,17 @@ tools/             simulator, preferans calibration, treasury setup, admin token
 ```
 
 See `DEPLOY.md` for putting this on a real server.
+
+---
+
+## Licence
+
+**GNU AGPL-3.0.** See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md).
+
+Free to run, modify and operate commercially. In return, your version stays open, the
+attribution travels with it, and because AGPL section 13 treats *running a network
+service* as distribution, players on your site can ask you for the source you are
+actually running. Plain GPL would not require that, which is precisely the loophole that
+covers most online casinos.
+
+If you operate a modified copy, link your public repository from the site footer.

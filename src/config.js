@@ -51,6 +51,20 @@ const DEFAULTS = {
     maxMultiplier: 10000,        // cap on limbo/crash multipliers
   },
 
+  // ---- CRASH ROUND PACING ----------------------------------------------
+  // Round length is a direct revenue lever: revenue is volume times edge, and volume is
+  // rounds per hour times stake. Shorter betting windows mean more rounds, but too short
+  // and players cannot place a bet in time. `growth` only controls how fast the
+  // multiplier climbs in real time; it does NOT change the crash-point distribution,
+  // which comes from the fairness engine.
+  crash: {
+    bettingMs: 7000,
+    endedMs: 4000,
+    tickMs: 100,
+    growth: 0.07,      // e^(0.07t): 2x at about 10s, 10x at about 33s
+    chainLength: 10000, // rounds per published commitment
+  },
+
   // ---- GROWTH LEVERS ---------------------------------------------------
   // Referrals are the cheapest acquisition channel a small site has.
   // Commission is paid from house edge, so it is never a loss-maker:

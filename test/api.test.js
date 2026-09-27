@@ -513,7 +513,12 @@ test('self-exclusion locks the account out of betting', async (t) => {
 });
 
 test('crash exposes a commitment and a verifiable chain', async (t) => {
-  const { cfg, app, client } = await boot();
+  // Fast pacing so the test is deterministic. A production round can run for a minute
+  // when the crash point is high, which is exactly what used to make this flaky.
+  // growth only changes how fast the multiplier climbs, never the crash distribution.
+  const { cfg, app, client } = await boot({
+    crash: { bettingMs: 250, endedMs: 150, tickMs: 25, growth: 4, chainLength: 40 },
+  });
   t.after(() => shutdown(app, cfg));
   const fair = require('../src/fair');
 
@@ -521,10 +526,10 @@ test('crash exposes a commitment and a verifiable chain', async (t) => {
   assert.match(conf.crashCommitment, /^[0-9a-f]{64}$/);
 
   // Wait for at least one round to finish so a seed has been revealed.
-  const deadline = Date.now() + 25000;
+  const deadline = Date.now() + 20000;
   let chain = await client.call('/api/fair/crash-chain');
-  while (chain.rounds.length < 2 && Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 500));
+  while (chain.rounds.length < 3 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 200));
     chain = await client.call('/api/fair/crash-chain');
   }
   assert.ok(chain.rounds.length >= 1, 'at least one round should have ended');

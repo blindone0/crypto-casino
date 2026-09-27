@@ -14,6 +14,8 @@ const U = require('../util');
 const fair = require('../fair');
 const ledger = require('../ledger');
 
+// Defaults; every one is overridable through cfg.crash so pacing can be tuned for
+// revenue in production and made fast and deterministic under test.
 const BETTING_MS = 7000;
 const ENDED_MS = 4000;
 const TICK_MS = 100;
@@ -23,9 +25,9 @@ const CHAIN_LEN = 10000;  // about 33 hours of rounds before a new commitment is
 const now = () => Math.floor(Date.now() / 1000);
 
 /** Multiplier shown at elapsed time t (seconds), floored to 2dp. */
-const multiplierAt = (t) => Math.max(1, Math.floor(Math.exp(GROWTH * t) * 100) / 100);
+const multiplierAt = (t, growth = GROWTH) => Math.max(1, Math.floor(Math.exp(growth * t) * 100) / 100);
 /** Seconds until the multiplier reaches m. */
-const timeFor = (m) => Math.log(m) / GROWTH;
+const timeFor = (m, growth = GROWTH) => Math.log(m) / growth;
 
 // ------------------------------------------------------------------ chain
 function buildChain(f, n) {
@@ -35,14 +37,14 @@ function buildChain(f, n) {
   return c;
 }
 
-function ensureChain(db) {
+function ensureChain(db, chainLen = CHAIN_LEN) {
   let meta = db.kvGet('crash.chain');
   if (!meta || meta.cursor >= meta.n) {
     const f = crypto.randomBytes(32).toString('hex');
-    const chain = buildChain(f, CHAIN_LEN);
-    meta = { f, n: CHAIN_LEN, cursor: 0, commitment: chain[CHAIN_LEN], createdAt: now() };
+    const chain = buildChain(f, chainLen);
+    meta = { f, n: chainLen, cursor: 0, commitment: chain[chainLen], createdAt: now() };
     db.kvSet('crash.chain', meta);
-    db.audit('system', 'crash.chain.new', { commitment: meta.commitment, rounds: CHAIN_LEN });
+    db.audit('system', 'crash.chain.new', { commitment: meta.commitment, rounds: chainLen });
     return { meta, chain };
   }
   return { meta, chain: buildChain(meta.f, meta.n) };
@@ -54,6 +56,13 @@ function ensureChain(db) {
  */
 function createCrash({ db, cfg, logger = console }) {
   const salt = cfg.crashPublicSalt || 'nullstake-crash-v1';
+  const pace = {
+    bettingMs: cfg.crash?.bettingMs ?? BETTING_MS,
+    endedMs: cfg.crash?.endedMs ?? ENDED_MS,
+    tickMs: cfg.crash?.tickMs ?? TICK_MS,
+    growth: cfg.crash?.growth ?? GROWTH,
+    chainLength: cfg.crash?.chainLength ?? CHAIN_LEN,
+  };
   let chain = null;
   let meta = null;
   let round = null;      // { id, seed, seedHash, crashPoint, state, startedAt, runStartMs }
@@ -62,7 +71,7 @@ function createCrash({ db, cfg, logger = console }) {
   const clients = new Set();
 
   function loadChain() {
-    const c = ensureChain(db);
+    const c = ensureChain(db, pace.chainLength);
     meta = c.meta;
     chain = c.chain;
   }
@@ -108,7 +117,7 @@ function createCrash({ db, cfg, logger = console }) {
     if (!round) return { state: 'starting', players: [], commitment: meta?.commitment };
     const elapsed = round.state === 'running' ? (Date.now() - round.runStartMs) / 1000 : 0;
     const live = round.state === 'running'
-      ? Math.min(multiplierAt(elapsed), round.crashPoint)
+      ? Math.min(multiplierAt(elapsed, pace.growth), round.crashPoint)
       : (round.state === 'ended' ? round.crashPoint : 1);
     return {
       state: round.state,
@@ -160,14 +169,14 @@ function createCrash({ db, cfg, logger = console }) {
       crashPoint,
       state: 'betting',
       startedAt: now(),
-      bettingEndsMs: Date.now() + BETTING_MS,
+      bettingEndsMs: Date.now() + pace.bettingMs,
       runStartMs: 0,
     };
     // The seed itself stays private until the round ends; only its hash goes out now.
     broadcast('betting', {
-      roundId: id, seedHash, commitment: meta.commitment, msLeft: BETTING_MS, history: recentHistory(),
+      roundId: id, seedHash, commitment: meta.commitment, msLeft: pace.bettingMs, history: recentHistory(),
     });
-    timer = setTimeout(startRun, BETTING_MS);
+    timer = setTimeout(startRun, pace.bettingMs);
   }
 
   function startRun() {
@@ -176,13 +185,13 @@ function createCrash({ db, cfg, logger = console }) {
     round.runStartMs = Date.now();
     db.run("UPDATE crash_rounds SET state='running' WHERE id=?", round.id);
     broadcast('running', { roundId: round.id, startedAt: round.runStartMs, players: playerList() });
-    timer = setInterval(tick, TICK_MS);
+    timer = setInterval(tick, pace.tickMs);
   }
 
   function tick() {
     if (stopped || !round || round.state !== 'running') return;
     const elapsed = (Date.now() - round.runStartMs) / 1000;
-    const live = multiplierAt(elapsed);
+    const live = multiplierAt(elapsed, pace.growth);
 
     if (live >= round.crashPoint) {
       clearInterval(timer);
@@ -276,7 +285,7 @@ function createCrash({ db, cfg, logger = console }) {
       commitment: meta.commitment,
       history: recentHistory(),
     });
-    timer = setTimeout(openRound, ENDED_MS);
+    timer = setTimeout(openRound, pace.endedMs);
   }
 
   // ------------------------------------------------------------ player API
@@ -322,7 +331,7 @@ function createCrash({ db, cfg, logger = console }) {
   function cashout(user) {
     if (!round || round.state !== 'running') throw new U.BadRequest('no round is running');
     const elapsed = (Date.now() - round.runStartMs) / 1000;
-    const live = multiplierAt(elapsed);
+    const live = multiplierAt(elapsed, pace.growth);
     if (live >= round.crashPoint) throw new U.BadRequest('too late, the round has busted');
 
     const out = db.tx(() => {
