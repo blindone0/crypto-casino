@@ -1,0 +1,18 @@
+{
+  "name": "crypto-casino",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Self-hosted provably-fair crypto casino. Zero npm dependencies.",
+  "type": "commonjs",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js",
+    "simulate": "node tools/simulate.js",
+    "admin-token": "node tools/admin-token.js",
+    "treasury": "node tools/treasury-setup.js"
+  }
+}

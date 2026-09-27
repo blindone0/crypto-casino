@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fairness verifier</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="chip"></span><span>Fairness verifier</span></div>
+  <span class="spacer"></span>
+  <select class="lang-select" id="langSelect"></select>
+  <a class="btn tiny" href="/">&larr; Casino</a>
+</header>
+
+<div class="wrap" style="max-width:820px">
+  <div class="panel">
+    <h2 id="hTitle">Recompute any bet yourself</h2>
+    <p class="hint" id="hIntro">
+      This page does the maths in your browser using the Web Crypto API. Nothing is sent to the
+      server, so you are not trusting it. Paste a revealed server seed, your client seed and the
+      bet nonce, and compare the result with what you were paid.
+    </p>
+
+    <label class="field"><span id="lGame">Game</span>
+      <select id="game">
+        <option value="dice">Dice</option>
+        <option value="limbo">Limbo</option>
+        <option value="crash">Crash</option>
+        <option value="mines">Mines</option>
+      </select>
+    </label>
+
+    <label class="field"><span id="lServer">Server seed (revealed, hex)</span>
+      <input id="serverSeed" class="mono" placeholder="64 hex characters"></label>
+
+    <label class="field"><span id="lClient">Client seed</span>
+      <input id="clientSeed" class="mono"></label>
+
+    <label class="field"><span id="lNonce">Nonce (bet number, or round id for crash)</span>
+      <input id="nonce" type="number" min="0" value="1"></label>
+
+    <div id="gameOpts"></div>
+
+    <label class="field"><span id="lEdge">House edge</span>
+      <input id="edge" class="mono" value="0.01"></label>
+
+    <button class="primary big" id="run">Verify</button>
+  </div>
+
+  <div class="panel" id="out" hidden></div>
+
+  <div class="panel">
+    <h3 id="lChain">Check a published commitment</h3>
+    <p class="hint" id="hChain">
+      Crash uses a reverse hash chain. Paste the seed a round revealed and the value it should
+      hash to (the commitment for round 1, otherwise the seed revealed by the round before it).
+    </p>
+    <label class="field"><span id="lSeedA">Revealed seed</span>
+      <input id="chainSeed" class="mono"></label>
+    <label class="field"><span id="lSeedB">Should hash to</span>
+      <input id="chainExpect" class="mono"></label>
+    <button id="runChain">Check hash</button>
+    <p id="chainOut" class="hint"></p>
+  </div>
+</div>
+
+<script type="module" src="verify.js"></script>
+</body>
+</html>

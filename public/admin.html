@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator panel</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="chip"></span><span id="siteName">Operator panel</span></div>
+  <span class="spacer"></span>
+  <select class="lang-select" id="langSelect"></select>
+  <a class="btn tiny" href="/">&larr; Casino</a>
+</header>
+
+<div class="wrap">
+  <div id="gate" class="panel" style="max-width:480px;margin:40px auto">
+    <h2 id="gateTitle">Admin access</h2>
+    <p class="hint" id="gateHint">
+      Paste the admin token from config.json, or sign in on the casino with an admin account.
+    </p>
+    <label class="field"><span id="gateLabel">Admin token</span>
+      <input id="token" class="mono" type="password" autocomplete="off"></label>
+    <button class="primary big" id="gateGo">Unlock</button>
+    <p class="hint neg" id="gateErr"></p>
+  </div>
+
+  <div id="app" hidden>
+    <div class="tabs" id="tabs"></div>
+    <div id="view"></div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+<script type="module" src="admin.js"></script>
+</body>
+</html>

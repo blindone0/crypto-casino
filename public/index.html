@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="same-origin">
+<title>Casino</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="brand"><span class="chip"></span><span id="siteName">Casino</span></div>
+
+  <nav class="row wrap" id="navGames"></nav>
+
+  <span class="spacer"></span>
+
+  <div class="balance" id="balanceBox" hidden>
+    <span class="label" data-i18n="nav.balance">Balance</span>
+    <span class="value" id="balanceValue">0.00000000</span>
+    <span class="label" id="currencyLabel">CRD</span>
+  </div>
+
+  <select class="lang-select" id="langSelect" data-i18n-title="common.language"></select>
+
+  <div class="row" id="authButtons">
+    <button class="ghost" id="btnSignin" data-i18n="nav.signin">Sign in</button>
+    <button class="primary" id="btnSignup" data-i18n="nav.signup">Register</button>
+  </div>
+
+  <div class="row wrap hide" id="userButtons">
+    <button class="ghost tiny" id="btnWallet" data-i18n="nav.wallet">Wallet</button>
+    <button class="ghost tiny" id="btnFair" data-i18n="nav.fair">Fairness</button>
+    <button class="ghost tiny" id="btnAff" data-i18n="nav.affiliate">Referrals</button>
+    <button class="ghost tiny" id="btnLimits" data-i18n="nav.limits">Limits</button>
+    <a class="btn tiny hide" id="btnAdmin" href="/admin" data-i18n="nav.admin">Admin</a>
+    <button class="ghost tiny" id="btnSignout" data-i18n="nav.signout">Sign out</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div id="banners"></div>
+
+  <div class="layout">
+    <!-- bet controls, rebuilt per game -->
+    <div>
+      <div class="panel" id="betPanel"></div>
+      <div class="panel" id="infoPanel"></div>
+    </div>
+
+    <!-- game stage plus the activity feed -->
+    <div>
+      <div class="stage" id="stage"></div>
+
+      <div class="panel" style="margin-top:16px">
+        <div class="tabs" id="feedTabs">
+          <button class="on" data-feed="recent" data-i18n="feed.recent">Latest bets</button>
+          <button data-feed="biggest" data-i18n="feed.biggest">Biggest wins</button>
+          <button data-feed="mine" data-i18n="feed.mine">My bets</button>
+        </div>
+        <div class="table-wrap scroll-y" id="feedBody"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toasts"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

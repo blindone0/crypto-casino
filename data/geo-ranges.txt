@@ -1,0 +1,18 @@
+# Offline country lookup for the jurisdiction filter (config.json -> geo).
+#
+# Format: one "<cidr> <ISO-3166-alpha-2>" per line. Blank lines and # comments ignored.
+# Both IPv4 and IPv6 CIDRs are supported.
+#
+# You only need this file if you have no trusted proxy setting a country header
+# (Cloudflare's CF-IPCountry, or nginx with the GeoIP2 module). A proxy header is more
+# accurate and needs no maintenance, so prefer it when you have one.
+#
+# To build a real table, take the RIPE/ARIN/APNIC "delegated-extended" files and convert
+# the ranges for the countries you care about, for example:
+#   curl -s https://ftp.ripe.net/pub/stats/ripencc/delegated-ripencc-extended-latest \
+#     | awk -F'|' '$3=="ipv4" && $2=="DE" {print $4"/"32-log($5)/log(2)" "$2}'
+#
+# Examples (illustrative only, do not rely on these):
+# 5.8.0.0/16       RU
+# 2a02:6b8::/32    RU
+# 8.8.8.0/24       US
