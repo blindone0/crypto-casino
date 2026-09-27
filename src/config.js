@@ -65,7 +65,12 @@ const DEFAULTS = {
   // just as importantly, what it does not do.
   token: {
     enabled: true,
-    symbol: 'NUL',
+    // The tugrik. Named after the Mongolian togrog, which Russian speakers have used as a
+    // joking word for money for decades. Nothing by this name is listed as a crypto asset,
+    // so the ticker is free; the ISO code MNT and the togrog sign are not, and are not used
+    // here, because this is a play token and must never be mistaken for a national currency.
+    symbol: 'TUG',
+    name: 'Tugrik',
     welcomeGrant: 1000,   // minted on-chain the first time a player registers a key
   },
 

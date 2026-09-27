@@ -29,7 +29,10 @@ const el = (tag, attrs = {}, ...kids) => {
  * word "null" on the page. It did, in the arcade panel.
  */
 const setKids = (node, ...kids) => {
-  setKids(node, ...kids.flat().filter((k) => k != null && k !== false));
+  // This one call stays as node.replaceChildren: it is the DOM method, not this helper.
+  // (replaceChildren lives on Element, not on Node, so reaching for it through a prototype
+  // is both unnecessary and wrong.)
+  node.replaceChildren(...kids.flat().filter((k) => k != null && k !== false));
   return node;
 };
 
@@ -149,6 +152,77 @@ const escClose = (e) => { if (e.key === 'Escape') closeModal(); };
 function closeModal() {
   setKids($('#modalRoot'));
   document.removeEventListener('keydown', escClose);
+}
+
+// ------------------------------------------------------------------ radio
+/**
+ * The dial.
+ *
+ * Sound and music are separate switches because wanting the reels to click without a jazz
+ * trio behind them is a perfectly normal preference, and a casino that will not shut up is
+ * one people close.
+ */
+function radioModal(onSettingsChange) {
+  const body = openModal(t('radio.title'), () => {});
+  const nowTitle = el('div', { class: 'v' }, '—');
+  const nowStation = el('div', { class: 'k' }, '');
+  let stopWatching = null;
+
+  const paint = (info) => {
+    const lang = getLocale() === 'ru' ? 'ru' : 'en';
+    nowTitle.textContent = info ? info.title[lang] : t('radio.silent');
+    nowStation.textContent = info
+      ? `${info.stationName[lang]} · ${info.position}/${info.of} · ${info.bpm} BPM`
+      : '';
+    for (const btn of body.querySelectorAll('[data-station]')) {
+      btn.classList.toggle('on', !!info && btn.dataset.station === info.station);
+    }
+  };
+
+  const toggle = (label, isOn, set) => {
+    const b = el('button', { class: isOn() ? 'on' : '' }, label);
+    b.onclick = () => {
+      set(!isOn());
+      b.classList.toggle('on', isOn());
+      paint(audio.nowPlaying());
+      if (onSettingsChange) onSettingsChange();
+    };
+    return b;
+  };
+
+  setKids(body,
+    el('div', { class: 'stat-card' },
+      el('div', { class: 'k' }, t('radio.nowPlaying')),
+      nowTitle,
+      nowStation),
+    el('div', { class: 'row', style: 'margin-top:10px' },
+      el('button', { onclick: () => paint(audio.skip(-1)) }, '‹‹'),
+      toggle(t('radio.sound'), audio.isEnabled, (on) => audio.setEnabled(on)),
+      toggle(t('radio.music'), audio.isMusicOn, (on) => audio.setMusic(on)),
+      el('button', { onclick: () => paint(audio.skip(1)) }, '››')),
+    el('h3', { style: 'margin-top:16px' }, t('radio.stations')),
+    el('div', { class: 'stations' }, ...audio.stations().map((st) => el('button', {
+      'data-station': st.id,
+      onclick: () => {
+        audio.setEnabled(true);
+        audio.setMusic(true);
+        paint(audio.setStation(st.id));
+        if (onSettingsChange) onSettingsChange();
+      },
+    },
+    el('strong', {}, st.name[getLocale() === 'ru' ? 'ru' : 'en']),
+    el('span', {}, st.blurb[getLocale() === 'ru' ? 'ru' : 'en'])))),
+    el('p', { class: 'hint', style: 'margin-top:14px' }, t('radio.about')));
+
+  applyAll(body);
+  paint(audio.nowPlaying());
+  stopWatching = audio.onRadio(paint);
+  // The modal is thrown away on close, so the subscription has to go with it or every
+  // visit to the dial leaves another listener painting a panel that is no longer on screen.
+  const observer = new MutationObserver(() => {
+    if (!document.body.contains(body)) { stopWatching?.(); observer.disconnect(); }
+  });
+  observer.observe($('#modalRoot'), { childList: true, subtree: true });
 }
 
 // ------------------------------------------------------------------- auth
@@ -2438,14 +2512,7 @@ async function boot() {
     soundBtn.classList.toggle('music-off', on && !music);
     soundBtn.title = on ? (music ? t('sound.musicOn') : t('sound.musicOff')) : t('sound.off');
   };
-  soundBtn.onclick = () => {
-    // Three states, because wanting effects without music is a normal preference.
-    if (audio.isEnabled() && audio.isMusicOn()) audio.setMusic(false);
-    else if (audio.isEnabled()) audio.setEnabled(false);
-    else { audio.setEnabled(true); audio.setMusic(true); }
-    paintSound();
-    audio.sfx('click');
-  };
+  soundBtn.onclick = () => { audio.sfx('click'); radioModal(paintSound); };
   paintSound();
   document.addEventListener('localechange', paintSound);
 

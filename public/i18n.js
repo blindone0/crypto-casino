@@ -223,6 +223,20 @@ const STRINGS = {
   'arc.ballsLeft': { en: 'Balls left', ru: 'Осталось шаров' },
 
   // ---- site token
+  // ---- radio
+  'radio.title': { en: 'Noir radio', ru: 'Нуар-радио' },
+  'radio.nowPlaying': { en: 'Now playing', ru: 'Сейчас играет' },
+  'radio.silent': { en: 'Off the air', ru: 'Не в эфире' },
+  'radio.sound': { en: 'Sound', ru: 'Звук' },
+  'radio.music': { en: 'Music', ru: 'Музыка' },
+  'radio.stations': { en: 'Stations', ru: 'Станции' },
+  'radio.about': {
+    en: 'Every piece is played live in your browser from oscillators and filtered noise. There are no audio files to download and nothing is streamed from anywhere.',
+    ru: 'Каждая вещь играется вживую в вашем браузере из осцилляторов и фильтрованного шума. Никаких аудиофайлов и никаких внешних потоков.',
+  },
+
+  'tok.coin': { en: 'Tugrik', ru: 'Тугрик' },
+  'tok.coins': { en: 'tugriks', ru: 'тугриков' },
   'tok.title': { en: 'Token wallet', ru: 'Токен-кошелёк' },
   'tok.nav': { en: 'Token', ru: 'Токен' },
   'tok.balance': { en: 'Token balance', ru: 'Баланс токенов' },
