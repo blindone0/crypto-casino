@@ -339,7 +339,7 @@ test/             115 tests
 tools/             simulator, preferans calibration, treasury setup, admin token
 ```
 
-See `DEPLOY.md` for putting this on a real server.
+See `DEPLOY.md` for putting this on a real server, and `GROWTH.md` for launching and promoting it.
 
 ---
 

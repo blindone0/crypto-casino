@@ -310,6 +310,26 @@ curl -sI https://example.com  # HSTS present, no Server header
 
 ---
 
+## 8b. Launch and promotion
+
+Once the checklist above is green, the next step is getting people through the door.
+That is its own document: see **[GROWTH.md](GROWTH.md)**.
+
+The short version, because the order matters more than the channels:
+
+1. **Prove payouts first.** Twenty real withdrawals paid without incident.
+2. **Prove retention.** Players returning on day seven.
+3. **Prove economics.** A player worth more than they cost to acquire.
+4. **Only then spend.** Buying traffic before step three converts your bankroll into
+   other people's entertainment.
+
+The cheapest channel is already in the product: the referral system pays commission out
+of the house edge, so an affiliate can never cost you money. The differentiator is also
+already in the product, and it is the one a larger competitor cannot copy: every bet here
+is verifiable by the player, and the source is public under AGPL.
+
+---
+
 ## 9. Running it day to day
 
 **Daily:** withdrawal queue, books-balance indicator, failed withdrawals.
