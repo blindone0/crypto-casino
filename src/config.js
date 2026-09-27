@@ -30,6 +30,14 @@ const DEFAULTS = {
     limbo: 0.01,
     crash: 0.01,
     mines: 0.01,
+    // Slots run a wider edge than the originals because that is the market norm and
+    // because their variance is far higher; 0.03 means a 97% return to player.
+    slots: 0.03,
+    // Preferans is a game of SKILL, so this edge is not guaranteed the way the others
+    // are. It is calibrated against the bot's own play: a player who plays better than
+    // the bot erodes it, a weaker one loses more. Keep it wide to absorb that, and watch
+    // the per-game hold in the admin panel.
+    preferans: 0.05,
   },
 
   // ---- RISK CONTROL ----------------------------------------------------

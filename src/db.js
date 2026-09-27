@@ -146,6 +146,30 @@ CREATE TABLE IF NOT EXISTS mines_games (
 );
 CREATE INDEX IF NOT EXISTS ix_mines_active ON mines_games(user_id, state);
 
+-- One Preferans hand in progress. The bots' cards are stored server-side and never
+-- sent to the client until the hand is over.
+CREATE TABLE IF NOT EXISTS pref_games (
+  id          INTEGER PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  stake       INTEGER NOT NULL,
+  hands       TEXT NOT NULL,
+  talon       TEXT NOT NULL,
+  trump       TEXT,
+  state       TEXT NOT NULL CHECK (state IN ('trump','discard','playing','done')),
+  trick       TEXT NOT NULL DEFAULT '[]',
+  leader      INTEGER NOT NULL DEFAULT 1,
+  tricks_won  TEXT NOT NULL DEFAULT '[0,0,0]',
+  trick_no    INTEGER NOT NULL DEFAULT 0,
+  log         TEXT NOT NULL DEFAULT '[]',
+  payout      INTEGER NOT NULL DEFAULT 0,
+  seed_id     INTEGER NOT NULL REFERENCES server_seeds(id),
+  nonce       INTEGER NOT NULL,
+  client_seed TEXT NOT NULL,
+  created_at  INTEGER NOT NULL,
+  ended_at    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_pref_active ON pref_games(user_id, state);
+
 CREATE TABLE IF NOT EXISTS addresses (
   id          INTEGER PRIMARY KEY,
   user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

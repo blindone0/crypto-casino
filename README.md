@@ -1,6 +1,6 @@
 # Crypto casino
 
-A self-hosted, provably-fair crypto casino. Four games, a real double-entry ledger,
+A self-hosted, provably-fair crypto casino. Six games, a real double-entry ledger,
 crypto deposits and withdrawals, an operator panel, and English/Russian interfaces.
 
 **Zero npm dependencies.** It runs on Node 22.5+ using only built-in modules:
@@ -25,7 +25,7 @@ start and saved to `config.json`.
 ```bash
 node src/server.js                  # start; first run writes config.json
 node tools/admin-token.js           # show the operator token
-npm test                            # 65 tests
+npm test                            # 88 tests
 node tools/simulate.js              # will this actually make money?
 ```
 
@@ -106,15 +106,50 @@ the server, so verification never depends on the server agreeing.
 
 ## Games
 
-| Game  | Type        | Player choice          | Edge applied as |
-|-------|-------------|------------------------|-----------------|
-| Dice  | instant     | threshold + direction  | `(1-edge)/chance` |
-| Limbo | instant     | target multiplier      | Pareto draw scaled by `1-edge` |
-| Mines | interactive | mine count, when to stop | `(1-edge) x C(25,k)/C(25-M,k)` |
-| Crash | multiplayer | stake + cashout point  | shared round, scaled by `1-edge` |
+| Game      | Type        | Player choice            | How the edge is applied |
+|-----------|-------------|--------------------------|-------------------------|
+| Dice      | instant     | threshold + direction    | `(1-edge)/chance` |
+| Limbo     | instant     | target multiplier        | Pareto draw scaled by `1-edge` |
+| Mines     | interactive | mine count, when to stop | `(1-edge) x C(25,k)/C(25-M,k)` |
+| Crash     | multiplayer | stake + cashout point    | shared round, scaled by `1-edge` |
+| Slots     | instant     | stake only               | paytable solved to hit the target RTP |
+| Preferans | interactive | trump, then how to play  | payouts calibrated against bot play |
 
 Crash runs a real shared round loop and pushes updates over Server-Sent Events. No
 WebSocket library needed.
+
+### Slots
+
+Five reels, three rows, twenty fixed paylines, wilds, scatters and free spins. What makes
+it unusual is that its RTP is **computed exactly, not sampled**. A payline draws one
+symbol from each reel, and a uniform reel stop makes that symbol uniform over the strip,
+so the line return is an exact sum over all 11^5 symbol combinations. Scatters need the
+visible three-row window, so their distribution is enumerated per reel and convolved.
+
+The paytable is then *solved*: a single scale factor is searched for until the finished
+machine lands on the configured edge, and the solver **throws rather than ship a machine
+that misses its target**. That guard is not theoretical. An early version had a fixed
+search ceiling, silently clamped, and produced a 35% RTP machine that looked perfectly
+normal. A test now asserts the closed-form RTP agrees with simulated play.
+
+### Preferans
+
+The simplest form of the card game: 32 cards, ten each to you and two bots, two in the
+talon. You choose trump, take the talon, discard two, and play ten tricks alone against
+both bots. Follow suit if you can; if you are void you must trump.
+
+Six tricks returns your stake, seven or more pays, and the curve steepens sharply toward
+ten. **This is the one game whose edge is not guaranteed by arithmetic.** There is no
+closed-form probability of taking N tricks: it depends on how well the hand is played. So
+the payouts are *measured*, by simulating the bot playing all three seats 40,000 times,
+and then priced at `(1 - edge) / P(tricks)`.
+
+That has a consequence worth being clear about: the edge holds against a player who plays
+about as well as the bot. A stronger player erodes it; a weaker one loses more. It ships
+with a wider default edge (5%) to absorb that, and the per-game hold in the operator panel
+is what tells you whether real players are beating the calibration. If you change the
+bot's play, re-run `node tools/calibrate-preferans.js` — a test fails if the stored table
+has drifted from how the bot actually plays.
 
 ---
 
@@ -248,11 +283,11 @@ src/
   treasury.js      operator profit withdrawal to cold storage
   addrcheck.js     bech32 / base58check address validation
   geo.js           jurisdiction filter
-  games/           dice, limbo, mines, crash
+  games/           dice, limbo, mines, crash, slots, preferans
   wallet/          mock, manual, bitcoind, monero drivers
 public/            the site: casino, /admin panel, /verify verifier, i18n
-test/              65 tests
-tools/             simulator, treasury setup, admin token, shortcut
+test/              88 tests
+tools/             simulator, preferans calibration, treasury setup, admin token
 ```
 
 See `DEPLOY.md` for putting this on a real server.

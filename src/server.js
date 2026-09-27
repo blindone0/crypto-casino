@@ -19,6 +19,8 @@ const geoMod = require('./geo');
 const dice = require('./games/dice');
 const limbo = require('./games/limbo');
 const mines = require('./games/mines');
+const slots = require('./games/slots');
+const preferans = require('./games/preferans');
 const crashMod = require('./games/crash');
 
 const MIME = {
@@ -127,6 +129,7 @@ function build(cfg) {
     referralCommission: cfg.referralCommission,
     crashCommitment: crash.commitment,
     dice: { minWinCount: dice.MIN_WIN_COUNT, maxWinCount: dice.MAX_WIN_COUNT },
+    slots: { rtp: slots.machineFor(cfg.houseEdge.slots).rtp, lines: slots.LINES },
   }));
 
   add('GET', '/api/stats/recent', async () => ({
@@ -305,6 +308,41 @@ function build(cfg) {
     const user = requireUser(ctx);
     return mines.current({ db, cfg, user });
   });
+
+  add('POST', '/api/bet/slots', async (ctx, req) => {
+    checkCsrf(req, ctx);
+    return slots.play(gameCtx(ctx), await U.readJsonBody(req));
+  });
+
+  add('GET', '/api/bet/slots/info', async () => slots.info(cfg));
+
+  // ------------------------------------------------------------- preferans
+  add('POST', '/api/bet/preferans/start', async (ctx, req) => {
+    checkCsrf(req, ctx);
+    return preferans.start(gameCtx(ctx), await U.readJsonBody(req));
+  });
+
+  add('POST', '/api/bet/preferans/trump', async (ctx, req) => {
+    checkCsrf(req, ctx);
+    return preferans.chooseTrump(gameCtx(ctx), await U.readJsonBody(req));
+  });
+
+  add('POST', '/api/bet/preferans/discard', async (ctx, req) => {
+    checkCsrf(req, ctx);
+    return preferans.discard(gameCtx(ctx), await U.readJsonBody(req));
+  });
+
+  add('POST', '/api/bet/preferans/play', async (ctx, req) => {
+    checkCsrf(req, ctx);
+    return preferans.playCard(gameCtx(ctx), await U.readJsonBody(req));
+  });
+
+  add('GET', '/api/bet/preferans/current', async (ctx) => {
+    const user = requireUser(ctx);
+    return preferans.current({ db, cfg, user });
+  });
+
+  add('GET', '/api/bet/preferans/info', async () => preferans.info(cfg));
 
   add('GET', '/api/bet/mines/table', async (ctx, req) => {
     const url = new URL(req.url, 'http://x');

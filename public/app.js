@@ -1006,8 +1006,366 @@ async function limitsModal() {
   }
 }
 
+
+// ------------------------------------------------------------------ slots
+// Glyphs must be distinguishable at a glance: two chess queens (U+265B / U+2655) look
+// identical on a reel, so the paying symbols use clearly different shapes instead.
+const SLOT_GLYPH = {
+  T: '10', J: 'J', Q: 'Q', K: 'K', A: 'A',
+  BELL: '\u25B2', GEM: '\u25C6', CROWN: '\u2605', WILD: 'W', SCAT: '\u26A1',
+};
+let slotInfo = null;
+
+async function renderSlots() {
+  const panel = $('#betPanel');
+  const amount = amountControl('0.20');
+  const spin = el('button', { class: 'primary big' }, t('slots.spin'));
+  const perLine = el('span', {});
+
+  const recalc = () => {
+    const amt = Number(amount.get()) || 0;
+    perLine.textContent = slotInfo ? (amt / slotInfo.lines).toFixed(8) : '-';
+  };
+  amount.input.addEventListener('input', recalc);
+
+  spin.addEventListener('click', async () => {
+    if (!requireLogin()) return;
+    spin.disabled = true;
+    setReelsSpinning(true);
+    try {
+      const out = await api('/api/bet/slots', { method: 'POST', body: { amount: amount.get() } });
+      // Let the blur read as a spin before the result lands.
+      await new Promise((r) => setTimeout(r, 320));
+      await showSlotResult(out);
+      state.user.balance = out.balance;
+      setBalance(out.balance, out.profit);
+      loadFeed();
+    } catch (e) {
+      toast(e.message, 'bad');
+      setReelsSpinning(false);
+    } finally {
+      spin.disabled = false;
+    }
+  });
+
+  panel.replaceChildren(
+    amount.node,
+    statRow('slots.lines', el('span', {}, slotInfo ? String(slotInfo.lines) : '20')),
+    el('div', { class: 'stat-row' },
+      el('span', { class: 'k' }, t('slots.perLineBet')),
+      el('span', { class: 'v' }, perLine)),
+    spin,
+    el('button', {
+      class: 'big', style: 'margin-top:8px',
+      onclick: () => slotPaytableModal(),
+    }, t('slots.paytable')),
+  );
+  applyAll(panel);
+
+  $('#stage').replaceChildren(
+    el('div', { class: 'slot-banner', id: 'slotBanner' }, ''),
+    el('div', { class: 'reels', id: 'reels' }),
+  );
+
+  if (!slotInfo) {
+    try { slotInfo = await api('/api/bet/slots/info'); } catch { /* offline */ }
+  }
+  paintReels(blankScreen());
+  recalc();
+  infoPanel([
+    el('div', { class: 'stat-row' },
+      el('span', { class: 'k' }, t('slots.rtp')),
+      el('span', { class: 'v pos' }, slotInfo ? `${(slotInfo.rtp * 100).toFixed(2)}%` : '-')),
+  ]);
+}
+
+const blankScreen = () => Array.from({ length: 5 }, () => ['T', 'J', 'Q']);
+
+function setReelsSpinning(on) {
+  for (const c of document.querySelectorAll('#reels .cell')) c.classList.toggle('spinning', on);
+}
+
+/** Draw the 5x3 window, highlighting the cells that form a winning line. */
+function paintReels(screen, wins = []) {
+  const box = $('#reels');
+  if (!box) return;
+  const lit = new Set();
+  if (slotInfo) {
+    for (const w of wins) {
+      const rows = slotInfo.paylines[w.line];
+      for (let reel = 0; reel < w.count; reel += 1) lit.add(`${reel}:${rows[reel]}`);
+    }
+  }
+  box.replaceChildren(...screen.map((reel, ri) => el('div', { class: 'reel' },
+    ...reel.map((sym, row) => el('div', {
+      class: `cell sym-${sym} ${lit.has(`${ri}:${row}`) ? 'win' : ''}`,
+    }, SLOT_GLYPH[sym] || sym)))));
+}
+
+async function showSlotResult(out) {
+  setReelsSpinning(false);
+  paintReels(out.screen, out.wins);
+  const banner = $('#slotBanner');
+  if (!banner) return;
+
+  if (out.freeSpinsAwarded) {
+    banner.className = 'slot-banner free';
+    banner.textContent = t('slots.freeSpins', { n: out.freeSpinsAwarded });
+    // Replay the free spins one at a time so they are visible, not just totalled.
+    for (const [i, fs] of out.freeSpins.entries()) {
+      await new Promise((r) => setTimeout(r, 480));
+      paintReels(fs.screen, fs.wins);
+      banner.textContent = t('slots.freeSpinRun', { i: i + 1, n: out.freeSpins.length });
+    }
+    await new Promise((r) => setTimeout(r, 380));
+    // Come back to the triggering spin: the banner reports the whole round, so leaving
+    // the last free spin on screen makes the picture disagree with the number.
+    paintReels(out.screen, out.wins);
+  }
+
+  if (out.payout > 0) {
+    banner.className = 'slot-banner win';
+    banner.textContent = `+${fmtShort(out.profit)}  (${out.multiplier.toFixed(2)}x)`;
+    if (out.multiplier >= 10) toast(t('slots.bigWin', { mult: out.multiplier.toFixed(2) }));
+  } else {
+    banner.className = 'slot-banner';
+    banner.textContent = '';
+  }
+}
+
+function slotPaytableModal() {
+  openModal(t('slots.paytable'), (body) => {
+    if (!slotInfo) { body.append(el('p', { class: 'hint' }, t('common.loading'))); return; }
+    const rows = [el('div', { class: 'sym' }, ''),
+      el('div', { class: 'n' }, '3'), el('div', { class: 'n' }, '4'), el('div', { class: 'n' }, '5')];
+    for (const [sym, pays] of Object.entries(slotInfo.pays)) {
+      rows.push(el('div', { class: 'sym' }, SLOT_GLYPH[sym] || sym));
+      for (const p of pays) rows.push(el('div', { class: 'n' }, p.toFixed(2)));
+    }
+    body.append(
+      el('p', { class: 'hint' }, t('slots.perLineBet')),
+      el('div', { class: 'paytable-grid' }, ...rows),
+      el('h3', { style: 'margin-top:16px' }, t('slots.scatterPays')),
+      el('div', { class: 'paytable-grid' },
+        ...Object.entries(slotInfo.scatter).flatMap(([n, v]) => [
+          el('div', { class: 'sym' }, `${SLOT_GLYPH.SCAT} x${n}`),
+          el('div', { class: 'n' }, v.toFixed(2)),
+          el('div', {}), el('div', {}),
+        ])),
+      el('div', { class: 'stat-row', style: 'margin-top:14px' },
+        el('span', { class: 'k' }, t('slots.rtp')),
+        el('span', { class: 'v pos' }, `${(slotInfo.rtp * 100).toFixed(2)}%`)),
+    );
+  });
+}
+
+// -------------------------------------------------------------- preferans
+const SUIT_GLYPH = { S: '\u2660', C: '\u2663', D: '\u2666', H: '\u2665' };
+const RANK_LABEL = { T: '10' };
+const isRedSuit = (s) => s === 'D' || s === 'H';
+let prefInfo = null;
+
+/**
+ * Which cards may legally be played right now. Mirrors the server rule exactly: follow
+ * the led suit, and if you are void you are obliged to trump. The server still enforces
+ * it, but making illegal cards unclickable is the difference between a card game and a
+ * guessing game with error messages.
+ */
+function legalCards(g) {
+  const hand = g.hand || [];
+  const trick = g.trick || [];
+  if (!trick.length) return hand;
+  const ledSuit = trick[0].card[1];
+  const following = hand.filter((c) => c[1] === ledSuit);
+  if (following.length) return following;
+  if (g.trump && g.trump !== 'NT') {
+    const trumps = hand.filter((c) => c[1] === g.trump);
+    if (trumps.length) return trumps;
+  }
+  return hand;
+}
+
+function cardNode(card, { onclick, selected, disabled, muted } = {}) {
+  const rank = card[0];
+  const suit = card[1];
+  return el('button', {
+    class: `card ${isRedSuit(suit) ? 'red' : ''} ${selected ? 'selected' : ''} ${muted ? 'muted' : ''}`,
+    disabled: disabled ? 'disabled' : false,
+    onclick: onclick || undefined,
+  }, el('span', {}, RANK_LABEL[rank] || rank), el('span', { class: 'suit' }, SUIT_GLYPH[suit]));
+}
+
+async function renderPreferans() {
+  if (!prefInfo) {
+    try { prefInfo = await api('/api/bet/preferans/info'); } catch { /* offline */ }
+  }
+  state.prefSelected = [];
+  let game = { state: 'none' };
+  if (state.user) {
+    try { game = await api('/api/bet/preferans/current'); } catch { /* nothing open */ }
+  }
+  state.pref = game;
+  paintPreferans();
+}
+
+function paintPreferans() {
+  const g = state.pref || { state: 'none' };
+  const panel = $('#betPanel');
+  const stage = $('#stage');
+
+  if (g.state === 'none' || g.state === 'done') {
+    const amount = amountControl('0.50');
+    const deal = el('button', { class: 'primary big' },
+      t(g.state === 'done' ? 'pref.newHand' : 'pref.deal'));
+    deal.addEventListener('click', async () => {
+      if (!requireLogin()) return;
+      deal.disabled = true;
+      try {
+        state.pref = await api('/api/bet/preferans/start',
+          { method: 'POST', body: { amount: amount.get() } });
+        state.prefSelected = [];
+        state.user.balance = state.pref.balance;
+        setBalance(state.pref.balance, -1);
+        paintPreferans();
+      } catch (e) {
+        toast(e.message, 'bad');
+        deal.disabled = false;
+      }
+    });
+    panel.replaceChildren(amount.node, deal, el('p', { class: 'hint' }, t('pref.rules')));
+  } else if (g.state === 'trump') {
+    const pick = el('div', { class: 'trump-pick' },
+      ...['S', 'C', 'D', 'H'].map((suit) => el('button', {
+        style: isRedSuit(suit) ? 'color:#ff6b81' : '',
+        onclick: () => chooseTrump(suit),
+      }, SUIT_GLYPH[suit])),
+      el('button', { onclick: () => chooseTrump('NT') }, t('pref.noTrump')));
+    panel.replaceChildren(
+      el('h3', {}, t('pref.pickTrump')),
+      pick,
+      el('p', { class: 'hint' }, t('pref.rules')),
+    );
+  } else if (g.state === 'discard') {
+    const confirm = el('button', {
+      class: 'primary big',
+      disabled: (state.prefSelected || []).length === 2 ? false : 'disabled',
+      onclick: doDiscard,
+    }, t('pref.confirmDiscard'));
+    panel.replaceChildren(
+      el('h3', {}, t('pref.discardTwo')),
+      el('div', { class: 'hand' }, ...(g.talon || []).map((c) => cardNode(c, { disabled: true }))),
+      el('p', { class: 'hint' }, t('pref.talon')),
+      confirm,
+    );
+  } else {
+    panel.replaceChildren(
+      el('div', { class: 'score-row' },
+        el('span', {}, `${t('pref.you')}: `, el('b', {}, String(g.tricksWon ? g.tricksWon[0] : 0))),
+        el('span', {}, `${t('pref.opponents')}: `,
+          el('b', {}, String(g.tricksWon ? g.tricksWon[1] + g.tricksWon[2] : 0)))),
+      el('p', { class: 'hint' }, t('pref.trick', { n: Math.min(10, (g.trickNumber || 0) + 1) })),
+      el('p', { class: 'hint' }, g.yourTurn ? t('pref.yourTurn') : t('pref.waiting')),
+      el('div', { class: 'stat-row' },
+        el('span', { class: 'k' }, 'Trump'),
+        el('span', { class: 'v' }, g.trump === 'NT' ? t('pref.noTrump') : SUIT_GLYPH[g.trump])),
+    );
+  }
+  applyAll(panel);
+
+  const kids = [];
+  if (g.state === 'done') {
+    const outcome = g.outcome === 'won' ? t('pref.won', { mult: (g.multiplier || 0).toFixed(2) })
+      : (g.outcome === 'push' ? t('pref.push') : t('pref.lostHand'));
+    kids.push(el('div', {
+      class: `crash-status ${g.outcome === 'won' ? 'pos' : (g.outcome === 'lost' ? 'neg' : '')}`,
+      style: 'font-size:18px;padding:8px 0',
+    }, t('pref.result', { n: g.tricksWon ? g.tricksWon[0] : 0, outcome })));
+  }
+
+  if (g.state === 'playing' || g.state === 'done') {
+    const trick = g.trick || [];
+    kids.push(el('div', { class: 'trick-area' },
+      ...[0, 1, 2].map((slot) => {
+        const played = trick.find((x) => x.seat === slot);
+        const label = slot === 0 ? t('pref.you') : `Bot ${slot}`;
+        return el('div', { class: 'trick-slot' },
+          el('div', { class: 'who' }, label),
+          played ? cardNode(played.card, { disabled: true }) : el('div', { class: 'empty-slot' }));
+      })));
+  }
+
+  if (g.hand && g.hand.length) {
+    const selectable = g.state === 'discard';
+    const playable = g.state === 'playing' && g.yourTurn;
+    const legal = playable ? new Set(legalCards(g)) : null;
+    kids.push(el('div', { class: 'hand' }, ...g.hand.map((c) => {
+      const canPlay = playable && legal.has(c);
+      return cardNode(c, {
+        selected: (state.prefSelected || []).includes(c),
+        disabled: !selectable && !canPlay,
+        // Cards you are not allowed to play are dimmed rather than silently inert.
+        muted: playable && !canPlay,
+        onclick: selectable ? () => toggleDiscard(c) : (canPlay ? () => playPrefCard(c) : undefined),
+      });
+    })));
+  }
+  if (g.state === 'done' && g.botHands) {
+    for (const bh of g.botHands) {
+      kids.push(el('div', { class: 'hand' },
+        ...bh.map((c) => cardNode(c, { disabled: true, muted: true }))));
+    }
+  }
+  stage.replaceChildren(...kids);
+
+  infoPanel(prefInfo ? [
+    el('h3', { style: 'margin-top:10px' }, t('pref.payTable')),
+    ...Object.entries(prefInfo.pays).map(([k, v]) => el('div', { class: 'stat-row' },
+      el('span', { class: 'k' }, `${k} ${t('pref.tricks').toLowerCase()}`),
+      el('span', { class: 'v' }, `${v.toFixed(2)}x`))),
+    el('p', { class: 'hint' }, t('pref.skillNote')),
+  ] : []);
+}
+
+async function chooseTrump(trump) {
+  try {
+    state.pref = await api('/api/bet/preferans/trump', { method: 'POST', body: { trump } });
+    state.prefSelected = [];
+    paintPreferans();
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
+function toggleDiscard(card) {
+  const sel = state.prefSelected || [];
+  state.prefSelected = sel.includes(card)
+    ? sel.filter((c) => c !== card)
+    : (sel.length >= 2 ? [sel[1], card] : [...sel, card]);
+  paintPreferans();
+}
+
+async function doDiscard() {
+  try {
+    state.pref = await api('/api/bet/preferans/discard',
+      { method: 'POST', body: { cards: state.prefSelected } });
+    state.prefSelected = [];
+    paintPreferans();
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
+async function playPrefCard(card) {
+  try {
+    const out = await api('/api/bet/preferans/play', { method: 'POST', body: { card } });
+    state.pref = out;
+    paintPreferans();
+    if (out.finished) {
+      state.user.balance = out.balance;
+      setBalance(out.balance, out.profit);
+      loadFeed();
+    }
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
 // ------------------------------------------------------------------- boot
-const GAMES = ['dice', 'limbo', 'mines', 'crash'];
+const GAMES = ['dice', 'limbo', 'mines', 'crash', 'slots', 'preferans'];
 
 function renderGame() {
   if (state.es && state.game !== 'crash') { state.es.close(); state.es = null; }
@@ -1021,6 +1379,8 @@ function renderGame() {
   if (state.game === 'dice') renderDice();
   else if (state.game === 'limbo') renderLimbo();
   else if (state.game === 'mines') { state.mines = null; renderMines(); loadMinesState(); }
+  else if (state.game === 'slots') renderSlots();
+  else if (state.game === 'preferans') renderPreferans();
   else renderCrash();
 }
 

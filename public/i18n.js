@@ -83,6 +83,51 @@ const STRINGS = {
   'crash.players': { en: 'Players', ru: 'Игроки' },
   'crash.waiting': { en: 'Waiting for the next round', ru: 'Ожидание следующего раунда' },
 
+  // ---- slots
+  'game.slots': { en: 'Slots', ru: 'Слоты' },
+  'slots.spin': { en: 'Spin', ru: 'Крутить' },
+  'slots.paytable': { en: 'Paytable', ru: 'Таблица выплат' },
+  'slots.lines': { en: 'Paylines', ru: 'Линий' },
+  'slots.rtp': { en: 'Return to player', ru: 'Возврат игроку' },
+  'slots.freeSpins': { en: '{n} free spins!', ru: '{n} фриспинов!' },
+  'slots.freeSpinRun': { en: 'Free spin {i} of {n}', ru: 'Фриспин {i} из {n}' },
+  'slots.scatterPays': { en: 'Scatter pays (x total bet)', ru: 'Скаттер (x общей ставки)' },
+  'slots.ofAKind': { en: '3 / 4 / 5 of a kind', ru: '3 / 4 / 5 подряд' },
+  'slots.perLineBet': { en: 'Payouts are multiples of the line bet', ru: 'Выплаты кратны ставке на линию' },
+  'slots.bigWin': { en: 'Big win! {mult}x', ru: 'Крупный выигрыш! {mult}x' },
+
+  // ---- preferans
+  'game.preferans': { en: 'Preferans', ru: 'Преферанс' },
+  'pref.deal': { en: 'Deal', ru: 'Раздать' },
+  'pref.pickTrump': { en: 'Choose trump', ru: 'Выберите козырь' },
+  'pref.noTrump': { en: 'No trump', ru: 'Без козыря' },
+  'pref.talon': { en: 'Talon', ru: 'Прикуп' },
+  'pref.discardTwo': { en: 'Discard two cards', ru: 'Сбросьте две карты' },
+  'pref.confirmDiscard': { en: 'Discard selected', ru: 'Сбросить выбранные' },
+  'pref.yourTurn': { en: 'Your turn', ru: 'Ваш ход' },
+  'pref.waiting': { en: 'Opponents playing…', ru: 'Ходят соперники…' },
+  'pref.tricks': { en: 'Tricks', ru: 'Взятки' },
+  'pref.you': { en: 'You', ru: 'Вы' },
+  'pref.opponents': { en: 'Opponents', ru: 'Соперники' },
+  'pref.trick': { en: 'Trick {n} of 10', ru: 'Взятка {n} из 10' },
+  'pref.result': {
+    en: 'You took {n} tricks: {outcome}',
+    ru: 'Вы взяли {n} взяток: {outcome}',
+  },
+  'pref.won': { en: 'paid {mult}x', ru: 'выплата {mult}x' },
+  'pref.push': { en: 'stake returned', ru: 'ставка возвращена' },
+  'pref.lostHand': { en: 'stake lost', ru: 'ставка проиграна' },
+  'pref.rules': {
+    en: 'You declare and play alone against two bots. Follow suit if you can; if you cannot you must trump. Take six tricks to get your stake back, seven or more to profit.',
+    ru: 'Вы играете один против двух ботов. Ходить надо в масть; если её нет, обязаны козырять. Шесть взяток возвращают ставку, семь и больше приносят прибыль.',
+  },
+  'pref.payTable': { en: 'Tricks and payouts', ru: 'Взятки и выплаты' },
+  'pref.skillNote': {
+    en: 'Skill matters here: the payouts are calibrated against the bot, so playing better than it improves your return.',
+    ru: 'Здесь важно умение: выплаты рассчитаны по игре бота, поэтому играя лучше него, вы повышаете свой возврат.',
+  },
+  'pref.newHand': { en: 'New hand', ru: 'Новая раздача' },
+
   // ---- wallet
   'wallet.deposit': { en: 'Deposit', ru: 'Пополнение' },
   'wallet.withdraw': { en: 'Withdraw', ru: 'Вывод' },

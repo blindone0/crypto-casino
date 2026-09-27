@@ -293,3 +293,80 @@ table.grid tr:last-child td { border-bottom: none; }
   .dice-readout .roll { font-size: 42px; }
   header.top { gap: 10px; }
 }
+
+/* ---------------------------------------------------------------- slots */
+.reels {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
+  max-width: 520px; margin: 10px auto; width: 100%;
+}
+.reel { display: grid; grid-template-rows: repeat(3, 1fr); gap: 6px; }
+.cell {
+  aspect-ratio: 1 / 0.95;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-input); border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  font-size: 26px; font-weight: 700; font-family: var(--mono);
+  color: var(--text-dim);
+  transition: background .15s, border-color .15s, transform .15s;
+}
+.cell.sym-WILD { color: var(--gold); border-color: #4a3a1f; }
+.cell.sym-SCAT { color: #7ab8ff; border-color: #234260; }
+.cell.sym-GEM, .cell.sym-CROWN, .cell.sym-BELL { color: var(--text); }
+.cell.win {
+  background: #0f2b22; border-color: var(--accent); color: var(--accent);
+  transform: scale(1.04);
+}
+.cell.spinning { opacity: .35; }
+.slot-banner {
+  text-align: center; font-family: var(--mono); font-size: 22px;
+  min-height: 30px; padding: 6px 0;
+}
+.slot-banner.win { color: var(--accent); }
+.slot-banner.free { color: var(--gold); }
+.paytable-grid { display: grid; grid-template-columns: auto repeat(3, 1fr); gap: 4px 10px; font-size: 12px; }
+.paytable-grid .sym { font-family: var(--mono); font-size: 16px; }
+.paytable-grid .n { font-family: var(--mono); text-align: right; color: var(--text-dim); }
+
+/* ----------------------------------------------------------- card games */
+.hand { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin: 12px 0; }
+.card {
+  width: 52px; height: 74px; border-radius: 7px;
+  background: #f4f6fa; color: #12161f;
+  border: 1px solid #c9d2e0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  font-family: var(--mono); font-weight: 700; font-size: 17px; line-height: 1.1;
+  cursor: pointer; user-select: none;
+  transition: transform .1s, box-shadow .1s, opacity .1s;
+}
+.card:hover:not(:disabled) { transform: translateY(-4px); }
+.card:disabled { cursor: default; }
+.card.red { color: #c2203a; }
+.card.selected { transform: translateY(-10px); box-shadow: 0 0 0 2px var(--accent); }
+.card.muted { opacity: .45; }
+.card .suit { font-size: 19px; }
+.card.back {
+  background: linear-gradient(135deg, #1b2740, #101726);
+  border-color: var(--line); color: var(--text-faint);
+}
+.trick-area {
+  display: flex; gap: 10px; justify-content: center; align-items: center;
+  min-height: 92px; margin: 10px 0;
+}
+.trick-slot { text-align: center; }
+.trick-slot .who {
+  font-size: 10px; color: var(--text-faint); text-transform: uppercase;
+  letter-spacing: .07em; margin-bottom: 4px;
+}
+.trick-slot.winner .card { box-shadow: 0 0 0 2px var(--accent); }
+.empty-slot {
+  width: 52px; height: 74px; border-radius: 7px;
+  border: 1px dashed var(--line); opacity: .5;
+}
+.trump-pick { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.trump-pick button { font-size: 18px; min-width: 52px; font-family: var(--mono); }
+.trump-pick button.on { border-color: var(--accent); color: var(--accent); }
+.score-row {
+  display: flex; gap: 14px; justify-content: center;
+  font-family: var(--mono); font-size: 13px; color: var(--text-dim);
+}
+.score-row b { color: var(--text); }

@@ -66,7 +66,8 @@ Edit `config.json`:
   "secureCookies": true,     // REQUIRED over HTTPS
   "defaultLocale": "ru",
   "faucetUnits": 0,          // turn the signup bonus off in production
-  "houseEdge": { "dice": 0.01, "limbo": 0.01, "crash": 0.01, "mines": 0.01 },
+  "houseEdge": { "dice": 0.01, "limbo": 0.01, "crash": 0.01, "mines": 0.01,
+                 "slots": 0.03, "preferans": 0.05 },
   "risk": { "bankrollRiskFraction": 0.01, "maxBetUnits": 5000000000 }
 }
 ```
@@ -291,7 +292,7 @@ restored books balance.
 ## 8. Checks before you take real money
 
 ```bash
-npm test                      # all 65 must pass
+npm test                      # all 88 must pass
 curl -sI https://example.com  # HSTS present, no Server header
 ```
 
@@ -304,6 +305,7 @@ curl -sI https://example.com  # HSTS present, no Server header
 - [ ] A test deposit credits, and a test withdrawal actually arrives
 - [ ] Backups running and a restore rehearsed at least once
 - [ ] Books-balance indicator green in the admin panel
+- [ ] Preferans calibration current: `node tools/calibrate-preferans.js` if the bot changed
 - [ ] Treasury whitelist set, hot wallet holding only what it needs
 
 ---
