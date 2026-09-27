@@ -69,6 +69,16 @@ const DEFAULTS = {
     welcomeGrant: 1000,   // minted on-chain the first time a player registers a key
   },
 
+  // ---- ARCADE -----------------------------------------------------------
+  // A token-operated game room. Plays cost site tokens and pay nothing back: the games
+  // run in the browser, so a score can never be trusted with money attached. Revenue is
+  // the token sale, which is how the arcades this imitates actually earned.
+  arcade: {
+    enabled: true,
+    tokenCost: 10,          // tokens burned per play
+    playTtlSeconds: 7200,   // an open play older than this is a stale tab, not a long game
+  },
+
   // ---- FREE PLAY --------------------------------------------------------
   // Practice mode for people with no money to deposit. Play money is a completely
   // separate ledger: it never touches the bankroll, never counts as a liability, and can

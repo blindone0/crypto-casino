@@ -1,0 +1,4 @@
+{
+  "type": "module",
+  "//": "Marks public/ as ES modules for Node, so the browser game modules can be imported by the test suite. The browser never reads this file, and the static server refuses to serve it."
+}

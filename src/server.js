@@ -17,6 +17,7 @@ const walletApi = require('./wallet');
 const treasury = require('./treasury');
 const bankMod = require('./bank');
 const tokenchain = require('./tokenchain');
+const arcade = require('./arcade');
 const geoMod = require('./geo');
 const dice = require('./games/dice');
 const limbo = require('./games/limbo');
@@ -134,6 +135,7 @@ function build(cfg) {
     referralCommission: cfg.referralCommission,
     demo: { enabled: cfg.demo.enabled, startingUnits: cfg.demo.startingUnits },
     token: { enabled: cfg.token.enabled, symbol: cfg.token.symbol },
+    arcade: { enabled: cfg.arcade.enabled, tokenCost: cfg.arcade.tokenCost },
     crashCommitment: crash.commitment,
     dice: { minWinCount: dice.MIN_WIN_COUNT, maxWinCount: dice.MAX_WIN_COUNT },
     slots: { rtp: slots.machineFor(cfg.houseEdge.slots).rtp, lines: slots.LINES },
@@ -538,6 +540,35 @@ function build(cfg) {
     };
   });
 
+  // ---------------------------------------------------------------- arcade
+  add('GET', '/api/arcade', async (ctx) => {
+    const user = ctx.auth ? ctx.auth.user : null;
+    return arcade.overview(db, cfg, user);
+  });
+
+  add('POST', '/api/arcade/play', async (ctx, req) => {
+    const user = requireUser(ctx);
+    checkCsrf(req, ctx);
+    if (!cfg.arcade.enabled) throw new U.BadRequest('the arcade is closed');
+    return arcade.insertToken(db, cfg, user, await U.readJsonBody(req));
+  });
+
+  add('POST', '/api/arcade/score', async (ctx, req) => {
+    const user = requireUser(ctx);
+    checkCsrf(req, ctx);
+    return arcade.submitScore(db, cfg, user, await U.readJsonBody(req));
+  });
+
+  add('GET', '/api/arcade/leaderboard', async (ctx, req) => {
+    const url = new URL(req.url, 'http://x');
+    return { scores: arcade.leaderboard(db, url.searchParams.get('game'), url.searchParams.get('limit')) };
+  });
+
+  add('GET', '/api/admin/arcade', async (ctx, req) => {
+    requireAdmin(req, ctx);
+    return arcade.stats(db);
+  });
+
   // -------------------------------------------------------------- fairness
   add('GET', '/api/fair/seed', async (ctx) => {
     const user = requireUser(ctx);
@@ -812,6 +843,12 @@ function build(cfg) {
       : pathname === '/admin' ? 'admin.html'
         : pathname === '/verify' ? 'verify.html'
           : pathname.replace(/^\/+/, '');
+    // public/package.json exists only to mark that tree as ESM for Node's resolver when
+    // the test suite imports the browser game modules. Nothing should fetch it.
+    if (path.basename(rel).toLowerCase() === 'package.json') {
+      U.sendJson(res, 404, { error: 'not found' });
+      return;
+    }
     const target = path.resolve(publicDir, rel);
     if (!target.startsWith(publicDir)) {
       U.sendJson(res, 403, { error: 'forbidden' });

@@ -189,6 +189,39 @@ const STRINGS = {
   },
   'pref.newHand': { en: 'New hand', ru: 'Новая раздача' },
 
+  // ---- arcade
+  'game.arcade': { en: 'Arcade', ru: 'Аркада' },
+  'arc.title': { en: 'The arcade', ru: 'Зал автоматов' },
+  'arc.intro': {
+    en: 'A token-operated game room. Plays cost tokens and pay nothing back: the games run in your browser, so a score could be edited and can never be worth money. The leaderboard is the prize.',
+    ru: 'Зал игровых автоматов на жетонах. Игра стоит токены и ничего не приносит: игры работают в вашем браузере, счёт можно подделать, поэтому на него нельзя ставить деньги. Приз — таблица рекордов.',
+  },
+  'arc.insert': { en: 'Insert token ({n} {sym})', ru: 'Бросить жетон ({n} {sym})' },
+  'arc.balance': { en: 'Tokens', ru: 'Жетоны' },
+  'arc.cost': { en: 'A play costs', ru: 'Игра стоит' },
+  'arc.noPayout': {
+    en: 'Cabinets pay nothing. The token is the price of admission and the score is the prize.',
+    ru: 'Автоматы ничего не выплачивают. Жетон — это плата за вход, а приз — место в таблице.',
+  },
+  'arc.best': { en: 'Your best', ru: 'Ваш рекорд' },
+  'arc.plays': { en: 'Plays', ru: 'Игр' },
+  'arc.top': { en: 'High scores', ru: 'Рекорды' },
+  'arc.noScores': { en: 'No scores yet. Be first.', ru: 'Рекордов пока нет. Будьте первым.' },
+  'arc.gameOver': { en: 'Game over — {n}', ru: 'Игра окончена — {n}' },
+  'arc.newBest': { en: 'New personal best!', ru: 'Новый личный рекорд!' },
+  'arc.again': { en: 'Play again', ru: 'Ещё раз' },
+  'arc.back': { en: 'Back to the floor', ru: 'Назад в зал' },
+  'arc.needTokens': {
+    en: 'You need tokens to play. Open the token wallet to create a wallet and claim your grant.',
+    ru: 'Нужны токены. Откройте токен-кошелёк, создайте его и получите стартовые токены.',
+  },
+  'arc.needUnlock': {
+    en: 'Unlock your token wallet first: inserting a token is signed by your key, not by us.',
+    ru: 'Сначала разблокируйте токен-кошелёк: жетон подписывается вашим ключом, а не нами.',
+  },
+  'arc.soon': { en: 'Cabinet under construction', ru: 'Автомат в разработке' },
+  'arc.ballsLeft': { en: 'Balls left', ru: 'Осталось шаров' },
+
   // ---- site token
   'tok.title': { en: 'Token wallet', ru: 'Токен-кошелёк' },
   'tok.nav': { en: 'Token', ru: 'Токен' },

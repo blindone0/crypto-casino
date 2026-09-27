@@ -252,6 +252,23 @@ CREATE TABLE IF NOT EXISTS token_nonces (
   PRIMARY KEY (pubkey, nonce)
 );
 
+-- Arcade plays. A ticket is issued when a token is burned and can report a score once.
+-- Scores never pay out: the games run in the browser, so the number is not trustworthy.
+CREATE TABLE IF NOT EXISTS arcade_plays (
+  id         INTEGER PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  pubkey     TEXT NOT NULL,
+  game       TEXT NOT NULL,
+  ticket     TEXT NOT NULL UNIQUE,
+  tokens     INTEGER NOT NULL,
+  score      INTEGER NOT NULL DEFAULT 0,
+  state      TEXT NOT NULL CHECK (state IN ('open','done','expired')),
+  created_at INTEGER NOT NULL,
+  ended_at   INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_arcade_board ON arcade_plays(game, score DESC);
+CREATE INDEX IF NOT EXISTS ix_arcade_user ON arcade_plays(user_id, game);
+
 -- Play money. Deliberately NOT in the accounts/ledger tables: demo wins must never be
 -- paid from the bankroll, and demo balances must never count as money owed to players.
 CREATE TABLE IF NOT EXISTS demo_balances (

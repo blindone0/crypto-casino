@@ -23,6 +23,16 @@ const el = (tag, attrs = {}, ...kids) => {
   return n;
 };
 
+/**
+ * replaceChildren that drops null and false, the way el() already does with its children.
+ * The native call stringifies them, so a `cond ? el(...) : null` child renders the literal
+ * word "null" on the page. It did, in the arcade panel.
+ */
+const setKids = (node, ...kids) => {
+  setKids(node, ...kids.flat().filter((k) => k != null && k !== false));
+  return node;
+};
+
 /** Same idea as el(), for the SVG namespace. */
 const svgEl = (tag, attrs = {}) => {
   const n = document.createElementNS('http://www.w3.org/2000/svg', tag);
@@ -113,7 +123,7 @@ function openModal(title, buildBody, { tabs } = {}) {
         onclick: () => {
           [...bar.children].forEach((c) => c.classList.remove('on'));
           b.classList.add('on');
-          body.replaceChildren();
+          setKids(body);
           tab.build(body);
           applyAll(body);
         },
@@ -130,14 +140,14 @@ function openModal(title, buildBody, { tabs } = {}) {
     class: 'modal-back',
     onclick: (e) => { if (e.target === back) closeModal(); },
   }, modal);
-  $('#modalRoot').replaceChildren(back);
+  setKids($('#modalRoot'), back);
   applyAll(back);
   document.addEventListener('keydown', escClose);
   return body;
 }
 const escClose = (e) => { if (e.key === 'Escape') closeModal(); };
 function closeModal() {
-  $('#modalRoot').replaceChildren();
+  setKids($('#modalRoot'));
   document.removeEventListener('keydown', escClose);
 }
 
@@ -274,9 +284,27 @@ function amountControl(initial = '0.001') {
 const statRow = (key, valueNode) => el('div', { class: 'stat-row' },
   el('span', { class: 'k', 'data-i18n': key }), el('span', { class: 'v' }, valueNode));
 
+/**
+ * The arcade has no house edge and no maximum win, because nothing there is a bet. Showing
+ * the betting panel for it printed "NaN%" against a game that cannot pay out at all.
+ */
+function arcadeInfoPanel() {
+  const info = state.arcade || {};
+  setKids($('#infoPanel'),
+    el('h3', {}, t('arc.title')),
+    el('div', { class: 'stat-row' },
+      el('span', { class: 'k' }, t('arc.cost')),
+      el('span', { class: 'v' }, `${info.tokenCost ?? '-'} ${info.symbol || ''}`)),
+    el('div', { class: 'stat-row' },
+      el('span', { class: 'k' }, t('arc.balance')),
+      el('span', { class: 'v' }, `${info.balance ?? 0} ${info.symbol || ''}`)),
+    el('p', { class: 'hint' }, t('arc.noPayout')));
+}
+
 function infoPanel(extra = []) {
+  if (state.game === 'arcade') { arcadeInfoPanel(); return; }
   const p = $('#infoPanel');
-  p.replaceChildren(
+  setKids(p, 
     el('h3', { 'data-i18n': 'bet.edge' }),
     el('div', { class: 'stat-row' },
       el('span', { class: 'k' }, t('game.' + state.game)),
@@ -348,7 +376,7 @@ function renderDice() {
     }
   });
 
-  panel.replaceChildren(
+  setKids(panel, 
     amount.node,
     el('label', { class: 'field' }, el('span', { 'data-i18n': 'dice.mode' }), mode),
     el('label', { class: 'field' },
@@ -361,7 +389,7 @@ function renderDice() {
   );
   applyAll(panel);
 
-  $('#stage').replaceChildren(
+  setKids($('#stage'), 
     el('div', { class: 'dice-readout' },
       el('div', { class: 'roll', id: 'diceRoll' }, '00.00'),
       el('div', { class: 'verdict', id: 'diceVerdict' }, '')),
@@ -428,7 +456,7 @@ function renderLimbo() {
     }
   });
 
-  panel.replaceChildren(
+  setKids(panel, 
     amount.node,
     el('label', { class: 'field' }, el('span', { 'data-i18n': 'limbo.target' }), target),
     statRow('bet.chance', chanceOut),
@@ -436,7 +464,7 @@ function renderLimbo() {
     go,
   );
   applyAll(panel);
-  $('#stage').replaceChildren(
+  setKids($('#stage'), 
     el('div', { class: 'limbo-readout' },
       el('div', { class: 'mult', id: 'limboMult' }, '1.00×'),
       el('div', { class: 'verdict muted', id: 'limboVerdict' }, '')),
@@ -495,7 +523,7 @@ function renderMines() {
     }
   });
 
-  panel.replaceChildren(
+  setKids(panel, 
     amount.node,
     el('label', { class: 'field' }, el('span', { 'data-i18n': 'mines.count' }), count),
     statRow('mines.next', nextOut),
@@ -540,7 +568,7 @@ function paintMines() {
     : (g && g.state === 'cashed' ? t('mines.cashedOut', { mult: (g.multiplier || 0).toFixed(2) })
       : (live ? `${(g.multiplier || 0).toFixed(2)}×` : t('mines.pickTile')));
 
-  $('#stage').replaceChildren(
+  setKids($('#stage'), 
     el('div', { class: 'crash-status', style: 'font-size:22px;font-family:var(--mono);padding:8px 0' }, status),
     grid,
   );
@@ -603,7 +631,7 @@ function renderCrash() {
     }
   });
 
-  panel.replaceChildren(
+  setKids(panel, 
     amount.node,
     el('label', { class: 'field' }, el('span', { 'data-i18n': 'crash.autoCashout' }), auto),
     bet, cash,
@@ -611,7 +639,7 @@ function renderCrash() {
   applyAll(panel);
   state.crashUi = { bet, cash };
 
-  $('#stage').replaceChildren(
+  setKids($('#stage'), 
     el('div', { class: 'crash-stage' },
       el('div', { class: 'crash-mult', id: 'crashMult' }, '1.00×'),
       el('div', { class: 'crash-status', id: 'crashStatus' }, t('crash.waiting')),
@@ -669,7 +697,7 @@ function connectCrash() {
   const showHistory = (hist) => {
     const box = $('#crashHist');
     if (!box || !hist) return;
-    box.replaceChildren(...hist.map((h) => el('span', {
+    setKids(box, ...hist.map((h) => el('span', {
       class: `pill ${h.crashPoint >= 2 ? 'hi' : (h.crashPoint < 1.2 ? 'lo' : '')}`,
     }, `${h.crashPoint.toFixed(2)}×`)));
   };
@@ -740,15 +768,15 @@ async function loadFeed() {
     let rows = [];
     let mine = false;
     if (state.feed === 'mine') {
-      if (!state.user) { body.replaceChildren(el('p', { class: 'hint' }, t('err.signin'))); return; }
+      if (!state.user) { setKids(body, el('p', { class: 'hint' }, t('err.signin'))); return; }
       rows = (await api('/api/me/bets?limit=40')).bets;
       mine = true;
     } else {
       const s = await api('/api/stats/recent');
       rows = state.feed === 'biggest' ? s.biggest : s.bets;
     }
-    if (!rows.length) { body.replaceChildren(el('p', { class: 'hint' }, t('feed.empty'))); return; }
-    body.replaceChildren(el('table', { class: 'grid' },
+    if (!rows.length) { setKids(body, el('p', { class: 'hint' }, t('feed.empty'))); return; }
+    setKids(body, el('table', { class: 'grid' },
       el('thead', {}, el('tr', {},
         mine ? null : el('th', { 'data-i18n': 'feed.player' }),
         el('th', { 'data-i18n': 'feed.game' }),
@@ -764,7 +792,7 @@ async function loadFeed() {
           (r.profit > 0 ? '+' : '') + fmtShort(r.profit)))))));
     applyAll(body);
   } catch {
-    body.replaceChildren(el('p', { class: 'hint' }, t('err.network')));
+    setKids(body, el('p', { class: 'hint' }, t('err.network')));
   }
 }
 
@@ -773,7 +801,7 @@ async function walletModal() {
   if (!requireLogin()) return;
 
   const depositTab = async (body) => {
-    body.replaceChildren(el('p', { class: 'hint' }, t('common.loading')));
+    setKids(body, el('p', { class: 'hint' }, t('common.loading')));
     try {
       const d = await api('/api/wallet/deposit');
       const kids = [];
@@ -822,10 +850,10 @@ async function walletModal() {
             }, '+')),
         );
       }
-      body.replaceChildren(...kids);
+      setKids(body, ...kids);
       applyAll(body);
     } catch (e) {
-      body.replaceChildren(el('p', { class: 'hint neg' }, e.message));
+      setKids(body, el('p', { class: 'hint neg' }, e.message));
     }
   };
 
@@ -839,7 +867,7 @@ async function walletModal() {
       recv.textContent = fmt(Math.max(0, units - w.withdrawalFee));
     };
     amt.addEventListener('input', recalc);
-    body.replaceChildren(
+    setKids(body, 
       el('label', { class: 'field' }, el('span', { 'data-i18n': 'wallet.destination' }), addr),
       el('label', { class: 'field' }, el('span', { 'data-i18n': 'bet.amount' }), amt),
       el('div', { class: 'stat-row' },
@@ -871,7 +899,7 @@ async function walletModal() {
   };
 
   const historyTab = async (body) => {
-    body.replaceChildren(el('p', { class: 'hint' }, t('common.loading')));
+    setKids(body, el('p', { class: 'hint' }, t('common.loading')));
     try {
       const h = await api('/api/wallet/history');
       const rows = [
@@ -883,15 +911,15 @@ async function walletModal() {
           kind: t('wallet.withdraw'), amount: -w.amount_units, at: w.requested_at, state: w.state,
         })),
       ].sort((a, b) => b.at - a.at);
-      if (!rows.length) { body.replaceChildren(el('p', { class: 'hint' }, t('feed.empty'))); return; }
-      body.replaceChildren(el('table', { class: 'grid' },
+      if (!rows.length) { setKids(body, el('p', { class: 'hint' }, t('feed.empty'))); return; }
+      setKids(body, el('table', { class: 'grid' },
         el('tbody', {}, ...rows.map((r) => el('tr', {},
           el('td', { class: 'name' }, r.kind),
           el('td', { class: r.amount > 0 ? 'pos' : 'neg' }, fmtShort(r.amount)),
           el('td', { class: 'name faint' }, r.state),
           el('td', { class: 'faint' }, new Date(r.at * 1000).toLocaleString()))))));
     } catch (e) {
-      body.replaceChildren(el('p', { class: 'hint neg' }, e.message));
+      setKids(body, el('p', { class: 'hint neg' }, e.message));
     }
   };
 
@@ -911,7 +939,7 @@ async function fairModal() {
   try {
     const f = await api('/api/fair/seed');
     const seedInput = el('input', { class: 'mono', value: f.clientSeed, maxlength: '64' });
-    body.replaceChildren(
+    setKids(body, 
       el('p', { class: 'hint', 'data-i18n': 'fair.explain' }),
       el('h3', { 'data-i18n': 'fair.serverHash' }),
       el('div', { class: 'addr' }, f.serverSeedHash),
@@ -954,7 +982,7 @@ async function fairModal() {
     );
     applyAll(body);
   } catch (e) {
-    body.replaceChildren(el('p', { class: 'hint neg' }, e.message));
+    setKids(body, el('p', { class: 'hint neg' }, e.message));
   }
 }
 
@@ -965,7 +993,7 @@ async function affiliateModal() {
   try {
     const a = await api('/api/me/affiliate');
     const me = await api('/api/me');
-    body.replaceChildren(
+    setKids(body, 
       el('h2', { 'data-i18n': 'aff.title' }),
       el('p', { class: 'hint' }, t('aff.explain', { pct: (a.commission * 100).toFixed(0) })),
       el('h3', { 'data-i18n': 'aff.link' }),
@@ -1018,7 +1046,7 @@ async function affiliateModal() {
     );
     applyAll(body);
   } catch (e) {
-    body.replaceChildren(el('p', { class: 'hint neg' }, e.message));
+    setKids(body, el('p', { class: 'hint neg' }, e.message));
   }
 }
 
@@ -1035,7 +1063,7 @@ async function limitsModal() {
       inputmode: 'decimal',
     });
     const days = el('input', { type: 'number', min: '1', max: '365', value: '7' });
-    body.replaceChildren(
+    setKids(body, 
       el('div', { class: 'stat-row' },
         el('span', { class: 'k', 'data-i18n': 'limits.playedToday' }),
         el('span', { class: 'v' }, t('limits.minutes', { n: me.play.minutes, bets: me.play.bets }))),
@@ -1069,7 +1097,7 @@ async function limitsModal() {
     );
     applyAll(body);
   } catch (e) {
-    body.replaceChildren(el('p', { class: 'hint neg' }, e.message));
+    setKids(body, el('p', { class: 'hint neg' }, e.message));
   }
 }
 
@@ -1102,7 +1130,7 @@ async function renderSlots() {
   amount.input.addEventListener('input', recalc);
   spin.addEventListener('click', () => doSpin(amount, spin));
 
-  panel.replaceChildren(
+  setKids(panel, 
     amount.node,
     statRow('slots.lines', el('span', {}, slotInfo ? String(slotInfo.lines) : '20')),
     el('div', { class: 'stat-row' },
@@ -1128,7 +1156,7 @@ async function renderSlots() {
   );
   applyAll(panel);
 
-  $('#stage').replaceChildren(
+  setKids($('#stage'), 
     el('div', { class: 'slot-banner', id: 'slotBanner' }, ''),
     el('div', { class: 'slot-cabinet' },
       el('div', { class: 'reels', id: 'reels' })),
@@ -1201,7 +1229,7 @@ async function settleReels(screen) {
 }
 
 function paintReel(reelNode, symbols, litRows) {
-  reelNode.replaceChildren(...symbols.map((sym, row) => {
+  setKids(reelNode, ...symbols.map((sym, row) => {
     const cell = el('div', { class: `cell sym-${sym} ${litRows.includes(row) ? 'win' : ''}` });
     cell.innerHTML = symbolSvg(sym, slotTheme);
     return cell;
@@ -1222,7 +1250,7 @@ function paintReels(screen, wins = []) {
       }
     }
   }
-  box.replaceChildren(...screen.map((symbols, ri) => {
+  setKids(box, ...screen.map((symbols, ri) => {
     const reel = el('div', { class: 'reel' });
     paintReel(reel, symbols, lit.get(ri) || []);
     return reel;
@@ -1407,7 +1435,7 @@ function paintPuzzle() {
       }
     });
 
-    panel.replaceChildren(
+    setKids(panel, 
       amount.node,
       el('label', { class: 'field' }, el('span', {}, t('puzzle.difficulty')), diff),
       tier ? statRow('puzzle.topPrize', el('span', {}, `${tier.complete.toFixed(2)}x`)) : null,
@@ -1429,7 +1457,7 @@ function paintPuzzle() {
         loadFeed();
       } catch (e) { toast(e.message, 'bad'); cash.disabled = false; }
     });
-    panel.replaceChildren(
+    setKids(panel, 
       statRow('bet.multiplier', el('span', {}, `${(g.multiplier || 0).toFixed(2)}x`)),
       statRow('puzzle.next', el('span', {}, g.nextMultiplier ? `${g.nextMultiplier.toFixed(2)}x` : '-')),
       statRow('puzzle.pieces', el('span', {}, String(g.remaining ?? 0))),
@@ -1486,7 +1514,7 @@ function paintPuzzle() {
       : (g.state === 'active' ? `${(g.multiplier || 0).toFixed(2)}x` : t('puzzle.pick')));
 
   const shape = cols / rows >= 1.6 ? 'widest' : (cols / rows > 1.05 ? 'wide' : '');
-  $('#stage').replaceChildren(
+  setKids($('#stage'), 
     el('div', {
       class: `puzzle-status ${g.state === 'lost' ? 'lost' : (g.state === 'cashed' ? 'won' : '')}`,
     }, status),
@@ -1602,7 +1630,7 @@ function paintPreferans() {
         deal.disabled = false;
       }
     });
-    panel.replaceChildren(amount.node, deal, el('p', { class: 'hint' }, t('pref.rules')));
+    setKids(panel, amount.node, deal, el('p', { class: 'hint' }, t('pref.rules')));
   } else if (g.state === 'trump') {
     const pick = el('div', { class: 'trump-pick' },
       ...['S', 'C', 'D', 'H'].map((suit) => el('button', {
@@ -1610,7 +1638,7 @@ function paintPreferans() {
         onclick: () => chooseTrump(suit),
       }, SUIT_GLYPH[suit])),
       el('button', { onclick: () => chooseTrump('NT') }, t('pref.noTrump')));
-    panel.replaceChildren(
+    setKids(panel, 
       el('h3', {}, t('pref.pickTrump')),
       pick,
       el('p', { class: 'hint' }, t('pref.rules')),
@@ -1621,14 +1649,14 @@ function paintPreferans() {
       disabled: (state.prefSelected || []).length === 2 ? false : 'disabled',
       onclick: doDiscard,
     }, t('pref.confirmDiscard'));
-    panel.replaceChildren(
+    setKids(panel, 
       el('h3', {}, t('pref.discardTwo')),
       el('div', { class: 'hand' }, ...(g.talon || []).map((c) => cardNode(c, { disabled: true }))),
       el('p', { class: 'hint' }, t('pref.talon')),
       confirm,
     );
   } else {
-    panel.replaceChildren(
+    setKids(panel, 
       el('div', { class: 'score-row' },
         el('span', {}, `${t('pref.you')}: `, el('b', {}, String(g.tricksWon ? g.tricksWon[0] : 0))),
         el('span', {}, `${t('pref.opponents')}: `,
@@ -1685,7 +1713,7 @@ function paintPreferans() {
         ...bh.map((c) => cardNode(c, { disabled: true, muted: true }))));
     }
   }
-  stage.replaceChildren(...kids);
+  setKids(stage, ...kids);
 
   infoPanel(prefInfo ? [
     el('h3', { style: 'margin-top:10px' }, t('pref.payTable')),
@@ -1806,7 +1834,7 @@ function paintDebertz() {
         paintDebertz();
       } catch (e) { toast(e.message, 'bad'); deal.disabled = false; }
     });
-    panel.replaceChildren(
+    setKids(panel, 
       amount.node, deal,
       el('p', { class: 'hint' }, t('deb.rules')),
       el('p', { class: 'hint neg' }, t('deb.beteWarn')),
@@ -1817,14 +1845,14 @@ function paintDebertz() {
         style: isRedSuit(suit) ? 'color:#ff6b81' : '',
         onclick: () => debChooseTrump(suit),
       }, SUIT_GLYPH[suit])));
-    panel.replaceChildren(
+    setKids(panel, 
       el('h3', {}, t('deb.pickTrump')),
       el('p', { class: 'hint' }, `${t('deb.upcard')}: ${g.upcard}`),
       pick,
       el('p', { class: 'hint' }, t('deb.rules')),
     );
   } else {
-    panel.replaceChildren(
+    setKids(panel, 
       el('div', { class: 'score-row' },
         el('span', {}, `${t('deb.you')}: `, el('b', {}, String(g.cardPoints?.[0] ?? 0))),
         el('span', {}, `${t('deb.opponent')}: `, el('b', {}, String(g.cardPoints?.[1] ?? 0)))),
@@ -1895,7 +1923,7 @@ function paintDebertz() {
     kids.push(el('div', { class: 'hand' },
       ...g.dealtHands[1].map((c) => cardNode(c, { disabled: true, muted: true }))));
   }
-  stage.replaceChildren(...kids);
+  setKids(stage, ...kids);
 
   infoPanel(debInfo ? [
     el('h3', { style: 'margin-top:10px' }, t('deb.payouts')),
@@ -1940,21 +1968,21 @@ async function tokenModal() {
   const body = openModal(t('tok.title'), (b) => b.append(el('p', { class: 'hint' }, t('common.loading'))));
 
   if (!(await tokenKeys.supported())) {
-    body.replaceChildren(el('div', { class: 'banner' }, t('tok.unsupported')));
+    setKids(body, el('div', { class: 'banner' }, t('tok.unsupported')));
     return;
   }
 
   let info;
   try { info = await api('/api/token'); } catch (e) {
-    body.replaceChildren(el('p', { class: 'hint neg' }, e.message));
+    setKids(body, el('p', { class: 'hint neg' }, e.message));
     return;
   }
   if (!info.enabled) {
-    body.replaceChildren(el('p', { class: 'hint' }, 'The site token is switched off.'));
+    setKids(body, el('p', { class: 'hint' }, 'The site token is switched off.'));
     return;
   }
 
-  body.replaceChildren();
+  setKids(body);
   body.append(el('p', { class: 'hint' }, t('tok.what')));
 
   if (!info.pubkey) {
@@ -1983,7 +2011,7 @@ function renderTokenSetup(body, info) {
       } catch (e) { toast(e.message, 'bad'); confirm.disabled = false; }
     });
 
-    body.replaceChildren(
+    setKids(body, 
       el('h3', {}, t('tok.phrase')),
       el('div', { class: 'banner' }, t('tok.phraseWarn')),
       box,
@@ -2144,13 +2172,169 @@ function renderTokenWallet(body, info) {
   );
 }
 
+
+// ----------------------------------------------------------------- arcade
+// A token-operated game room. Nothing here pays out, deliberately: the games run in the
+// browser, so the score arrives from a machine the player controls. Attaching money to an
+// unverifiable number would be farmed the same day.
+const CABINET_MODULES = {
+  pinball: () => import('./games/pinball.js'),
+};
+
+async function renderArcade() {
+  if (state.cabinet) { state.cabinet.stop(); state.cabinet = null; }
+  let info;
+  try { info = await api('/api/arcade'); } catch (e) {
+    setKids($('#stage'), el('p', { class: 'hint neg' }, e.message));
+    return;
+  }
+  state.arcade = info;
+  paintArcadeFloor();
+}
+
+function paintArcadeFloor() {
+  const info = state.arcade;
+  const panel = $('#betPanel');
+
+  setKids(panel, 
+    el('div', { class: 'stat-card' },
+      el('div', { class: 'k' }, t('arc.balance')),
+      el('div', { class: 'v pos' }, `${info.balance} ${info.symbol}`)),
+    el('p', { class: 'hint' }, t('arc.intro')),
+    !info.pubkey
+      ? el('button', { class: 'big', style: 'margin-top:10px', onclick: tokenModal }, t('tok.nav'))
+      : null,
+  );
+  applyAll(panel);
+
+  setKids($('#stage'), 
+    el('h2', { style: 'text-align:center' }, t('arc.title')),
+    el('div', { class: 'cabinets' }, ...info.games.map((g) => cabinetCard(g, info))),
+  );
+  infoPanel();
+}
+
+function cabinetCard(game, info) {
+  const playable = !!CABINET_MODULES[game.key];
+  const card = el('div', {
+    class: 'cabinet',
+    onclick: () => (playable ? insertToken(game) : toast(t('arc.soon'))),
+  },
+  el('div', { class: 'marquee' }, game.name.toUpperCase().slice(0, 14)),
+  el('h4', {}, game.name),
+  el('div', { class: 'blurb' }, playable ? game.blurb : t('arc.soon')),
+  el('div', { class: 'stat-row' },
+    el('span', { class: 'k' }, t('arc.best')),
+    el('span', { class: 'v' }, String(game.mine.best || 0))),
+  el('div', { class: 'board' },
+    el('div', {}, el('span', {}, t('arc.top')), el('span', {}, '')),
+    ...(game.top.length
+      ? game.top.map((row, i) => el('div', {},
+        el('span', {}, `${i + 1}. ${row.username}`), el('span', {}, String(row.score))))
+      : [el('div', {}, el('span', {}, t('arc.noScores')), el('span', {}, ''))])));
+  return card;
+}
+
+/**
+ * Insert a token: sign the spend with the player key, burn it on the chain, then start
+ * the cabinet. The signature is the point. Without it the operator could charge accounts
+ * for plays nobody started.
+ */
+async function insertToken(game) {
+  if (!requireLogin()) return;
+  const info = state.arcade;
+  if (!info.pubkey) { toast(t('arc.needTokens'), 'bad'); tokenModal(); return; }
+  if (info.balance < info.tokenCost) { toast(t('arc.needTokens'), 'bad'); return; }
+  if (!tokenKey || tokenKey.publicKey !== info.pubkey) {
+    toast(t('arc.needUnlock'), 'warn');
+    tokenModal();
+    return;
+  }
+
+  try {
+    const fresh = await api('/api/arcade');
+    const spend = {
+      from: tokenKey.publicKey, game: game.key, amount: fresh.tokenCost, nonce: fresh.nextNonce,
+    };
+    const sig = await tokenKeys.signSpend(tokenKey, spend);
+    const play = await api('/api/arcade/play', { method: 'POST', body: { ...spend, sig } });
+    audio.sfx('click');
+    startCabinet(game, play);
+  } catch (e) {
+    toast(e.message, 'bad');
+  }
+}
+
+async function startCabinet(game, play) {
+  const mod = await CABINET_MODULES[game.key]();
+  const canvas = el('canvas');
+  const scoreOut = el('b', {}, '0');
+  const ballsOut = el('b', {}, '3');
+
+  setKids($('#stage'), 
+    el('div', { class: 'arcade-screen' },
+      el('div', { class: 'arcade-hud' },
+        el('span', {}, 'SCORE ', scoreOut),
+        el('span', {}, `${t('arc.ballsLeft')} `, ballsOut)),
+      canvas,
+      el('div', { class: 'arcade-controls' }, mod.meta.controls)),
+  );
+
+  setKids($('#betPanel'), 
+    el('div', { class: 'stat-card' },
+      el('div', { class: 'k' }, game.name),
+      el('div', { class: 'v' }, scoreOut.textContent)),
+    el('p', { class: 'hint' }, mod.meta.controls),
+    el('button', {
+      class: 'big', style: 'margin-top:10px',
+      onclick: () => { if (state.cabinet) state.cabinet.stop(); renderArcade(); },
+    }, t('arc.back')),
+  );
+
+  let finished = false;
+  const finish = async (score) => {
+    if (finished) return;
+    finished = true;
+    audio.sfx('lose');
+    let result = null;
+    try {
+      result = await api('/api/arcade/score', { method: 'POST', body: { ticket: play.ticket, score } });
+    } catch (e) { toast(e.message, 'bad'); }
+    showGameOver(game, score, result);
+  };
+
+  state.cabinet = mod.start(canvas, {
+    onScore: (s) => { scoreOut.textContent = String(s); },
+    onBall: (n) => { ballsOut.textContent = String(Math.max(0, n)); },
+    onEnd: finish,
+  });
+  canvas.focus?.();
+}
+
+function showGameOver(game, score, result) {
+  const best = result ? result.personalBest : 0;
+  setKids($('#stage'), 
+    el('div', { class: 'arcade-screen' },
+      el('div', { class: 'crash-mult busted', style: 'font-size:46px' }, String(score)),
+      el('div', { class: 'crash-status' }, t('arc.gameOver', { n: score })),
+      score > 0 && score >= best
+        ? el('div', { class: 'crash-status pos' }, t('arc.newBest'))
+        : null,
+      el('div', { class: 'row' },
+        el('button', { class: 'primary', onclick: () => insertToken(game) }, t('arc.again')),
+        el('button', { onclick: renderArcade }, t('arc.back')))),
+  );
+  loadFeed();
+}
+
 // ------------------------------------------------------------------- boot
-const GAMES = ['dice', 'limbo', 'mines', 'crash', 'slots', 'puzzle', 'preferans', 'debertz'];
+const GAMES = ['dice', 'limbo', 'mines', 'crash', 'slots', 'puzzle', 'preferans', 'debertz', 'arcade'];
 
 function renderGame() {
   if (state.es && state.game !== 'crash') { state.es.close(); state.es = null; }
+  if (state.cabinet && state.game !== 'arcade') { state.cabinet.stop(); state.cabinet = null; }
   const nav = $('#navGames');
-  nav.replaceChildren(...GAMES.map((g) => el('button', {
+  setKids(nav, ...GAMES.map((g) => el('button', {
     class: `tiny ${state.game === g ? 'on' : ''}`,
     style: state.game === g ? 'background:var(--panel);border-color:var(--line)' : 'background:transparent;border-color:transparent;color:var(--text-dim)',
     onclick: () => { state.game = g; renderGame(); },
@@ -2163,6 +2347,7 @@ function renderGame() {
   else if (state.game === 'puzzle') renderPuzzle();
   else if (state.game === 'preferans') renderPreferans();
   else if (state.game === 'debertz') renderDebertz();
+  else if (state.game === 'arcade') renderArcade();
   else renderCrash();
 }
 
@@ -2188,7 +2373,7 @@ async function refreshMe() {
 function renderBanners() {
   const box = $('#banners');
   if (!box) return;
-  box.replaceChildren();
+  setKids(box);
   if (state.wallet === 'demo') {
     box.append(el('div', { class: 'banner practice' },
       t('demo.banner'), ' ',
@@ -2209,7 +2394,7 @@ function renderBanners() {
 
 async function boot() {
   const sel = $('#langSelect');
-  sel.replaceChildren(...LANGS.map((l) => el('option', { value: l.code }, l.label)));
+  setKids(sel, ...LANGS.map((l) => el('option', { value: l.code }, l.label)));
 
   try {
     state.cfg = await api('/api/config');

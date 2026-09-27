@@ -732,3 +732,45 @@ body.russian .bigwin .amount { color: #ffe0a8; text-shadow: 0 0 44px rgba(232, 1
 .verify-result { font-size: 13px; padding: 10px 12px; border-radius: var(--radius-sm); margin-top: 10px; }
 .verify-result.ok { background: #0e2b21; border: 1px solid #1d6b52; color: var(--win); }
 .verify-result.bad { background: #2a1219; border: 1px solid #6b2734; color: var(--danger); }
+
+/* ---------------------------------------------------------------- arcade */
+.cabinets { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+.cabinet {
+  background: linear-gradient(180deg, #1b1a28 0%, #101018 100%);
+  border: 1px solid #2f2d44; border-radius: var(--radius);
+  padding: 16px; cursor: pointer;
+  transition: border-color .15s, transform .12s, box-shadow .15s;
+}
+.cabinet:hover {
+  border-color: #5fd6ff; transform: translateY(-3px);
+  box-shadow: 0 10px 30px rgba(95, 214, 255, .14);
+}
+.cabinet h4 {
+  margin: 0 0 6px; font-family: var(--serif); font-size: 16px; color: #8fe3ff;
+}
+.cabinet .blurb { font-size: 12px; color: var(--text-dim); min-height: 32px; }
+.cabinet .marquee {
+  height: 54px; border-radius: 6px; margin-bottom: 10px;
+  background: linear-gradient(180deg, #24243a, #0e0e18);
+  border: 1px solid #343252;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 22px; color: #5fd6ff;
+  text-shadow: 0 0 14px rgba(95, 214, 255, .55);
+}
+.cabinet .board { margin-top: 10px; font-size: 11px; }
+.cabinet .board div { display: flex; justify-content: space-between; color: var(--text-faint); }
+.arcade-screen {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+.arcade-screen canvas {
+  max-width: 100%; height: auto; border-radius: 10px;
+  border: 1px solid #2f2d44; background: #0a1420;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, .6);
+  touch-action: none;
+}
+.arcade-hud {
+  display: flex; gap: 18px; font-family: var(--mono); font-size: 13px;
+  color: var(--text-dim); font-variant-numeric: tabular-nums;
+}
+.arcade-hud b { color: #8fe3ff; }
+.arcade-controls { font-size: 12px; color: var(--text-faint); text-align: center; }

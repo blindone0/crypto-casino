@@ -162,6 +162,25 @@ async function signTransfer(key, tx) {
   return hex(sig);
 }
 
+/** What an arcade spend signature covers. Distinct from a transfer so the two cannot
+ *  be swapped: a signature authorising ten tokens for a pinball play must not also
+ *  authorise sending ten tokens to a stranger. */
+const spendPayload = (spend) => ({
+  chain: 'nullstake-token-v1',
+  type: 'arcade',
+  from: spend.from,
+  game: spend.game,
+  amount: spend.amount,
+  nonce: spend.nonce,
+});
+
+/** Sign an arcade token spend. */
+async function signSpend(key, spend) {
+  const bytes = new TextEncoder().encode(canonical(spendPayload(spend)));
+  const sig = await crypto.subtle.sign({ name: 'Ed25519' }, key.privateKey, bytes);
+  return hex(sig);
+}
+
 /** Verify a signature against a raw public key. Used by the chain verifier. */
 async function verifySignature(pubHex, payload, sigHex) {
   try {
@@ -194,6 +213,7 @@ async function sha256Hex(text) {
 
 export {
   WORDS, PHRASE_LENGTH, supported, generatePhrase, validatePhrase, normalise,
-  seedFromPhrase, keyFromPhrase, signTransfer, verifySignature, verifyOverString,
+  seedFromPhrase, keyFromPhrase, signTransfer, signSpend, spendPayload,
+  verifySignature, verifyOverString,
   canonical, transferPayload, sha256Hex, hex, unhex,
 };
