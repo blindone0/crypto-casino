@@ -95,6 +95,8 @@ const STRINGS = {
   'slots.ofAKind': { en: '3 / 4 / 5 of a kind', ru: '3 / 4 / 5 подряд' },
   'slots.perLineBet': { en: 'Payouts are multiples of the line bet', ru: 'Выплаты кратны ставке на линию' },
   'slots.bigWin': { en: 'Big win! {mult}x', ru: 'Крупный выигрыш! {mult}x' },
+  'slots.bigWinLabel': { en: 'Big win', ru: 'Крупный выигрыш' },
+  'slots.returned': { en: 'returned', ru: 'возврат' },
 
   // ---- preferans
   'game.preferans': { en: 'Preferans', ru: 'Преферанс' },

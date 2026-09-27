@@ -1,4 +1,5 @@
 import { LANGS, t, setLocale, getLocale, applyAll } from './i18n.js';
+import { ensureSymbolDefs, symbolSvg } from './symbols.js';
 
 // ---------------------------------------------------------------- plumbing
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1008,15 +1009,11 @@ async function limitsModal() {
 
 
 // ------------------------------------------------------------------ slots
-// Glyphs must be distinguishable at a glance: two chess queens (U+265B / U+2655) look
-// identical on a reel, so the paying symbols use clearly different shapes instead.
-const SLOT_GLYPH = {
-  T: '10', J: 'J', Q: 'Q', K: 'K', A: 'A',
-  BELL: '\u25B2', GEM: '\u25C6', CROWN: '\u2605', WILD: 'W', SCAT: '\u26A1',
-};
 let slotInfo = null;
+let slotBusy = false;
 
 async function renderSlots() {
+  ensureSymbolDefs();
   const panel = $('#betPanel');
   const amount = amountControl('0.20');
   const spin = el('button', { class: 'primary big' }, t('slots.spin'));
@@ -1027,26 +1024,7 @@ async function renderSlots() {
     perLine.textContent = slotInfo ? (amt / slotInfo.lines).toFixed(8) : '-';
   };
   amount.input.addEventListener('input', recalc);
-
-  spin.addEventListener('click', async () => {
-    if (!requireLogin()) return;
-    spin.disabled = true;
-    setReelsSpinning(true);
-    try {
-      const out = await api('/api/bet/slots', { method: 'POST', body: { amount: amount.get() } });
-      // Let the blur read as a spin before the result lands.
-      await new Promise((r) => setTimeout(r, 320));
-      await showSlotResult(out);
-      state.user.balance = out.balance;
-      setBalance(out.balance, out.profit);
-      loadFeed();
-    } catch (e) {
-      toast(e.message, 'bad');
-      setReelsSpinning(false);
-    } finally {
-      spin.disabled = false;
-    }
-  });
+  spin.addEventListener('click', () => doSpin(amount, spin));
 
   panel.replaceChildren(
     amount.node,
@@ -1064,7 +1042,8 @@ async function renderSlots() {
 
   $('#stage').replaceChildren(
     el('div', { class: 'slot-banner', id: 'slotBanner' }, ''),
-    el('div', { class: 'reels', id: 'reels' }),
+    el('div', { class: 'slot-cabinet' },
+      el('div', { class: 'reels', id: 'reels' })),
   );
 
   if (!slotInfo) {
@@ -1079,32 +1058,145 @@ async function renderSlots() {
   ]);
 }
 
-const blankScreen = () => Array.from({ length: 5 }, () => ['T', 'J', 'Q']);
+const blankScreen = () => Array.from({ length: 5 }, (_, i) =>
+  [['A', 'K', 'Q'], ['GEM', 'J', 'BELL'], ['WILD', 'A', 'T'], ['K', 'CROWN', 'Q'], ['J', 'T', 'A']][i]);
+
+async function doSpin(amount, spin) {
+  if (!requireLogin() || slotBusy) return;
+  slotBusy = true;
+  spin.disabled = true;
+  clearPaylines();
+  removeBigWin();
+  setReelsSpinning(true);
+
+  try {
+    const out = await api('/api/bet/slots', { method: 'POST', body: { amount: amount.get() } });
+    // Stop the reels left to right. The stagger is what makes a spin feel like a spin
+    // rather than a screen swap, and it is the moment the last reel matters.
+    await settleReels(out.screen);
+    await showSlotResult(out);
+    state.user.balance = out.balance;
+    setBalance(out.balance, out.profit);
+    loadFeed();
+  } catch (e) {
+    toast(e.message, 'bad');
+    setReelsSpinning(false);
+  } finally {
+    slotBusy = false;
+    spin.disabled = false;
+  }
+}
 
 function setReelsSpinning(on) {
-  for (const c of document.querySelectorAll('#reels .cell')) c.classList.toggle('spinning', on);
+  for (const r of document.querySelectorAll('#reels .reel')) {
+    r.classList.toggle('spinning', on);
+    if (!on) r.classList.remove('landing');
+  }
+}
+
+/** Land each reel in turn, showing its final symbols as it stops. */
+async function settleReels(screen) {
+  const reels = [...document.querySelectorAll('#reels .reel')];
+  if (!reels.length) { paintReels(screen); return; }
+  await new Promise((r) => setTimeout(r, 260));
+  for (const [i, reel] of reels.entries()) {
+    reel.classList.remove('spinning');
+    reel.classList.add('landing');
+    paintReel(reel, screen[i], []);
+    await new Promise((r) => setTimeout(r, 130));
+  }
+}
+
+function paintReel(reelNode, symbols, litRows) {
+  reelNode.replaceChildren(...symbols.map((sym, row) => {
+    const cell = el('div', { class: `cell sym-${sym} ${litRows.includes(row) ? 'win' : ''}` });
+    cell.innerHTML = symbolSvg(sym);
+    return cell;
+  }));
 }
 
 /** Draw the 5x3 window, highlighting the cells that form a winning line. */
 function paintReels(screen, wins = []) {
   const box = $('#reels');
   if (!box) return;
-  const lit = new Set();
+  const lit = new Map();
   if (slotInfo) {
     for (const w of wins) {
       const rows = slotInfo.paylines[w.line];
-      for (let reel = 0; reel < w.count; reel += 1) lit.add(`${reel}:${rows[reel]}`);
+      for (let reel = 0; reel < w.count; reel += 1) {
+        if (!lit.has(reel)) lit.set(reel, []);
+        lit.get(reel).push(rows[reel]);
+      }
     }
   }
-  box.replaceChildren(...screen.map((reel, ri) => el('div', { class: 'reel' },
-    ...reel.map((sym, row) => el('div', {
-      class: `cell sym-${sym} ${lit.has(`${ri}:${row}`) ? 'win' : ''}`,
-    }, SLOT_GLYPH[sym] || sym)))));
+  box.replaceChildren(...screen.map((symbols, ri) => {
+    const reel = el('div', { class: 'reel' });
+    paintReel(reel, symbols, lit.get(ri) || []);
+    return reel;
+  }));
+}
+
+function clearPaylines() {
+  const old = document.getElementById('paylineLayer');
+  if (old) old.remove();
+}
+
+/**
+ * Trace each winning line across the reels it actually covers. Cell positions are
+ * measured from the DOM rather than recomputed from the grid maths, so the overlay
+ * stays correct at any width.
+ */
+function drawPaylines(wins) {
+  clearPaylines();
+  const box = $('#reels');
+  if (!box || !slotInfo || !wins.length) return;
+
+  const reels = [...box.querySelectorAll('.reel')];
+  const base = box.getBoundingClientRect();
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('id', 'paylineLayer');
+  svg.setAttribute('class', 'payline-layer');
+  svg.setAttribute('viewBox', `0 0 ${base.width} ${base.height}`);
+  svg.setAttribute('preserveAspectRatio', 'none');
+
+  for (const w of wins.slice(0, 6)) {
+    const rows = slotInfo.paylines[w.line];
+    const points = [];
+    for (let reel = 0; reel < w.count; reel += 1) {
+      const cell = reels[reel]?.children[rows[reel]];
+      if (!cell) continue;
+      const r = cell.getBoundingClientRect();
+      points.push(`${(r.left - base.left + r.width / 2).toFixed(1)},${(r.top - base.top + r.height / 2).toFixed(1)}`);
+    }
+    if (points.length < 2) continue;
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', `M${points.join(' L')}`);
+    svg.appendChild(path);
+  }
+  box.appendChild(svg);
+}
+
+function removeBigWin() {
+  const old = document.getElementById('bigWin');
+  if (old) old.remove();
+}
+
+function showBigWin(profit, multiplier) {
+  const stage = $('#stage');
+  if (!stage) return;
+  const node = el('div', { class: 'bigwin', id: 'bigWin' },
+    el('div', { class: 'label' }, t('slots.bigWinLabel')),
+    el('div', { class: 'amount' }, `+${fmtShort(profit)}`),
+    el('div', { class: 'label' }, `${multiplier.toFixed(2)}x`));
+  node.addEventListener('click', removeBigWin);
+  stage.appendChild(node);
+  setTimeout(removeBigWin, 2600);
 }
 
 async function showSlotResult(out) {
   setReelsSpinning(false);
   paintReels(out.screen, out.wins);
+  drawPaylines(out.wins);
   const banner = $('#slotBanner');
   if (!banner) return;
 
@@ -1113,20 +1205,28 @@ async function showSlotResult(out) {
     banner.textContent = t('slots.freeSpins', { n: out.freeSpinsAwarded });
     // Replay the free spins one at a time so they are visible, not just totalled.
     for (const [i, fs] of out.freeSpins.entries()) {
-      await new Promise((r) => setTimeout(r, 480));
+      await new Promise((r) => setTimeout(r, 520));
       paintReels(fs.screen, fs.wins);
+      drawPaylines(fs.wins);
       banner.textContent = t('slots.freeSpinRun', { i: i + 1, n: out.freeSpins.length });
     }
-    await new Promise((r) => setTimeout(r, 380));
+    await new Promise((r) => setTimeout(r, 420));
     // Come back to the triggering spin: the banner reports the whole round, so leaving
     // the last free spin on screen makes the picture disagree with the number.
     paintReels(out.screen, out.wins);
+    drawPaylines(out.wins);
   }
 
-  if (out.payout > 0) {
+  // A payout below the stake is still a net loss. Dressing that up with a green plus
+  // sign is the sort of thing that makes a player distrust every number on the page, so
+  // the three cases are shown honestly and differently.
+  if (out.profit > 0) {
     banner.className = 'slot-banner win';
     banner.textContent = `+${fmtShort(out.profit)}  (${out.multiplier.toFixed(2)}x)`;
-    if (out.multiplier >= 10) toast(t('slots.bigWin', { mult: out.multiplier.toFixed(2) }));
+    if (out.multiplier >= 10) showBigWin(out.profit, out.multiplier);
+  } else if (out.payout > 0) {
+    banner.className = 'slot-banner';
+    banner.textContent = `${fmtShort(out.payout)} ${t('slots.returned')}  (${out.multiplier.toFixed(2)}x)`;
   } else {
     banner.className = 'slot-banner';
     banner.textContent = '';
@@ -1134,25 +1234,32 @@ async function showSlotResult(out) {
 }
 
 function slotPaytableModal() {
+  ensureSymbolDefs();
   openModal(t('slots.paytable'), (body) => {
     if (!slotInfo) { body.append(el('p', { class: 'hint' }, t('common.loading'))); return; }
+    const symCell = (key) => {
+      const d = el('div', { class: 'sym' });
+      d.innerHTML = symbolSvg(key);
+      return d;
+    };
     const rows = [el('div', { class: 'sym' }, ''),
       el('div', { class: 'n' }, '3'), el('div', { class: 'n' }, '4'), el('div', { class: 'n' }, '5')];
     for (const [sym, pays] of Object.entries(slotInfo.pays)) {
-      rows.push(el('div', { class: 'sym' }, SLOT_GLYPH[sym] || sym));
+      rows.push(symCell(sym));
       for (const p of pays) rows.push(el('div', { class: 'n' }, p.toFixed(2)));
     }
     body.append(
       el('p', { class: 'hint' }, t('slots.perLineBet')),
       el('div', { class: 'paytable-grid' }, ...rows),
-      el('h3', { style: 'margin-top:16px' }, t('slots.scatterPays')),
+      el('h3', { style: 'margin-top:18px' }, t('slots.scatterPays')),
       el('div', { class: 'paytable-grid' },
         ...Object.entries(slotInfo.scatter).flatMap(([n, v]) => [
-          el('div', { class: 'sym' }, `${SLOT_GLYPH.SCAT} x${n}`),
+          symCell('SCAT'),
+          el('div', { class: 'n' }, `x${n}`),
           el('div', { class: 'n' }, v.toFixed(2)),
-          el('div', {}), el('div', {}),
+          el('div', {}),
         ])),
-      el('div', { class: 'stat-row', style: 'margin-top:14px' },
+      el('div', { class: 'stat-row', style: 'margin-top:16px' },
         el('span', { class: 'k' }, t('slots.rtp')),
         el('span', { class: 'v pos' }, `${(slotInfo.rtp * 100).toFixed(2)}%`)),
     );
