@@ -124,6 +124,39 @@ const STRINGS = {
   },
   'puzzle.topPrize': { en: 'Complete the picture', ru: 'Собрать всю картину' },
 
+  // ---- debertz
+  'game.debertz': { en: 'Debertz', ru: 'Деберц' },
+  'deb.deal': { en: 'Deal', ru: 'Раздать' },
+  'deb.newHand': { en: 'New hand', ru: 'Новая раздача' },
+  'deb.upcard': { en: 'Turned up', ru: 'Открытая карта' },
+  'deb.pickTrump': { en: 'Name trumps', ru: 'Назовите козырь' },
+  'deb.trump': { en: 'Trumps', ru: 'Козырь' },
+  'deb.you': { en: 'You', ru: 'Вы' },
+  'deb.opponent': { en: 'Opponent', ru: 'Соперник' },
+  'deb.yourTurn': { en: 'Your turn', ru: 'Ваш ход' },
+  'deb.waiting': { en: 'Opponent playing…', ru: 'Ходит соперник…' },
+  'deb.trick': { en: 'Trick {n} of 9', ru: 'Взятка {n} из 9' },
+  'deb.points': { en: 'Points', ru: 'Очки' },
+  'deb.meld': { en: 'Your run', ru: 'Ваша последовательность' },
+  'deb.bella': { en: 'Bella (K+Q of trumps)', ru: 'Белла (К+Д козыря)' },
+  'deb.won': { en: 'Won by {margin} — {mult}x', ru: 'Выигрыш на {margin} — {mult}x' },
+  'deb.push': { en: 'Won narrowly — stake returned', ru: 'Выигрыш впритык — ставка возвращена' },
+  'deb.bete': { en: 'Bete! You named trumps and fell short.', ru: 'Бете! Вы назвали козырь и не добрали.' },
+  'deb.payouts': { en: 'Payout by margin', ru: 'Выплата по разнице' },
+  'deb.margin': { en: 'Margin', ru: 'Разница' },
+  'deb.rules': {
+    en: 'You name trumps, so you must finish ahead. In trumps the Jack is highest and the Nine second; elsewhere the Ace leads. Follow suit, trump if you cannot, and overtrump if the trick is already trumped.',
+    ru: 'Вы называете козырь, поэтому обязаны выйти вперёд. В козырях старший — валет, затем девятка; в остальных мастях старший — туз. Ходите в масть, иначе козыряйте, а если взятка уже бита — перебивайте.',
+  },
+  'deb.beteWarn': {
+    en: 'Fall short of the opponent and you lose everything, not just the difference.',
+    ru: 'Не обгоните соперника — потеряете всё, а не только разницу.',
+  },
+  'deb.skillNote': {
+    en: 'Payouts are calibrated against the bot, so playing better than it improves your return.',
+    ru: 'Выплаты рассчитаны по игре бота, поэтому играя лучше него, вы повышаете свой возврат.',
+  },
+
   // ---- preferans
   'game.preferans': { en: 'Preferans', ru: 'Преферанс' },
   'pref.deal': { en: 'Deal', ru: 'Раздать' },

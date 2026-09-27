@@ -1734,8 +1734,200 @@ async function playPrefCard(card) {
   } catch (e) { toast(e.message, 'bad'); }
 }
 
+
+// ---------------------------------------------------------------- debertz
+// Trick strength, mirrored from the server so illegal cards can be greyed out rather
+// than rejected after the click. The trump order is the whole character of the game:
+// the Jack is highest and the Nine second, which is true in no other suit.
+const DEB_TRUMP_ORDER = ['7', '8', 'Q', 'K', 'T', 'A', '9', 'J'];
+const DEB_PLAIN_ORDER = ['7', '8', '9', 'J', 'Q', 'K', 'T', 'A'];
+const debStrength = (card, trump) => (card[1] === trump
+  ? DEB_TRUMP_ORDER.indexOf(card[0])
+  : DEB_PLAIN_ORDER.indexOf(card[0]));
+
+/** Which cards may legally be played now. Mirrors src/games/debertz.js exactly. */
+function debLegal(g) {
+  const hand = g.hand || [];
+  const trick = g.trick || [];
+  const trump = g.trump;
+  if (!trick.length) return hand;
+  const led = trick[0].card[1];
+
+  const following = hand.filter((c) => c[1] === led);
+  if (following.length) {
+    if (led === trump) {
+      const best = Math.max(...trick.filter((p) => p.card[1] === trump)
+        .map((p) => debStrength(p.card, trump)), -1);
+      const higher = following.filter((c) => debStrength(c, trump) > best);
+      return higher.length ? higher : following;
+    }
+    return following;
+  }
+  const trumps = hand.filter((c) => c[1] === trump);
+  if (!trumps.length) return hand;
+  const played = trick.filter((p) => p.card[1] === trump);
+  if (!played.length) return trumps;
+  const best = Math.max(...played.map((p) => debStrength(p.card, trump)));
+  const higher = trumps.filter((c) => debStrength(c, trump) > best);
+  return higher.length ? higher : hand;
+}
+
+let debInfo = null;
+
+async function renderDebertz() {
+  if (!debInfo) {
+    try { debInfo = await api('/api/bet/debertz/info'); } catch { /* offline */ }
+  }
+  let game = { state: 'none' };
+  if (state.user) {
+    try { game = await api('/api/bet/debertz/current'); } catch { /* nothing open */ }
+  }
+  state.deb = game;
+  paintDebertz();
+}
+
+function paintDebertz() {
+  const g = state.deb || { state: 'none' };
+  const panel = $('#betPanel');
+  const stage = $('#stage');
+
+  if (g.state === 'none' || g.state === 'done') {
+    const amount = amountControl('0.50');
+    const deal = el('button', { class: 'primary big' },
+      t(g.state === 'done' ? 'deb.newHand' : 'deb.deal'));
+    deal.addEventListener('click', async () => {
+      if (!requireLogin()) return;
+      deal.disabled = true;
+      try {
+        state.deb = await api('/api/bet/debertz/start', { method: 'POST', body: { amount: amount.get() } });
+        setBalance(state.deb.balance, -1);
+        paintDebertz();
+      } catch (e) { toast(e.message, 'bad'); deal.disabled = false; }
+    });
+    panel.replaceChildren(
+      amount.node, deal,
+      el('p', { class: 'hint' }, t('deb.rules')),
+      el('p', { class: 'hint neg' }, t('deb.beteWarn')),
+    );
+  } else if (g.state === 'trump') {
+    const pick = el('div', { class: 'trump-pick' },
+      ...['S', 'C', 'D', 'H'].map((suit) => el('button', {
+        style: isRedSuit(suit) ? 'color:#ff6b81' : '',
+        onclick: () => debChooseTrump(suit),
+      }, SUIT_GLYPH[suit])));
+    panel.replaceChildren(
+      el('h3', {}, t('deb.pickTrump')),
+      el('p', { class: 'hint' }, `${t('deb.upcard')}: ${g.upcard}`),
+      pick,
+      el('p', { class: 'hint' }, t('deb.rules')),
+    );
+  } else {
+    panel.replaceChildren(
+      el('div', { class: 'score-row' },
+        el('span', {}, `${t('deb.you')}: `, el('b', {}, String(g.cardPoints?.[0] ?? 0))),
+        el('span', {}, `${t('deb.opponent')}: `, el('b', {}, String(g.cardPoints?.[1] ?? 0)))),
+      el('p', { class: 'hint' }, t('deb.trick', { n: Math.min(9, (g.trickNumber ?? 0) + 1) })),
+      el('p', { class: 'hint' }, g.yourTurn ? t('deb.yourTurn') : t('deb.waiting')),
+      el('div', { class: 'stat-row' },
+        el('span', { class: 'k' }, t('deb.trump')),
+        el('span', { class: 'v' }, SUIT_GLYPH[g.trump] || '-')),
+      g.meld?.value
+        ? statRow('deb.meld', el('span', {}, `${g.meld.value}`))
+        : null,
+      g.bella ? statRow('deb.bella', el('span', {}, '20')) : null,
+    );
+  }
+  applyAll(panel);
+
+  // ---- stage
+  const kids = [];
+  if (g.state === 'done') {
+    const r = g.result || {};
+    const text = r.bete ? t('deb.bete')
+      : (g.multiplier > 1
+        ? t('deb.won', { margin: r.margin, mult: (g.multiplier || 0).toFixed(2) })
+        : t('deb.push'));
+    kids.push(el('div', {
+      class: `crash-status ${r.bete ? 'neg' : (g.multiplier > 1 ? 'pos' : '')}`,
+      style: 'font-size:18px;padding:8px 0',
+    }, text));
+    if (r.totals) {
+      kids.push(el('div', { class: 'score-row', style: 'margin-bottom:10px' },
+        el('span', {}, `${t('deb.you')}: `, el('b', {}, String(r.totals[0]))),
+        el('span', {}, `${t('deb.opponent')}: `, el('b', {}, String(r.totals[1])))));
+    }
+  }
+
+  if (g.state === 'trump') {
+    kids.push(el('div', { class: 'trick-area' },
+      el('div', { class: 'trick-slot' },
+        el('div', { class: 'who' }, t('deb.upcard')),
+        cardNode(g.upcard, { disabled: true }))));
+  }
+
+  if (g.state === 'playing' || g.state === 'done') {
+    const trick = g.trick || [];
+    kids.push(el('div', { class: 'trick-area' },
+      ...[0, 1].map((slot) => {
+        const played = trick.find((x) => x.seat === slot);
+        return el('div', { class: 'trick-slot' },
+          el('div', { class: 'who' }, slot === 0 ? t('deb.you') : t('deb.opponent')),
+          played ? cardNode(played.card, { disabled: true }) : el('div', { class: 'empty-slot' }));
+      })));
+  }
+
+  if (g.hand?.length) {
+    const playable = g.state === 'playing' && g.yourTurn;
+    const legal = playable ? new Set(debLegal(g)) : null;
+    kids.push(el('div', { class: 'hand' }, ...g.hand.map((c) => {
+      const canPlay = playable && legal.has(c);
+      return cardNode(c, {
+        disabled: !canPlay,
+        muted: playable && !canPlay,
+        onclick: canPlay ? () => debPlay(c) : undefined,
+      });
+    })));
+  }
+  if (g.state === 'done' && g.dealtHands) {
+    kids.push(el('p', { class: 'hint', style: 'text-align:center' }, t('deb.opponent')));
+    kids.push(el('div', { class: 'hand' },
+      ...g.dealtHands[1].map((c) => cardNode(c, { disabled: true, muted: true }))));
+  }
+  stage.replaceChildren(...kids);
+
+  infoPanel(debInfo ? [
+    el('h3', { style: 'margin-top:10px' }, t('deb.payouts')),
+    ...debInfo.bands.map((b, i) => el('div', { class: 'stat-row' },
+      el('span', { class: 'k' }, `${t('deb.margin')} ≥ ${b}`),
+      el('span', { class: 'v' }, `${debInfo.pays[i].toFixed(2)}x`))),
+    el('p', { class: 'hint' }, t('deb.skillNote')),
+  ] : []);
+}
+
+async function debChooseTrump(trump) {
+  try {
+    state.deb = await api('/api/bet/debertz/trump', { method: 'POST', body: { trump } });
+    paintDebertz();
+    audio.sfx('card');
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
+async function debPlay(card) {
+  try {
+    const out = await api('/api/bet/debertz/play', { method: 'POST', body: { card } });
+    state.deb = out;
+    paintDebertz();
+    audio.sfx('card');
+    if (out.finished) {
+      setBalance(out.balance, out.profit);
+      audio.sfx(out.outcome === 'won' ? 'win' : (out.outcome === 'push' ? 'click' : 'lose'));
+      loadFeed();
+    }
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
 // ------------------------------------------------------------------- boot
-const GAMES = ['dice', 'limbo', 'mines', 'crash', 'slots', 'puzzle', 'preferans'];
+const GAMES = ['dice', 'limbo', 'mines', 'crash', 'slots', 'puzzle', 'preferans', 'debertz'];
 
 function renderGame() {
   if (state.es && state.game !== 'crash') { state.es.close(); state.es = null; }
@@ -1752,6 +1944,7 @@ function renderGame() {
   else if (state.game === 'slots') renderSlots();
   else if (state.game === 'puzzle') renderPuzzle();
   else if (state.game === 'preferans') renderPreferans();
+  else if (state.game === 'debertz') renderDebertz();
   else renderCrash();
 }
 

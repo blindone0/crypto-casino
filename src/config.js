@@ -41,6 +41,10 @@ const DEFAULTS = {
     // the bot erodes it, a weaker one loses more. Keep it wide to absorb that, and watch
     // the per-game hold in the admin panel.
     preferans: 0.05,
+    // Debertz is skill-dependent for the same reason Preferans is, and the chooser wins
+    // about four hands in five, so the edge is wide to absorb a player who is better
+    // than the bot the payouts were priced against.
+    debertz: 0.05,
   },
 
   // ---- RISK CONTROL ----------------------------------------------------

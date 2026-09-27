@@ -194,6 +194,31 @@ CREATE TABLE IF NOT EXISTS puzzle_games (
 );
 CREATE INDEX IF NOT EXISTS ix_puzzle_active ON puzzle_games(user_id, state);
 
+-- One Debertz hand in progress. The bot's cards stay server-side until the hand ends.
+CREATE TABLE IF NOT EXISTS debertz_games (
+  id          INTEGER PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  stake       INTEGER NOT NULL,
+  hands       TEXT NOT NULL,
+  upcard      TEXT NOT NULL,
+  trump       TEXT,
+  state       TEXT NOT NULL CHECK (state IN ('trump','playing','done')),
+  mode        TEXT NOT NULL DEFAULT 'real',
+  trick       TEXT NOT NULL DEFAULT '[]',
+  turn        INTEGER NOT NULL DEFAULT 1,
+  card_points TEXT NOT NULL DEFAULT '[0,0]',
+  trick_no    INTEGER NOT NULL DEFAULT 0,
+  last_winner INTEGER NOT NULL DEFAULT 1,
+  log         TEXT NOT NULL DEFAULT '[]',
+  payout      INTEGER NOT NULL DEFAULT 0,
+  seed_id     INTEGER NOT NULL REFERENCES server_seeds(id),
+  nonce       INTEGER NOT NULL,
+  client_seed TEXT NOT NULL,
+  created_at  INTEGER NOT NULL,
+  ended_at    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_debertz_active ON debertz_games(user_id, state);
+
 -- Play money. Deliberately NOT in the accounts/ledger tables: demo wins must never be
 -- paid from the bankroll, and demo balances must never count as money owed to players.
 CREATE TABLE IF NOT EXISTS demo_balances (

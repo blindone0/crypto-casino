@@ -23,6 +23,7 @@ const mines = require('./games/mines');
 const slots = require('./games/slots');
 const preferans = require('./games/preferans');
 const puzzle = require('./games/puzzle');
+const debertz = require('./games/debertz');
 const crashMod = require('./games/crash');
 
 const MIME = {
@@ -365,6 +366,30 @@ function build(cfg) {
   });
 
   add('GET', '/api/bet/puzzle/info', async () => puzzle.info(cfg));
+
+  // --------------------------------------------------------------- debertz
+  add('POST', '/api/bet/debertz/start', async (ctx, req) => {
+    checkCsrf(req, ctx);
+    const body = await U.readJsonBody(req);
+    return debertz.start(gameCtx(ctx, modeOf(body)), body);
+  });
+
+  add('POST', '/api/bet/debertz/trump', async (ctx, req) => {
+    checkCsrf(req, ctx);
+    return debertz.chooseTrump(gameCtx(ctx), await U.readJsonBody(req));
+  });
+
+  add('POST', '/api/bet/debertz/play', async (ctx, req) => {
+    checkCsrf(req, ctx);
+    return debertz.playCard(gameCtx(ctx), await U.readJsonBody(req));
+  });
+
+  add('GET', '/api/bet/debertz/current', async (ctx) => {
+    const user = requireUser(ctx);
+    return debertz.current({ db, cfg, user });
+  });
+
+  add('GET', '/api/bet/debertz/info', async () => debertz.info(cfg));
 
   // ------------------------------------------------------------- preferans
   add('POST', '/api/bet/preferans/start', async (ctx, req) => {

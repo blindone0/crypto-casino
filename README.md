@@ -25,7 +25,7 @@ start and saved to `config.json`.
 ```bash
 node src/server.js                  # start; first run writes config.json
 node tools/admin-token.js           # show the operator token
-npm test                            # 97 tests
+npm test                            # 115 tests
 node tools/simulate.js              # will this actually make money?
 ```
 
@@ -114,6 +114,8 @@ the server, so verification never depends on the server agreeing.
 | Crash     | multiplayer | stake + cashout point    | shared round, scaled by `1-edge` |
 | Slots     | instant     | stake only               | paytable solved to hit the target RTP |
 | Preferans | interactive | trump, then how to play  | payouts calibrated against bot play |
+| Puzzle    | interactive | difficulty, when to stop | `(1-edge) x C(N,k)/C(N-M,k)` |
+| Debertz   | interactive | trumps, then how to play | payouts calibrated against bot play |
 
 Crash runs a real shared round loop and pushes updates over Server-Sent Events. No
 WebSocket library needed.
@@ -178,6 +180,25 @@ apply here too, because someone who asked to be kept away from the games asked t
 away from all of them.
 
 Turn it off with `demo.enabled: false`.
+
+### Debertz
+
+The Odessa card game (Klaberjass), nine cards each against one opponent. Its whole
+character is that **trumps rank differently from every other suit**: in trumps the Jack
+is highest and the Nine second, while everywhere else the Ace leads and the Jack is worth
+almost nothing. Getting that wrong turns it into a different game, so it is the first
+thing the tests check.
+
+You name trumps, which means you carry the bete risk: finish level or behind and you lose
+the whole hand rather than the difference. That happens about one hand in five. Scoring is
+card points plus the best run, plus bella (king and queen of trumps), plus ten for the
+last trick.
+
+Because the chooser wins roughly four hands in five, the pricing is tight: at a 1% edge
+the average winning hand can only be worth about 1.23x. Left to a free solve, a narrow win
+would price *below* the stake, so "you won" would quietly mean "you lost money". The
+narrowest band is therefore pinned to exactly 1.00 and only the wider margins are solved,
+so every win returns at least what was staked. A test enforces that.
 
 ---
 
@@ -314,7 +335,7 @@ src/
   games/           dice, limbo, mines, crash, slots, preferans
   wallet/          mock, manual, bitcoind, monero drivers
 public/            the site: casino, /admin panel, /verify verifier, i18n
-test/              97 tests
+test/             115 tests
 tools/             simulator, preferans calibration, treasury setup, admin token
 ```
 
