@@ -22,6 +22,9 @@ const state = {
   cfg: null, user: null, csrf: null,
   game: 'dice', feed: 'recent',
   mines: null, crash: null, es: null,
+  // 'real' or 'demo'. Practice money is a completely separate balance that cannot be
+  // deposited to or withdrawn from; it exists so someone with nothing can still learn.
+  wallet: 'real', demoBalance: 0,
 };
 
 const UNIT = 1e8;
@@ -33,15 +36,23 @@ const fmtShort = (units) => {
   return n.toFixed(6);
 };
 
+const STAKE_ROUTES = ['/api/bet/', '/api/crash/bet'];
+
 async function api(path, { method = 'GET', body } = {}) {
   const headers = {};
-  if (body !== undefined) headers['content-type'] = 'application/json';
+  // Anything that stakes money carries the active wallet, set in one place rather than
+  // at each of the dozen call sites, so a new game cannot forget it and bet real funds.
+  let payload = body;
+  if (method === 'POST' && state.wallet === 'demo' && STAKE_ROUTES.some((r) => path.startsWith(r))) {
+    payload = { ...(body || {}), wallet: 'demo' };
+  }
+  if (payload !== undefined) headers['content-type'] = 'application/json';
   if (state.csrf && method !== 'GET') headers['x-csrf-token'] = state.csrf;
   let res;
   try {
     res = await fetch(path, {
       method, headers, credentials: 'same-origin',
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: payload === undefined ? undefined : JSON.stringify(payload),
     });
   } catch {
     throw new Error(t('err.network'));
@@ -64,6 +75,8 @@ function setBalance(units, direction) {
   const box = $('#balanceBox');
   const v = $('#balanceValue');
   box.hidden = false;
+  if (state.wallet === 'demo') state.demoBalance = units;
+  else if (state.user) state.user.balance = units;
   v.textContent = fmt(units);
   if (direction) {
     v.className = `value ${direction > 0 ? 'flash' : 'flash-down'}`;
@@ -167,9 +180,35 @@ function afterAuth() {
   $('#authButtons').classList.add('hide');
   $('#userButtons').classList.remove('hide');
   $('#btnAdmin').classList.toggle('hide', state.user.role !== 'admin');
-  setBalance(state.user.balance);
+  $('#modeSwitch').classList.toggle('hide', !state.cfg?.demo?.enabled);
+  applyWallet();
   renderGame();
   loadFeed();
+}
+
+/** Reflect the active wallet everywhere: balance, styling, banner, switch. */
+function applyWallet() {
+  const demo = state.wallet === 'demo';
+  document.body.classList.toggle('practice', demo);
+  for (const b of document.querySelectorAll('#modeSwitch button')) {
+    b.classList.toggle('on', b.dataset.wallet === state.wallet);
+  }
+  setBalance(demo ? state.demoBalance : (state.user?.balance ?? 0));
+  renderBanners();
+}
+
+async function setWallet(next) {
+  if (state.wallet === next) return;
+  state.wallet = next;
+  try { localStorage.setItem('wallet', next); } catch { /* private mode */ }
+  if (next === 'demo' && state.user) {
+    try { state.demoBalance = (await api('/api/demo')).balance; } catch { /* keep last */ }
+  }
+  // Any half-finished round belongs to the other wallet, so start clean.
+  state.mines = null;
+  state.pref = null;
+  applyWallet();
+  renderGame();
 }
 
 async function signOut() {
@@ -178,7 +217,11 @@ async function signOut() {
   state.csrf = null;
   $('#authButtons').classList.remove('hide');
   $('#userButtons').classList.add('hide');
+  $('#modeSwitch').classList.add('hide');
   $('#balanceBox').hidden = true;
+  state.wallet = 'real';
+  document.body.classList.remove('practice');
+  renderBanners();
   renderGame();
 }
 
@@ -1512,7 +1555,23 @@ async function refreshMe() {
 /** Banners depend on the active language, so they are rebuilt whenever it changes. */
 function renderBanners() {
   const box = $('#banners');
+  if (!box) return;
   box.replaceChildren();
+  if (state.wallet === 'demo') {
+    box.append(el('div', { class: 'banner practice' },
+      t('demo.banner'), ' ',
+      el('button', {
+        class: 'tiny', style: 'margin-left:8px',
+        onclick: async () => {
+          try {
+            const r = await api('/api/demo/topup', { method: 'POST' });
+            state.demoBalance = r.balance;
+            setBalance(r.balance, 1);
+            toast(t('demo.toppedUp'));
+          } catch (e) { toast(e.message, 'bad'); }
+        },
+      }, t('demo.topUp'))));
+  }
   if (state.cfg?.wallet?.isMock) box.append(el('div', { class: 'banner' }, t('wallet.mockWarning')));
 }
 
@@ -1544,6 +1603,14 @@ async function boot() {
 
   renderBanners();
 
+  try {
+    const savedWallet = localStorage.getItem('wallet');
+    if (savedWallet === 'demo' && state.cfg?.demo?.enabled) state.wallet = 'demo';
+  } catch { /* private mode */ }
+  for (const b of document.querySelectorAll('#modeSwitch button')) {
+    b.onclick = () => setWallet(b.dataset.wallet);
+  }
+
   $('#btnSignin').onclick = () => authModal('login');
   $('#btnSignup').onclick = () => authModal('register');
   $('#btnSignout').onclick = signOut;
@@ -1564,6 +1631,8 @@ async function boot() {
     const me = await api('/api/me');
     state.user = me.user;
     state.csrf = me.csrf;
+    state.demoBalance = me.demoBalance || 0;
+    if (!me.demoEnabled) state.wallet = 'real';
     afterAuth();
   } catch {
     renderGame();

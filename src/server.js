@@ -15,6 +15,7 @@ const fair = require('./fair');
 const adminApi = require('./admin');
 const walletApi = require('./wallet');
 const treasury = require('./treasury');
+const bankMod = require('./bank');
 const geoMod = require('./geo');
 const dice = require('./games/dice');
 const limbo = require('./games/limbo');
@@ -37,7 +38,8 @@ const MIME = {
 function build(cfg) {
   const db = dbMod.open(cfg.dbPath);
   const driver = walletApi.loadDriver(cfg);
-  const crash = crashMod.createCrash({ db, cfg });
+  const bankFor = (mode) => bankMod.bankFor(db, cfg, mode);
+  const crash = crashMod.createCrash({ db, cfg, bankFor });
   const geo = geoMod.createGeo(cfg);
   const publicDir = path.join(cfg.root, 'public');
 
@@ -127,6 +129,7 @@ function build(cfg) {
     },
     rakeback: cfg.rakeback,
     referralCommission: cfg.referralCommission,
+    demo: { enabled: cfg.demo.enabled, startingUnits: cfg.demo.startingUnits },
     crashCommitment: crash.commitment,
     dice: { minWinCount: dice.MIN_WIN_COUNT, maxWinCount: dice.MAX_WIN_COUNT },
     slots: { rtp: slots.machineFor(cfg.houseEdge.slots).rtp, lines: slots.LINES },
@@ -176,6 +179,8 @@ function build(cfg) {
       csrf: ctx.auth.session.csrf,
       play: limits.playTimeToday(db, user.id),
       maxProfitPerBet: ledger.maxProfitAllowed(db, cfg),
+      demoEnabled: cfg.demo.enabled,
+      demoBalance: cfg.demo.enabled ? bankMod.demoBank(db, cfg).balance(user.id) : 0,
     };
   });
 
@@ -273,29 +278,48 @@ function build(cfg) {
   });
 
   // --------------------------------------------------------------- games
-  const gameCtx = (ctx) => {
+  /**
+    * Build the context a game runs in. `mode` picks which bank the stake and payout move
+    * through; anything but an explicit "demo" is real money. Games that persist a round
+    * also get `bankFor`, so they can settle against the bank the round was opened with
+    * rather than whatever the current request claims.
+    */
+  const gameCtx = (ctx, mode) => {
     const user = requireUser(ctx);
     limits.requireNotExcluded(user);
-    return { db, cfg, user };
+    const wanted = mode === 'demo' ? 'demo' : 'real';
+    if (wanted === 'demo' && !cfg.demo.enabled) throw new U.BadRequest('practice mode is disabled');
+    return { db, cfg, user, bank: bankFor(wanted), bankFor };
   };
+
+  /**
+   * Which bank a bet should move through. Deliberately called `wallet` and not `mode`:
+   * dice already uses `mode` for the roll direction, and overloading it would have made
+   * "play for free" and "roll over" the same field.
+   */
+  const modeOf = (src) => (src?.wallet === 'demo' ? 'demo' : 'real');
 
   add('POST', '/api/bet/dice', async (ctx, req) => {
     checkCsrf(req, ctx);
-    return dice.play(gameCtx(ctx), await U.readJsonBody(req));
+    const body = await U.readJsonBody(req);
+    return dice.play(gameCtx(ctx, modeOf(body)), body);
   });
 
   add('POST', '/api/bet/limbo', async (ctx, req) => {
     checkCsrf(req, ctx);
-    return limbo.play(gameCtx(ctx), await U.readJsonBody(req));
+    const body = await U.readJsonBody(req);
+    return limbo.play(gameCtx(ctx, modeOf(body)), body);
   });
 
   add('POST', '/api/bet/mines/start', async (ctx, req) => {
     checkCsrf(req, ctx);
-    return mines.start(gameCtx(ctx), await U.readJsonBody(req));
+    const body = await U.readJsonBody(req);
+    return mines.start(gameCtx(ctx, modeOf(body)), body);
   });
 
   add('POST', '/api/bet/mines/reveal', async (ctx, req) => {
     checkCsrf(req, ctx);
+    // No mode here on purpose: the round already knows which bank it belongs to.
     return mines.reveal(gameCtx(ctx), await U.readJsonBody(req));
   });
 
@@ -311,7 +335,8 @@ function build(cfg) {
 
   add('POST', '/api/bet/slots', async (ctx, req) => {
     checkCsrf(req, ctx);
-    return slots.play(gameCtx(ctx), await U.readJsonBody(req));
+    const body = await U.readJsonBody(req);
+    return slots.play(gameCtx(ctx, modeOf(body)), body);
   });
 
   add('GET', '/api/bet/slots/info', async () => slots.info(cfg));
@@ -319,7 +344,8 @@ function build(cfg) {
   // ------------------------------------------------------------- preferans
   add('POST', '/api/bet/preferans/start', async (ctx, req) => {
     checkCsrf(req, ctx);
-    return preferans.start(gameCtx(ctx), await U.readJsonBody(req));
+    const body = await U.readJsonBody(req);
+    return preferans.start(gameCtx(ctx, modeOf(body)), body);
   });
 
   add('POST', '/api/bet/preferans/trump', async (ctx, req) => {
@@ -355,8 +381,10 @@ function build(cfg) {
 
   add('POST', '/api/crash/bet', async (ctx, req) => {
     checkCsrf(req, ctx);
-    const { user } = gameCtx(ctx);
-    return crash.placeBet(user, await U.readJsonBody(req));
+    const body = await U.readJsonBody(req);
+    const mode = modeOf(body);
+    const { user } = gameCtx(ctx, mode);
+    return crash.placeBet(user, body, mode);
   });
 
   add('POST', '/api/crash/cashout', async (ctx, req) => {
@@ -368,6 +396,26 @@ function build(cfg) {
   add('GET', '/api/crash/mine', async (ctx) => {
     const user = requireUser(ctx);
     return { bet: crash.myBet(user) };
+  });
+
+  // ------------------------------------------------------------ free play
+  add('GET', '/api/demo', async (ctx) => {
+    const user = requireUser(ctx);
+    const demo = bankMod.demoBank(db, cfg);
+    return {
+      enabled: cfg.demo.enabled,
+      balance: demo.balance(user.id),
+      startingUnits: cfg.demo.startingUnits,
+      topUpBelowUnits: cfg.demo.topUpBelowUnits,
+      bets: demo.history(user.id, 40),
+    };
+  });
+
+  add('POST', '/api/demo/topup', async (ctx, req) => {
+    const user = requireUser(ctx);
+    checkCsrf(req, ctx);
+    if (!cfg.demo.enabled) throw new U.BadRequest('practice mode is disabled');
+    return bankMod.demoBank(db, cfg).topUp(user.id);
   });
 
   // -------------------------------------------------------------- fairness
@@ -474,6 +522,11 @@ function build(cfg) {
     requireAdmin(req, ctx);
     const url = new URL(req.url, 'http://x');
     return { series: adminApi.dailySeries(db, U.clamp(Number(url.searchParams.get('days')) || 30, 1, 365)) };
+  });
+
+  add('GET', '/api/admin/demo', async (ctx, req) => {
+    requireAdmin(req, ctx);
+    return bankMod.demoStats(db);
   });
 
   add('GET', '/api/admin/risk', async (ctx, req) => {

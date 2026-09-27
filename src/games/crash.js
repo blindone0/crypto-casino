@@ -54,7 +54,7 @@ function ensureChain(db, chainLen = CHAIN_LEN) {
  * The crash engine. One instance per process; server.js starts it.
  * All database work happens synchronously inside db.tx() so it cannot interleave.
  */
-function createCrash({ db, cfg, logger = console }) {
+function createCrash({ db, cfg, bankFor, logger = console }) {
   const salt = cfg.crashPublicSalt || 'nullstake-crash-v1';
   const pace = {
     bettingMs: cfg.crash?.bettingMs ?? BETTING_MS,
@@ -223,12 +223,13 @@ function createCrash({ db, cfg, logger = console }) {
   /** Credit a winning crash bet. Caller must be inside a transaction. */
   function payWin(bet, atMultiplier) {
     const user = db.get('SELECT * FROM users WHERE id=?', bet.user_id);
+    const bank = bankFor(bet.mode);
     const raw = U.mulUnits(bet.wager, atMultiplier);
     const payout = Math.min(raw, bet.max_payout || raw);
 
     db.run("UPDATE crash_bets SET state='won', cashed_at=?, payout=? WHERE id=?",
       atMultiplier, payout, bet.id);
-    ledger.settleBet(db, cfg, {
+    bank.settle({
       user,
       game: 'crash',
       wager: bet.wager,
@@ -260,7 +261,7 @@ function createCrash({ db, cfg, logger = console }) {
       for (const bet of losers) {
         const user = db.get('SELECT * FROM users WHERE id=?', bet.user_id);
         db.run("UPDATE crash_bets SET state='lost' WHERE id=?", bet.id);
-        ledger.settleBet(db, cfg, {
+        bankFor(bet.mode).settle({
           user,
           game: 'crash',
           wager: bet.wager,
@@ -289,7 +290,7 @@ function createCrash({ db, cfg, logger = console }) {
   }
 
   // ------------------------------------------------------------ player API
-  function placeBet(user, body) {
+  function placeBet(user, body, mode = 'real') {
     if (!round || round.state !== 'betting') throw new U.BadRequest('betting is closed for this round');
     const wager = U.parseAmount(body.amount);
     const autoRaw = body.autoCashout == null || body.autoCashout === '' ? 0 : Number(body.autoCashout);
@@ -302,26 +303,23 @@ function createCrash({ db, cfg, logger = console }) {
       if (db.get('SELECT 1 FROM crash_bets WHERE round_id=? AND user_id=?', round.id, user.id)) {
         throw new U.BadRequest('you already have a bet on this round');
       }
-      ledger.checkBetLimits(db, cfg, user, wager, 1);
-      const maxPayout = ledger.capPayout(db, cfg, wager, Infinity).ceiling;
+      const bank = bankFor(mode);
+      bank.checkLimits(user, wager, 1);
+      const maxPayout = bank.capPayout(wager, Infinity).ceiling;
 
-      ledger.transfer(
-        db,
-        ledger.userAccount(db, user.id).id,
-        ledger.houseAccount(db).id,
-        wager, 'bet', `crash#${round.id}`,
-      );
+      bank.takeStake(user, wager, `crash#${round.id}`);
       db.run(
-        `INSERT INTO crash_bets(round_id,user_id,wager,auto_cashout,max_payout,state,created_at)
-         VALUES(?,?,?,?,?,'placed',?)`,
-        round.id, user.id, wager, auto, maxPayout, now(),
+        `INSERT INTO crash_bets(round_id,user_id,wager,auto_cashout,max_payout,state,mode,created_at)
+         VALUES(?,?,?,?,?,'placed',?,?)`,
+        round.id, user.id, wager, auto, maxPayout, bank.mode, now(),
       );
       const out = {
         roundId: round.id,
         wager,
         autoCashout: auto,
         maxPayout,
-        balance: ledger.userAccount(db, user.id).balance,
+        mode: bank.mode,
+        balance: bank.balance(user.id),
       };
       broadcast('bet', { username: user.username, wager, autoCashout: auto });
       return out;
@@ -345,7 +343,8 @@ function createCrash({ db, cfg, logger = console }) {
         cashedAt: live,
         payout,
         profit: payout - bet.wager,
-        balance: ledger.userAccount(db, user.id).balance,
+        mode: bet.mode,
+        balance: bankFor(bet.mode).balance(user.id),
       };
     });
     broadcast('cashout', { username: user.username, at: live, auto: false });
@@ -365,13 +364,23 @@ function createCrash({ db, cfg, logger = console }) {
       for (const r of stale) {
         const bets = db.all("SELECT * FROM crash_bets WHERE round_id=? AND state='placed'", r.id);
         for (const b of bets) {
-          ledger.transfer(
-            db,
-            ledger.houseAccount(db).id,
-            ledger.userAccount(db, b.user_id).id,
-            b.wager, 'refund', `crash#${r.id} restart`,
-          );
-          db.run("UPDATE crash_bets SET state='lost', payout=0 WHERE id=?", b.id);
+          const user = db.get('SELECT * FROM users WHERE id=?', b.user_id);
+          // Refund to whichever bank took the stake, then record it as a settled
+          // zero-multiplier round so the books and the bet log stay consistent.
+          bankFor(b.mode).settle({
+            user,
+            game: 'crash',
+            wager: b.wager,
+            multiplier: 1,
+            payout: b.wager,
+            edgeUnits: 0,
+            seedId: null,
+            nonce: r.id,
+            clientSeed: salt,
+            detail: { roundId: r.id, refunded: true, reason: 'server restart' },
+            stakeTaken: true,
+          });
+          db.run("UPDATE crash_bets SET state='lost', payout=? WHERE id=?", b.wager, b.id);
         }
         db.run("UPDATE crash_rounds SET state='ended', ended_at=? WHERE id=?", now(), r.id);
       }

@@ -25,7 +25,7 @@ start and saved to `config.json`.
 ```bash
 node src/server.js                  # start; first run writes config.json
 node tools/admin-token.js           # show the operator token
-npm test                            # 88 tests
+npm test                            # 97 tests
 node tools/simulate.js              # will this actually make money?
 ```
 
@@ -150,6 +150,29 @@ with a wider default edge (5%) to absorb that, and the per-game hold in the oper
 is what tells you whether real players are beating the calibration. If you change the
 bot's play, re-run `node tools/calibrate-preferans.js` — a test fails if the stored table
 has drifted from how the bot actually plays.
+
+---
+
+## Free play
+
+Anyone can practise without depositing. Every account gets a separate play balance that
+can be refilled for free once it runs low, and the Real / Practice switch in the header
+changes which money the games use.
+
+The separation is absolute, and deliberately so. Play money lives in its own tables and
+never enters `accounts` or `ledger`, which means a practice win is **not** paid out of
+the bankroll, practice balances are **not** counted as money owed to players, and the
+books-balance check is not measuring fiction. Practice bets are excluded from revenue
+reporting and from the public bet feed, though the operator can still see engagement
+under Admin. A round opened with play money settles with play money even if a later
+request claims otherwise, since the round itself records which bank it belongs to.
+
+What practice players still get is everything that matters for learning: the same games,
+the same maths, the same provably-fair seed chain. Self-imposed limits and self-exclusion
+apply here too, because someone who asked to be kept away from the games asked to be kept
+away from all of them.
+
+Turn it off with `demo.enabled: false`.
 
 ---
 
@@ -286,7 +309,7 @@ src/
   games/           dice, limbo, mines, crash, slots, preferans
   wallet/          mock, manual, bitcoind, monero drivers
 public/            the site: casino, /admin panel, /verify verifier, i18n
-test/              88 tests
+test/              97 tests
 tools/             simulator, preferans calibration, treasury setup, admin token
 ```
 

@@ -20,14 +20,14 @@ function parseTarget(cfg, raw) {
   return target;
 }
 
-function play({ db, cfg, user }, body) {
+function play({ db, cfg, user, bank }, body) {
   const wager = U.parseAmount(body.amount);
   const target = parseTarget(cfg, body.target);
   const edge = cfg.houseEdge.limbo;
   const chance = (1 - edge) / target;
 
   return db.tx(() => {
-    ledger.checkBetLimits(db, cfg, user, wager, target);
+    bank.checkLimits(user, wager, target);
     const seed = auth.activeSeed(db, user.id);
     const nonce = auth.claimNonce(db, seed.id);
 
@@ -35,7 +35,7 @@ function play({ db, cfg, user }, body) {
     const won = drawn >= target;
     const payout = won ? U.mulUnits(wager, target) : 0;
 
-    const betId = ledger.settleBet(db, cfg, {
+    const betId = bank.settle({
       user,
       game: 'limbo',
       wager,
@@ -61,7 +61,7 @@ function play({ db, cfg, user }, body) {
       profit: payout - wager,
       nonce,
       serverSeedHash: seed.seed_hash,
-      balance: ledger.userAccount(db, user.id).balance,
+      balance: bank.balance(user.id),
     };
   });
 }

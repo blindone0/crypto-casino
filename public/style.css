@@ -584,3 +584,26 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* --------------------------------------------------------- play mode */
+.mode-switch {
+  display: inline-flex; padding: 3px; gap: 3px;
+  background: var(--bg-input); border: 1px solid var(--line); border-radius: 999px;
+}
+.mode-switch button {
+  border: none; background: transparent; color: var(--text-dim);
+  border-radius: 999px; padding: 5px 13px; font-size: 12px; letter-spacing: .04em;
+}
+.mode-switch button.on {
+  background: linear-gradient(180deg, var(--gold-bright), var(--gold));
+  color: #1a1305; font-weight: 700;
+}
+.mode-switch button.on[data-wallet="demo"] {
+  background: linear-gradient(180deg, #5fd6ff, #2f9fd0); color: #04212e;
+}
+body.practice .balance { border-color: rgba(95, 214, 255, .35); }
+body.practice .balance .value { color: #8fe3ff; }
+.banner.practice {
+  background: linear-gradient(180deg, #0f2733, #0a1a22);
+  border-color: #23566b; color: #8fe3ff;
+}

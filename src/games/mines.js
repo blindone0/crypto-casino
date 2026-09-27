@@ -46,43 +46,39 @@ function view(db, cfg, g, extra = {}) {
   };
 }
 
-function start({ db, cfg, user }, body) {
+function start({ db, cfg, user, bank }, body) {
   const wager = U.parseAmount(body.amount);
   const mineCount = U.toInt(body.mines, { min: 1, max: 24, name: 'mines' });
 
   return db.tx(() => {
     if (activeGame(db, user.id)) throw new U.BadRequest('finish your current mines round first');
     // Stake-side checks only; the win side is bounded by capPayout at cashout.
-    ledger.checkBetLimits(db, cfg, user, wager, 1);
+    bank.checkLimits(user, wager, 1);
 
     const seed = auth.activeSeed(db, user.id);
     const nonce = auth.claimNonce(db, seed.id);
     const mines = fair.minePositions(seed.seed, user.client_seed, nonce, mineCount);
 
-    ledger.transfer(
-      db,
-      ledger.userAccount(db, user.id).id,
-      ledger.houseAccount(db).id,
-      wager, 'bet', `mines#${nonce}`,
-    );
+    bank.takeStake(user, wager, `mines#${nonce}`);
 
     db.run(
-      `INSERT INTO mines_games(user_id,wager,mine_count,mines,picks,seed_id,nonce,client_seed,state,created_at)
-       VALUES(?,?,?,?,'[]',?,?,?,'active',?)`,
-      user.id, wager, mineCount, JSON.stringify(mines), seed.id, nonce, user.client_seed, now(),
+      `INSERT INTO mines_games(user_id,wager,mine_count,mines,picks,seed_id,nonce,client_seed,state,mode,created_at)
+       VALUES(?,?,?,?,'[]',?,?,?,'active',?,?)`,
+      user.id, wager, mineCount, JSON.stringify(mines), seed.id, nonce, user.client_seed,
+      bank.mode, now(),
     );
     const g = activeGame(db, user.id);
     return {
       ...view(db, cfg, g),
       table: multiplierTable(cfg, mineCount),
       serverSeedHash: seed.seed_hash,
-      maxPayout: ledger.capPayout(db, cfg, wager, Infinity).ceiling,
-      balance: ledger.userAccount(db, user.id).balance,
+      maxPayout: bank.capPayout(wager, Infinity).ceiling,
+      balance: bank.balance(user.id),
     };
   });
 }
 
-function reveal({ db, cfg, user }, body) {
+function reveal({ db, cfg, user, bankFor }, body) {
   const tile = U.toInt(body.tile, { min: 0, max: TILES - 1, name: 'tile' });
 
   return db.tx(() => {
@@ -93,10 +89,13 @@ function reveal({ db, cfg, user }, body) {
 
     const mines = JSON.parse(g.mines);
     const edge = cfg.houseEdge.mines;
+    // Settle against the bank this round was opened with, not the one the request asks
+    // for: a round started with play money must never pay out real money.
+    const bank = bankFor(g.mode);
 
     if (mines.includes(tile)) {
       db.run("UPDATE mines_games SET state='lost', ended_at=? WHERE id=?", now(), g.id);
-      ledger.settleBet(db, cfg, {
+      bank.settle({
         user,
         game: 'mines',
         wager: g.wager,
@@ -115,7 +114,7 @@ function reveal({ db, cfg, user }, body) {
         hit: tile,
         mines,
         payout: 0,
-        balance: ledger.userAccount(db, user.id).balance,
+        balance: bank.balance(user.id),
       };
     }
 
@@ -125,32 +124,33 @@ function reveal({ db, cfg, user }, body) {
 
     // Clearing every safe tile ends the round at the top of the ladder.
     if (picks.length === TILES - g.mine_count) {
-      return { ...finish({ db, cfg, user }, updated), safe: true, autoCashout: true };
+      return { ...finish({ db, cfg, user, bankFor }, updated), safe: true, autoCashout: true };
     }
     return { ...view(db, cfg, updated), safe: true };
   });
 }
 
-function cashout({ db, cfg, user }) {
+function cashout({ db, cfg, user, bankFor }) {
   return db.tx(() => {
     const g = activeGame(db, user.id);
     if (!g) throw new U.NotFound('no active mines round');
     if (JSON.parse(g.picks).length === 0) throw new U.BadRequest('reveal at least one tile first');
-    return finish({ db, cfg, user }, g);
+    return finish({ db, cfg, user, bankFor }, g);
   });
 }
 
 /** Pay out a mines round. Caller must already be inside a transaction. */
-function finish({ db, cfg, user }, g) {
+function finish({ db, cfg, user, bankFor }, g) {
+  const bank = bankFor(g.mode);
   const picks = JSON.parse(g.picks);
   const mines = JSON.parse(g.mines);
   const edge = cfg.houseEdge.mines;
   const multiplier = fair.minesMultiplier(g.mine_count, picks.length, edge);
   const raw = U.mulUnits(g.wager, multiplier);
-  const { payout, capped } = ledger.capPayout(db, cfg, g.wager, raw);
+  const { payout, capped } = bank.capPayout(g.wager, raw);
 
   db.run("UPDATE mines_games SET state='cashed', payout=?, ended_at=? WHERE id=?", payout, now(), g.id);
-  ledger.settleBet(db, cfg, {
+  bank.settle({
     user,
     game: 'mines',
     wager: g.wager,
@@ -172,7 +172,7 @@ function finish({ db, cfg, user }, g) {
     payout,
     capped,
     profit: payout - g.wager,
-    balance: ledger.userAccount(db, user.id).balance,
+    balance: bank.balance(user.id),
   };
 }
 

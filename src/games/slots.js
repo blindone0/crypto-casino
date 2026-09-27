@@ -352,7 +352,7 @@ function info(cfg) {
 }
 
 // ------------------------------------------------------------------- play
-function play({ db, cfg, user }, body) {
+function play({ db, cfg, user, bank }, body) {
   const wager = U.parseAmount(body.amount);
   const edge = cfg.houseEdge.slots;
   const machine = machineFor(edge);
@@ -360,7 +360,7 @@ function play({ db, cfg, user }, body) {
   return db.tx(() => {
     // Stake-side checks only: the win is bounded by capPayout, exactly as mines and
     // crash do, because a slot has no fixed ceiling once free spins are in play.
-    ledger.checkBetLimits(db, cfg, user, wager, 1);
+    bank.checkLimits(user, wager, 1);
 
     const seed = auth.activeSeed(db, user.id);
     const nonce = auth.claimNonce(db, seed.id);
@@ -387,9 +387,9 @@ function play({ db, cfg, user }, body) {
     }
 
     const raw = U.mulUnits(wager, totalMultiplier);
-    const { payout, capped } = ledger.capPayout(db, cfg, wager, raw);
+    const { payout, capped } = bank.capPayout(wager, raw);
 
-    const betId = ledger.settleBet(db, cfg, {
+    const betId = bank.settle({
       user,
       game: 'slots',
       wager,
@@ -425,7 +425,7 @@ function play({ db, cfg, user }, body) {
       profit: payout - wager,
       nonce,
       serverSeedHash: seed.seed_hash,
-      balance: ledger.userAccount(db, user.id).balance,
+      balance: bank.balance(user.id),
     };
   });
 }

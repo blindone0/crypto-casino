@@ -18,7 +18,7 @@ function quote(cfg, target, mode) {
   return { chance, multiplier: fair.payoutMultiplier(chance, cfg.houseEdge.dice) };
 }
 
-function play({ db, cfg, user }, body) {
+function play({ db, cfg, user, bank }, body) {
   const wager = U.parseAmount(body.amount);
   const mode = body.mode === 'over' ? 'over' : 'under';
   const target = U.toInt(body.target, { min: 0, max: 9999, name: 'target' });
@@ -26,7 +26,7 @@ function play({ db, cfg, user }, body) {
   const edge = cfg.houseEdge.dice;
 
   return db.tx(() => {
-    ledger.checkBetLimits(db, cfg, user, wager, multiplier);
+    bank.checkLimits(user, wager, multiplier);
     const seed = auth.activeSeed(db, user.id);
     const nonce = auth.claimNonce(db, seed.id);
 
@@ -34,7 +34,7 @@ function play({ db, cfg, user }, body) {
     const won = fair.diceWins(roll, target, mode);
     const payout = won ? U.mulUnits(wager, multiplier) : 0;
 
-    const betId = ledger.settleBet(db, cfg, {
+    const betId = bank.settle({
       user,
       game: 'dice',
       wager,
@@ -62,7 +62,7 @@ function play({ db, cfg, user }, body) {
       profit: payout - wager,
       nonce,
       serverSeedHash: seed.seed_hash,
-      balance: ledger.userAccount(db, user.id).balance,
+      balance: bank.balance(user.id),
     };
   });
 }

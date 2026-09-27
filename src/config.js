@@ -51,6 +51,18 @@ const DEFAULTS = {
     maxMultiplier: 10000,        // cap on limbo/crash multipliers
   },
 
+  // ---- FREE PLAY --------------------------------------------------------
+  // Practice mode for people with no money to deposit. Play money is a completely
+  // separate ledger: it never touches the bankroll, never counts as a liability, and can
+  // never be withdrawn. It costs the operator nothing and is the cheapest way to let
+  // someone learn the games before risking anything.
+  demo: {
+    enabled: true,
+    startingUnits: 1000 * 100000000,   // 1000 play credits on first use
+    topUpToUnits: 1000 * 100000000,
+    topUpBelowUnits: 10 * 100000000,   // refill only once they are nearly out
+  },
+
   // ---- CRASH ROUND PACING ----------------------------------------------
   // Round length is a direct revenue lever: revenue is volume times edge, and volume is
   // rounds per hour times stake. Shorter betting windows mean more rounds, but too short

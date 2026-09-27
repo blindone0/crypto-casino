@@ -130,6 +130,21 @@ const STRINGS = {
   },
   'pref.newHand': { en: 'New hand', ru: 'Новая раздача' },
 
+  // ---- free play
+  'demo.real': { en: 'Real', ru: 'На деньги' },
+  'demo.practice': { en: 'Practice', ru: 'Тренировка' },
+  'demo.mode': { en: 'Play mode', ru: 'Режим игры' },
+  'demo.banner': {
+    en: 'Practice mode: play money only. Nothing here can be won or lost, and nothing can be withdrawn.',
+    ru: 'Режим тренировки: только игровые фишки. Здесь ничего нельзя выиграть, проиграть или вывести.',
+  },
+  'demo.topUp': { en: 'Refill play balance', ru: 'Пополнить игровой баланс' },
+  'demo.toppedUp': { en: 'Play balance refilled', ru: 'Игровой баланс пополнен' },
+  'demo.switchHint': {
+    en: 'No deposit needed. Switch to Practice and learn the games for free.',
+    ru: 'Депозит не нужен. Переключитесь на Тренировку и изучайте игры бесплатно.',
+  },
+
   // ---- wallet
   'wallet.deposit': { en: 'Deposit', ru: 'Пополнение' },
   'wallet.withdraw': { en: 'Withdraw', ru: 'Вывод' },

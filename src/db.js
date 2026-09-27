@@ -122,6 +122,7 @@ CREATE TABLE IF NOT EXISTS crash_bets (
   payout       INTEGER NOT NULL DEFAULT 0,
   max_payout   INTEGER NOT NULL DEFAULT 0,
   state        TEXT NOT NULL CHECK (state IN ('placed','won','lost')),
+  mode         TEXT NOT NULL DEFAULT 'real',
   created_at   INTEGER NOT NULL,
   UNIQUE (round_id, user_id)
 );
@@ -140,6 +141,7 @@ CREATE TABLE IF NOT EXISTS mines_games (
   nonce       INTEGER NOT NULL,
   client_seed TEXT NOT NULL,
   state       TEXT NOT NULL CHECK (state IN ('active','lost','cashed')),
+  mode        TEXT NOT NULL DEFAULT 'real',
   payout      INTEGER NOT NULL DEFAULT 0,
   created_at  INTEGER NOT NULL,
   ended_at    INTEGER NOT NULL DEFAULT 0
@@ -156,6 +158,7 @@ CREATE TABLE IF NOT EXISTS pref_games (
   talon       TEXT NOT NULL,
   trump       TEXT,
   state       TEXT NOT NULL CHECK (state IN ('trump','discard','playing','done')),
+  mode        TEXT NOT NULL DEFAULT 'real',
   trick       TEXT NOT NULL DEFAULT '[]',
   leader      INTEGER NOT NULL DEFAULT 1,
   tricks_won  TEXT NOT NULL DEFAULT '[0,0,0]',
@@ -169,6 +172,29 @@ CREATE TABLE IF NOT EXISTS pref_games (
   ended_at    INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS ix_pref_active ON pref_games(user_id, state);
+
+-- Play money. Deliberately NOT in the accounts/ledger tables: demo wins must never be
+-- paid from the bankroll, and demo balances must never count as money owed to players.
+CREATE TABLE IF NOT EXISTS demo_balances (
+  user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  balance    INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS demo_bets (
+  id         INTEGER PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  game       TEXT NOT NULL,
+  wager      INTEGER NOT NULL,
+  multiplier REAL NOT NULL,
+  payout     INTEGER NOT NULL,
+  profit     INTEGER NOT NULL,
+  nonce      INTEGER NOT NULL,
+  detail     TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_demobets_user ON demo_bets(user_id, id DESC);
 
 CREATE TABLE IF NOT EXISTS addresses (
   id          INTEGER PRIMARY KEY,

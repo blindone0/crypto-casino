@@ -376,7 +376,7 @@ function view(db, cfg, g, extra = {}) {
   };
 }
 
-function start({ db, cfg, user }, body) {
+function start({ db, cfg, user, bank }, body) {
   const wager = U.parseAmount(body.amount);
   const table = payoutTable(cfg.houseEdge.preferans);
 
@@ -384,30 +384,25 @@ function start({ db, cfg, user }, body) {
     if (activeGame(db, user.id)) throw new U.BadRequest('finish your current hand first');
     // The top payout is known in advance here, so the bet can be limit-checked properly
     // rather than capped after the fact.
-    ledger.checkBetLimits(db, cfg, user, wager, table.maxMultiplier);
+    bank.checkLimits(user, wager, table.maxMultiplier);
 
     const seed = auth.activeSeed(db, user.id);
     const nonce = auth.claimNonce(db, seed.id);
     const d = deal(seed.seed, user.client_seed, nonce);
 
-    ledger.transfer(
-      db,
-      ledger.userAccount(db, user.id).id,
-      ledger.houseAccount(db).id,
-      wager, 'bet', `preferans#${nonce}`,
-    );
+    bank.takeStake(user, wager, `preferans#${nonce}`);
 
     db.run(
-      `INSERT INTO pref_games(user_id,stake,hands,talon,state,seed_id,nonce,client_seed,created_at)
-       VALUES(?,?,?,?,'trump',?,?,?,?)`,
+      `INSERT INTO pref_games(user_id,stake,hands,talon,state,mode,seed_id,nonce,client_seed,created_at)
+       VALUES(?,?,?,?,'trump',?,?,?,?,?)`,
       user.id, wager, JSON.stringify(d.hands), JSON.stringify(d.talon),
-      seed.id, nonce, user.client_seed, now(),
+      bank.mode, seed.id, nonce, user.client_seed, now(),
     );
     const g = activeGame(db, user.id);
     return {
       ...view(db, cfg, g),
       serverSeedHash: seed.seed_hash,
-      balance: ledger.userAccount(db, user.id).balance,
+      balance: bank.balance(user.id),
     };
   });
 }
@@ -429,7 +424,7 @@ function chooseTrump({ db, cfg, user }, body) {
   });
 }
 
-function discard({ db, cfg, user }, body) {
+function discard({ db, cfg, user, bankFor }, body) {
   const cards = Array.isArray(body.cards) ? body.cards.map(String) : [];
   if (cards.length !== TALON) throw new U.BadRequest(`discard exactly ${TALON} cards`);
   if (cards[0] === cards[1]) throw new U.BadRequest('pick two different cards');
@@ -450,11 +445,11 @@ function discard({ db, cfg, user }, body) {
       JSON.stringify(s.hands), g.id,
     );
     // The defender on the declarer's left leads, so the bots move before the player does.
-    return runBots({ db, cfg, user }, db.get('SELECT * FROM pref_games WHERE id=?', g.id));
+    return runBots({ db, cfg, user, bankFor }, db.get('SELECT * FROM pref_games WHERE id=?', g.id));
   });
 }
 
-function playCard({ db, cfg, user }, body) {
+function playCard({ db, cfg, user, bankFor }, body) {
   const card = String(body.card ?? '');
   return db.tx(() => {
     const g = activeGame(db, user.id);
@@ -479,7 +474,7 @@ function playCard({ db, cfg, user }, body) {
     db.run('UPDATE pref_games SET hands=?, trick=? WHERE id=?',
       JSON.stringify(s.hands), JSON.stringify(s.trick), g.id);
 
-    return runBots({ db, cfg, user }, db.get('SELECT * FROM pref_games WHERE id=?', g.id));
+    return runBots({ db, cfg, user, bankFor }, db.get('SELECT * FROM pref_games WHERE id=?', g.id));
   });
 }
 
@@ -488,7 +483,7 @@ function playCard({ db, cfg, user }, body) {
  * Caller must already hold a transaction.
  */
 function runBots(ctx, game) {
-  const { db, cfg, user } = ctx;
+  const { db, cfg, user } = ctx;  // ctx also carries bankFor, used by settle
   let g = game;
   let guard = 0;
 
@@ -546,7 +541,10 @@ function runBots(ctx, game) {
 }
 
 /** Pay the hand out according to how many tricks the player took. */
-function settle({ db, cfg, user }, g) {
+function settle({ db, cfg, user, bankFor }, g) {
+  // Settle against the bank the hand was dealt with, never the one the request asks for:
+  // a hand opened with play money must never pay out real money.
+  const bank = bankFor(g.mode);
   const s = loadState(g);
   const table = payoutTable(cfg.houseEdge.preferans);
   const tricks = s.tricksWon[PLAYER];
@@ -556,7 +554,7 @@ function settle({ db, cfg, user }, g) {
   db.run("UPDATE pref_games SET state='done', payout=?, ended_at=? WHERE id=?",
     payout, now(), g.id);
 
-  ledger.settleBet(db, cfg, {
+  bank.settle({
     user,
     game: 'preferans',
     wager: g.stake,
@@ -579,7 +577,7 @@ function settle({ db, cfg, user }, g) {
     payout,
     profit: payout - g.stake,
     outcome: payout === 0 ? 'lost' : (payout === g.stake ? 'push' : 'won'),
-    balance: ledger.userAccount(db, user.id).balance,
+    balance: bank.balance(user.id),
   };
 }
 
