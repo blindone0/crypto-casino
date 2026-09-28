@@ -1660,3 +1660,16 @@ body.couch .bigwin .amount { color: #e8eeff; text-shadow: 0 0 44px rgba(143, 166
     padding-bottom: max(20px, env(safe-area-inset-bottom));
   }
 }
+
+/* ------------------------------------------------------------ the card table ---
+   The felt and the trick, drawn in WebGL. Your hand is DOM, below it — see the note at
+   the top of cards3d.js for why a card you must pick for money stays a real button. */
+.card-stage {
+  width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 10px;
+  background: #0a0e0b;
+  box-shadow: inset 0 2px 14px rgba(0, 0, 0, .6);
+}
+.cards-canvas { display: block; width: 100%; }

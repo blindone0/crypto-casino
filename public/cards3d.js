@@ -197,7 +197,13 @@ function cardMesh(gl) {
     const xs = flip ? [1, 0, 1, 0] : [0, 1, 0, 1];
     pos.push(-W, y, -H, W, y, -H, -W, y, H, W, y, H);
     for (let i = 0; i < 4; i += 1) nrm.push(0, ny, 0);
-    uv.push(xs[0], 0, xs[1], 0, xs[2], 1, xs[3], 1);
+    // v runs 1 at the far edge to 0 at the near edge, which looks backwards and is not.
+    //
+    // Every texture here is uploaded with UNPACK_FLIP_Y, so v = 0 samples the BOTTOM of
+    // the image. A card lying on the table has its top edge pointing away from the
+    // camera, at -H — so the far edge needs the image's top, which after the flip is
+    // v = 1. Getting this the intuitive way round printed every court card upside down.
+    uv.push(xs[0], 1, xs[1], 1, xs[2], 0, xs[3], 0);
     if (ny > 0) idx.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
     else idx.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
   };

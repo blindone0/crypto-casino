@@ -11,6 +11,7 @@ import { verifyChain, compareHeads } from './chainverify.js';
 import { createSparks } from './slotfx.js';
 import { createReels as createGlReels } from './slot3d.js';
 import { createDice } from './dice3d.js';
+import { createTable } from './cards3d.js';
 import { startParallax } from './parallax.js';
 
 // ---------------------------------------------------------------- plumbing
@@ -1842,6 +1843,7 @@ let slotFx = null;
 // drums behind them are hidden. When it is not — old hardware, a refused context — the
 // DOM drums stay and everything works as before. The game logic does not know which it
 // got, which is the point: the renderer is a skin over the same screen and stops.
+let cardTable = null;
 let bonesDice = null;
 let glReels = null;
 let glWatch = null;
@@ -2267,6 +2269,45 @@ function legalCards(g) {
   return hand;
 }
 
+/**
+ * The 3D card table, shared by Преферанс and Деберц.
+ *
+ * Both games lay a trick out the same way — one card per seat, in front of whoever played
+ * it — so they share the renderer and the seating. The hand stays DOM: see the note at the
+ * top of cards3d.js for why a card you must pick for money should be a real button.
+ *
+ * Returns the host element to put on the stage, or null when WebGL is unavailable, in
+ * which case the caller keeps its flat trick slots and the game plays exactly as before.
+ */
+function cardStage(seats, trick, extras = []) {
+  const host = el('div', { class: 'card-stage' });
+  if (cardTable) { cardTable.destroy(); cardTable = null; }
+  cardTable = createTable(host, {});
+  if (!cardTable) return null;
+
+  // Where each seat's card lands. Seat 0 is you, nearest the camera; the rest fan away.
+  const SEATS = {
+    2: [[0, 0, 1.5], [0, 0, -1.5]],
+    3: [[0, 0, 1.6], [-1.7, 0, -0.9], [1.7, 0, -0.9]],
+    4: [[0, 0, 1.6], [-2.0, 0, 0], [0, 0, -1.6], [2.0, 0, 0]],
+  }[seats] || [[0, 0, 1.6], [-1.7, 0, -0.9], [1.7, 0, -0.9]];
+
+  const layout = [];
+  for (const played of trick) {
+    const at = SEATS[played.seat] || [0, 0, 0];
+    layout.push({
+      card: played.card,
+      at,
+      // A slight turn per seat, so a trick looks thrown down rather than laid out.
+      turn: (played.seat - 1) * 0.10,
+      deal: true,
+    });
+  }
+  for (const x of extras) layout.push(x);
+  cardTable.show(layout);
+  return host;
+}
+
 function cardNode(card, { onclick, selected, disabled, muted } = {}) {
   const rank = card[0];
   const suit = card[1];
@@ -2366,14 +2407,20 @@ function paintPreferans() {
 
   if (g.state === 'playing' || g.state === 'done') {
     const trick = g.trick || [];
-    kids.push(el('div', { class: 'trick-area' },
-      ...[0, 1, 2].map((slot) => {
-        const played = trick.find((x) => x.seat === slot);
-        const label = slot === 0 ? t('pref.you') : `Bot ${slot}`;
-        return el('div', { class: 'trick-slot' },
-          el('div', { class: 'who' }, label),
-          played ? cardNode(played.card, { disabled: true }) : el('div', { class: 'empty-slot' }));
-      })));
+    // The trick, on the felt. Falls back to flat slots when WebGL is unavailable: the
+    // game is identical either way, it simply stops being three-dimensional.
+    const table = cardStage(3, trick);
+    if (table) kids.push(table);
+    else {
+      kids.push(el('div', { class: 'trick-area' },
+        ...[0, 1, 2].map((slot) => {
+          const played = trick.find((x) => x.seat === slot);
+          const label = slot === 0 ? t('pref.you') : `Bot ${slot}`;
+          return el('div', { class: 'trick-slot' },
+            el('div', { class: 'who' }, label),
+            played ? cardNode(played.card, { disabled: true }) : el('div', { class: 'empty-slot' }));
+        })));
+    }
   }
 
   if (g.hand && g.hand.length) {
@@ -2573,21 +2620,35 @@ function paintDebertz() {
   }
 
   if (g.state === 'trump') {
-    kids.push(el('div', { class: 'trick-area' },
-      el('div', { class: 'trick-slot' },
-        el('div', { class: 'who' }, t('deb.upcard')),
-        cardNode(g.upcard, { disabled: true }))));
+    const table = cardStage(2, [], [
+      { card: g.upcard, at: [0.5, 0, 0], turn: 0.08 },
+      // The rest of the deck, face down and slightly stacked, so the upcard reads as
+      // having been turned off the top of something.
+      { card: null, at: [-0.85, 0, -0.05], turn: -0.04 },
+      { card: null, at: [-0.9, 0, 0] },
+    ]);
+    if (table) kids.push(table);
+    else {
+      kids.push(el('div', { class: 'trick-area' },
+        el('div', { class: 'trick-slot' },
+          el('div', { class: 'who' }, t('deb.upcard')),
+          cardNode(g.upcard, { disabled: true }))));
+    }
   }
 
   if (g.state === 'playing' || g.state === 'done') {
     const trick = g.trick || [];
-    kids.push(el('div', { class: 'trick-area' },
-      ...[0, 1].map((slot) => {
-        const played = trick.find((x) => x.seat === slot);
-        return el('div', { class: 'trick-slot' },
-          el('div', { class: 'who' }, slot === 0 ? t('deb.you') : t('deb.opponent')),
-          played ? cardNode(played.card, { disabled: true }) : el('div', { class: 'empty-slot' }));
-      })));
+    const table = cardStage(2, trick);
+    if (table) kids.push(table);
+    else {
+      kids.push(el('div', { class: 'trick-area' },
+        ...[0, 1].map((slot) => {
+          const played = trick.find((x) => x.seat === slot);
+          return el('div', { class: 'trick-slot' },
+            el('div', { class: 'who' }, slot === 0 ? t('deb.you') : t('deb.opponent')),
+            played ? cardNode(played.card, { disabled: true }) : el('div', { class: 'empty-slot' }));
+        })));
+    }
   }
 
   if (g.hand?.length) {
@@ -3832,6 +3893,10 @@ function renderGame() {
   // The stage it was publishing onto is about to be replaced, so the loop has nothing
   // left to drive.
   if (state.parallax && !['slots', 'games'].includes(state.game)) { state.parallax.stop(); state.parallax = null; }
+  if (cardTable && !['preferans', 'debertz'].includes(state.game)) {
+    cardTable.destroy();
+    cardTable = null;
+  }
   if (bonesDice && state.game !== 'bones') { bonesDice.destroy(); bonesDice = null; }
   if (state.game !== 'match') { stopMatchPoll(); state.matchId = null; state.board = null; }
   const nav = $('#navGames');
