@@ -66,33 +66,53 @@ h3 {
 code, .mono { font-family: var(--mono); font-size: 12px; }
 
 /* ---------------------------------------------------------------- header */
+/* The header is sticky, so every pixel of it is a pixel taken off every game for the
+   whole session. It used to be 190px tall — nearly a quarter of an 833px screen — because
+   a dozen game buttons and seven account buttons all wrapped inside one flex row, giving
+   three stacked bands. It is one band now: the row never wraps, the game nav scrolls
+   sideways instead of wrapping, and the account buttons live in a menu. */
 header.top {
-  display: flex; align-items: center; gap: 14px;
-  padding: 12px 20px;
+  display: flex; align-items: center; gap: 12px;
+  padding: 6px 18px;
   background: linear-gradient(180deg, #17140f 0%, #100e0c 100%);
   border-bottom: 1px solid var(--gold-line);
   box-shadow: 0 1px 0 rgba(255, 255, 255, .03) inset, 0 10px 30px rgba(0, 0, 0, .45);
   position: sticky; top: 0; z-index: 40;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 .brand {
-  display: flex; align-items: center; gap: 10px;
-  font-family: var(--serif); font-weight: 600; font-size: 19px;
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--serif); font-weight: 600; font-size: 17px;
   letter-spacing: .02em; color: var(--gold-bright);
+  flex: 0 0 auto;
 }
 .brand .chip {
-  width: 24px; height: 24px; border-radius: 50%;
+  width: 20px; height: 20px; border-radius: 50%;
   background: conic-gradient(from 210deg, var(--gold-bright), var(--gold-dim), var(--gold-bright));
   box-shadow: 0 0 14px var(--gold-glow), inset 0 0 6px rgba(0, 0, 0, .5);
 }
 .spacer { flex: 1 1 auto; }
+
+/* The game nav is the one part that genuinely cannot fit on a phone, so it scrolls rather
+   than wraps: a second line here costs every game 30px forever, a sideways scroll costs
+   nothing until you need it. `min-width: 0` is what actually lets it shrink — a flex item
+   defaults to min-width:auto and would otherwise push the bar wider than the screen. */
+header.top nav#navGames {
+  flex: 0 1 auto; min-width: 0;
+  flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: none; -ms-overflow-style: none;
+  scroll-snap-type: x proximity;
+}
+header.top nav#navGames::-webkit-scrollbar { display: none; }
+header.top nav#navGames button { flex: 0 0 auto; scroll-snap-align: start; }
 
 .balance {
   display: flex; align-items: baseline; gap: 7px;
   background: linear-gradient(180deg, #14110e, #0c0a09);
   border: 1px solid var(--gold-line);
   border-radius: 999px;
-  padding: 7px 14px;
+  padding: 4px 12px;
+  flex: 0 0 auto;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
 }
 .balance .label {
@@ -105,6 +125,36 @@ header.top {
 }
 .balance .value.flash { color: var(--win); }
 .balance .value.flash-down { color: var(--danger); }
+
+/* ------------------------------------------------------------ header menu */
+.menu { position: relative; flex: 0 0 auto; }
+.menu-trigger { display: flex; align-items: center; gap: 7px; }
+/* Three bars drawn in the border so the trigger reads as a menu without an icon font. */
+.menu-trigger::before {
+  content: ''; width: 13px; height: 9px;
+  border-top: 2px solid currentColor; border-bottom: 2px solid currentColor;
+  box-shadow: inset 0 0 0 1px transparent;
+  background: linear-gradient(currentColor, currentColor) center/100% 2px no-repeat;
+}
+.menu-trigger[aria-expanded="true"] { background: rgba(255, 255, 255, .06); border-color: var(--line); }
+
+.menu-panel {
+  position: absolute; top: calc(100% + 7px); right: 0; z-index: 50;
+  min-width: 190px;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 6px;
+  background: linear-gradient(180deg, #191511, #100e0c);
+  border: 1px solid var(--gold-line); border-radius: var(--radius-sm);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 255, 255, .04);
+}
+.menu-item {
+  display: block; width: 100%; text-align: left;
+  background: transparent; border-color: transparent; color: var(--text-dim);
+  padding: 7px 10px; font-size: 13px; font-weight: 500;
+  text-decoration: none;
+}
+.menu-item:hover { background: rgba(255, 255, 255, .05); border-color: transparent; color: var(--text); }
+.menu-sep { height: 1px; margin: 4px 2px; background: var(--line); }
 
 /* --------------------------------------------------------------- buttons */
 button, .btn {
@@ -394,7 +444,7 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
   border: 1px solid #4a3a1f; color: var(--warn);
   border-radius: var(--radius-sm); padding: 10px 14px; font-size: 12px; margin-bottom: 16px;
 }
-.lang-select { width: auto; padding: 7px 9px; font-size: 13px; }
+.lang-select { width: auto; padding: 4px 7px; font-size: 12px; flex: 0 0 auto; }
 .hide { display: none !important; }
 
 /* ----------------------------------------------------------------- slots */
@@ -873,7 +923,11 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
   .crash-mult, .limbo-readout .mult { font-size: 48px; }
   .dice-readout .roll { font-size: 44px; }
   .bigwin .amount { font-size: 38px; }
-  header.top { gap: 10px; padding: 10px 14px; }
+  header.top { gap: 8px; padding: 5px 12px; }
+  /* On a phone the brand word and the wallet switch are the two things worth losing
+     before the bar is allowed to take a second line. */
+  .brand #siteName { display: none; }
+  .mode-switch { display: none; }
   .card { width: 48px; height: 68px; font-size: 16px; }
   .empty-slot { width: 48px; height: 68px; }
 }
@@ -883,12 +937,12 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
 
 /* --------------------------------------------------------- play mode */
 .mode-switch {
-  display: inline-flex; padding: 3px; gap: 3px;
+  display: inline-flex; padding: 2px; gap: 3px; flex: 0 0 auto;
   background: var(--bg-input); border: 1px solid var(--line); border-radius: 999px;
 }
 .mode-switch button {
   border: none; background: transparent; color: var(--text-dim);
-  border-radius: 999px; padding: 5px 13px; font-size: 12px; letter-spacing: .04em;
+  border-radius: 999px; padding: 4px 11px; font-size: 12px; letter-spacing: .04em;
 }
 .mode-switch button.on {
   background: linear-gradient(180deg, var(--gold-bright), var(--gold));

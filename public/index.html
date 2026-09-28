@@ -12,7 +12,10 @@
 <header class="top">
   <div class="brand"><span class="chip"></span><span id="siteName">Casino</span></div>
 
-  <nav class="row wrap" id="navGames"></nav>
+  <!-- Not `class="row wrap"`: `.wrap` is the page-container class (max-width 1280 and
+       20px of vertical padding), so the nav was quietly wearing 40px of page padding and
+       was the tallest thing in the bar. It scrolls sideways now instead of wrapping. -->
+  <nav class="row" id="navGames"></nav>
 
   <span class="spacer"></span>
 
@@ -33,18 +36,26 @@
   <select class="lang-select" id="langSelect" data-i18n-title="common.language"></select>
 
   <div class="row" id="authButtons">
-    <button class="ghost" id="btnSignin" data-i18n="nav.signin">Sign in</button>
-    <button class="primary" id="btnSignup" data-i18n="nav.signup">Register</button>
+    <button class="ghost tiny" id="btnSignin" data-i18n="nav.signin">Sign in</button>
+    <button class="primary tiny" id="btnSignup" data-i18n="nav.signup">Register</button>
   </div>
 
-  <div class="row wrap hide" id="userButtons">
-    <button class="ghost tiny" id="btnWallet" data-i18n="nav.wallet">Wallet</button>
-    <button class="ghost tiny" id="btnFair" data-i18n="nav.fair">Fairness</button>
-    <button class="ghost tiny" id="btnAff" data-i18n="nav.affiliate">Referrals</button>
-    <button class="ghost tiny" id="btnLimits" data-i18n="nav.limits">Limits</button>
-    <button class="ghost tiny" id="btnToken" data-i18n="tok.nav">Token</button>
-    <a class="btn tiny hide" id="btnAdmin" href="/admin" data-i18n="nav.admin">Admin</a>
-    <button class="ghost tiny" id="btnSignout" data-i18n="nav.signout">Sign out</button>
+  <!-- Seven account buttons used to sit here in a row of their own, which is most of the
+       reason the header was three bands tall. They are all things you press between games,
+       never during one, so they live behind this button now. -->
+  <div class="menu hide" id="accountMenu">
+    <button class="ghost tiny menu-trigger" id="btnAccount" aria-haspopup="true"
+            aria-expanded="false" aria-controls="userButtons" data-i18n="nav.account">Account</button>
+    <div class="menu-panel" id="userButtons" hidden>
+      <button class="menu-item" id="btnWallet" data-i18n="nav.wallet">Wallet</button>
+      <button class="menu-item" id="btnFair" data-i18n="nav.fair">Fairness</button>
+      <button class="menu-item" id="btnAff" data-i18n="nav.affiliate">Referrals</button>
+      <button class="menu-item" id="btnLimits" data-i18n="nav.limits">Limits</button>
+      <button class="menu-item" id="btnToken" data-i18n="tok.nav">Token</button>
+      <a class="menu-item hide" id="btnAdmin" href="/admin" data-i18n="nav.admin">Admin</a>
+      <div class="menu-sep"></div>
+      <button class="menu-item" id="btnSignout" data-i18n="nav.signout">Sign out</button>
+    </div>
   </div>
 </header>
 

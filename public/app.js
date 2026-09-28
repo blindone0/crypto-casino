@@ -337,7 +337,7 @@ function authModal(mode = 'login') {
 
 function afterAuth() {
   $('#authButtons').classList.add('hide');
-  $('#userButtons').classList.remove('hide');
+  $('#accountMenu').classList.remove('hide');
   $('#btnAdmin').classList.toggle('hide', state.user.role !== 'admin');
   $('#modeSwitch').classList.toggle('hide', !state.cfg?.demo?.enabled);
   applyWallet();
@@ -429,7 +429,7 @@ async function signOut() {
   state.user = null;
   state.csrf = null;
   $('#authButtons').classList.remove('hide');
-  $('#userButtons').classList.add('hide');
+  $('#accountMenu').classList.add('hide');
   $('#modeSwitch').classList.add('hide');
   $('#balanceBox').hidden = true;
   state.wallet = 'real';
@@ -3537,6 +3537,28 @@ async function boot() {
   soundBtn.onclick = () => { audio.sfx('click'); radioModal(paintSound); };
   paintSound();
   document.addEventListener('localechange', paintSound);
+
+  // The account menu. Closing on any outside pointerdown and on Escape is the whole of
+  // it — the buttons inside keep the ids they always had, so their wiring below is
+  // untouched by having moved into a panel.
+  const accountMenu = $('#accountMenu');
+  const accountTrigger = $('#btnAccount');
+  const accountPanel = $('#userButtons');
+  const closeAccount = () => {
+    accountPanel.hidden = true;
+    accountTrigger.setAttribute('aria-expanded', 'false');
+  };
+  accountTrigger.onclick = (e) => {
+    e.stopPropagation();
+    const open = accountPanel.hidden;
+    accountPanel.hidden = !open;
+    accountTrigger.setAttribute('aria-expanded', String(open));
+  };
+  document.addEventListener('pointerdown', (e) => {
+    if (!accountPanel.hidden && !accountMenu.contains(e.target)) closeAccount();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAccount(); });
+  accountPanel.addEventListener('click', closeAccount);
 
   $('#btnSignin').onclick = () => authModal('login');
   $('#btnSignup').onclick = () => authModal('register');

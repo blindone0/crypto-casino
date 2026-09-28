@@ -8,6 +8,7 @@ const LANGS = [
 const STRINGS = {
   // ---- chrome
   'nav.games': { en: 'Games', ru: 'Игры' },
+  'nav.account': { en: 'Account', ru: 'Аккаунт' },
   'nav.wallet': { en: 'Wallet', ru: 'Кошелёк' },
   'nav.fair': { en: 'Fairness', ru: 'Честность' },
   'nav.affiliate': { en: 'Referrals', ru: 'Рефералы' },
