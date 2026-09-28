@@ -924,10 +924,8 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
   .dice-readout .roll { font-size: 44px; }
   .bigwin .amount { font-size: 38px; }
   header.top { gap: 8px; padding: 5px 12px; }
-  /* On a phone the brand word and the wallet switch are the two things worth losing
-     before the bar is allowed to take a second line. */
+  /* On a phone the brand word goes before the bar is allowed to take a second line. */
   .brand #siteName { display: none; }
-  .mode-switch { display: none; }
   .card { width: 48px; height: 68px; font-size: 16px; }
   .empty-slot { width: 48px; height: 68px; }
 }
@@ -935,28 +933,6 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
   * { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
 
-/* --------------------------------------------------------- play mode */
-.mode-switch {
-  display: inline-flex; padding: 2px; gap: 3px; flex: 0 0 auto;
-  background: var(--bg-input); border: 1px solid var(--line); border-radius: 999px;
-}
-.mode-switch button {
-  border: none; background: transparent; color: var(--text-dim);
-  border-radius: 999px; padding: 4px 11px; font-size: 12px; letter-spacing: .04em;
-}
-.mode-switch button.on {
-  background: linear-gradient(180deg, var(--gold-bright), var(--gold));
-  color: #1a1305; font-weight: 700;
-}
-.mode-switch button.on[data-wallet="demo"] {
-  background: linear-gradient(180deg, #5fd6ff, #2f9fd0); color: #04212e;
-}
-body.practice .balance { border-color: rgba(95, 214, 255, .35); }
-body.practice .balance .value { color: #8fe3ff; }
-.banner.practice {
-  background: linear-gradient(180deg, #0f2733, #0a1a22);
-  border-color: #23566b; color: #8fe3ff;
-}
 
 /* ------------------------------------------------- slots: After Dark theme */
 /* Only the cabinet dressing changes with the theme. The reel maths, paytable and

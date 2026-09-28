@@ -129,75 +129,67 @@ test('capPayout clamps an unbounded win to what the house can afford', (t) => {
   assert.ok(huge.payout < ledger.bankroll(db), 'the cap must always be payable');
 });
 
-test('settleBet moves the stake, pays the win and records the edge', (t) => {
+test('recordBet writes the round down and moves nothing', (t) => {
   const { cfg, db, user } = setup();
   t.after(() => cleanup(cfg, db));
   db.tx(() => ledger.mint(db, ledger.houseAccount(db).id, 1000 * U.UNIT, 'bankroll.in', null));
-  db.tx(() => ledger.transfer(db, ledger.houseAccount(db).id,
-    ledger.userAccount(db, user.id).id, 10 * U.UNIT, 'topup', null));
 
-  const before = ledger.userAccount(db, user.id).balance;
-  db.tx(() => ledger.settleBet(db, cfg, {
+  // `settleBet` used to move the stake and the payout through the credit ledger as well
+  // as writing the row. It is `recordBet` now and only writes the row: the money moved on
+  // the token chain before this was called, because the only currency is the tugrik and
+  // the operator cannot move one without the player's signature.
+  const bankBefore = ledger.bankroll(db);
+  db.tx(() => ledger.recordBet(db, cfg, {
     user, game: 'dice', wager: U.UNIT, multiplier: 1.98, payout: 198000000,
     edgeUnits: 1000000, seedId: null, nonce: 1, clientSeed: 'c', detail: { t: 1 },
   }));
 
-  const after = ledger.userAccount(db, user.id).balance;
-  assert.strictEqual(after - before, 98000000, 'net should be payout minus stake');
+  assert.strictEqual(ledger.bankroll(db), bankBefore, 'recording a bet moves no credits');
   const bet = db.get('SELECT * FROM bets ORDER BY id DESC LIMIT 1');
   assert.strictEqual(bet.profit, 98000000);
   assert.strictEqual(bet.edge_units, 1000000);
+  assert.strictEqual(bet.client_seed, 'c', 'the fairness record is the point of the row');
   assert.ok(ledger.auditBalances(db).ok);
 });
 
-test('a losing bet leaves the stake with the house', (t) => {
+test('a round with no fairness seed behind it still records', (t) => {
   const { cfg, db, user } = setup();
   t.after(() => cleanup(cfg, db));
-  db.tx(() => ledger.mint(db, ledger.houseAccount(db).id, 1000 * U.UNIT, 'bankroll.in', null));
-  db.tx(() => ledger.transfer(db, ledger.houseAccount(db).id,
-    ledger.userAccount(db, user.id).id, 10 * U.UNIT, 'topup', null));
-
-  const bankBefore = ledger.bankroll(db);
-  db.tx(() => ledger.settleBet(db, cfg, {
-    user, game: 'dice', wager: U.UNIT, multiplier: 0, payout: 0,
-    edgeUnits: 1000000, seedId: null, nonce: 2, clientSeed: 'c', detail: {},
+  // The arcade and a settled match are money moving without a dice roll, and `edge_units`
+  // and `client_seed` are NOT NULL. Defaulting them here is what stops a settlement
+  // throwing on columns it was never going to fill.
+  db.tx(() => ledger.recordBet(db, cfg, {
+    user, game: 'match', wager: 5 * U.UNIT, multiplier: 2, payout: 10 * U.UNIT,
   }));
-  // The house keeps the stake, minus the rakeback carved out of the edge.
-  const rake = ledger.userAccount(db, user.id, 'rakeback').balance;
-  assert.strictEqual(ledger.bankroll(db), bankBefore + U.UNIT - rake);
-  assert.ok(rake > 0, 'rakeback should accrue');
-  assert.ok(ledger.auditBalances(db).ok);
+  const bet = db.get('SELECT * FROM bets ORDER BY id DESC LIMIT 1');
+  assert.strictEqual(bet.edge_units, 0);
+  assert.strictEqual(bet.client_seed, '');
+  assert.strictEqual(bet.profit, 5 * U.UNIT);
 });
 
-test('affiliate commission and rakeback come out of the edge, never the stake', (t) => {
-  const cfg = testConfig({ referralCommission: 0.2, rakeback: { enabled: true, rate: 0.05 } });
-  const db = openTestDb(cfg);
-  t.after(() => cleanup(cfg, db));
-
-  const boss = auth.register(db, cfg, { username: 'boss', password: 'longpassword1' });
-  const player = auth.register(db, cfg, {
-    username: 'player', password: 'longpassword1', referralCode: boss.referral_code,
+test('affiliate commission and rakeback still work when they are switched on', (t) => {
+  // Both ship switched off: they pay into a credit balance that no longer exists, and
+  // paying them in tugriks would mean extra chain blocks per bet for an acquisition
+  // mechanic this site does not need. The mechanism is kept and tested so turning them
+  // back on is a config change rather than a rewrite.
+  const { cfg, db, user } = setup({
+    referralCommission: 0.20, rakeback: { enabled: true, rate: 0.05 },
   });
-  assert.strictEqual(player.referred_by, boss.id);
-
+  t.after(() => cleanup(cfg, db));
   db.tx(() => ledger.mint(db, ledger.houseAccount(db).id, 1000 * U.UNIT, 'bankroll.in', null));
-  db.tx(() => ledger.transfer(db, ledger.houseAccount(db).id,
-    ledger.userAccount(db, player.id).id, 10 * U.UNIT, 'topup', null));
 
-  const wager = U.UNIT;
-  const edgeUnits = Math.floor(wager * 0.01);
-  db.tx(() => ledger.settleBet(db, cfg, {
-    user: player, game: 'dice', wager, multiplier: 0, payout: 0,
-    edgeUnits, seedId: null, nonce: 1, clientSeed: 'c', detail: {},
+  db.run('UPDATE users SET referred_by=? WHERE id=?', user.id, user.id);
+  const withRef = db.get('SELECT * FROM users WHERE id=?', user.id);
+
+  const edge = 1000000;
+  db.tx(() => ledger.recordBet(db, cfg, {
+    user: withRef, game: 'dice', wager: U.UNIT, multiplier: 0, payout: 0,
+    edgeUnits: edge, seedId: null, nonce: 1, clientSeed: 'c', detail: {},
   }));
 
-  const commission = ledger.affiliateAccount(db, boss.id).balance;
-  const rake = ledger.userAccount(db, player.id, 'rakeback').balance;
-  assert.strictEqual(commission, Math.floor(edgeUnits * 0.2));
-  assert.strictEqual(rake, Math.floor(edgeUnits * 0.05));
-  assert.ok(commission + rake < edgeUnits, 'payouts must stay inside the edge');
-  assert.strictEqual(db.get('SELECT COUNT(*) AS n FROM referral_earnings').n, 1);
-  assert.ok(ledger.auditBalances(db).ok);
+  assert.strictEqual(ledger.affiliateAccount(db, user.id).balance, Math.floor(edge * 0.20));
+  assert.strictEqual(ledger.userAccount(db, user.id, 'rakeback').balance, Math.floor(edge * 0.05));
+  assert.ok(ledger.auditBalances(db).ok, 'both come out of the house, so the books still balance');
 });
 
 test('house stats report actual and theoretical revenue separately', (t) => {
@@ -208,7 +200,7 @@ test('house stats report actual and theoretical revenue separately', (t) => {
     ledger.userAccount(db, user.id).id, 100 * U.UNIT, 'topup', null));
 
   for (let i = 0; i < 10; i += 1) {
-    db.tx(() => ledger.settleBet(db, cfg, {
+    db.tx(() => ledger.recordBet(db, cfg, {
       user, game: 'dice', wager: U.UNIT, multiplier: i < 5 ? 1.98 : 0,
       payout: i < 5 ? 198000000 : 0, edgeUnits: 1000000,
       seedId: null, nonce: i, clientSeed: 'c', detail: {},

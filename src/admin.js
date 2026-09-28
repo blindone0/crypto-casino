@@ -41,8 +41,6 @@ function overview(db, cfg) {
   const activeToday = db.get(
     'SELECT COUNT(DISTINCT user_id) AS n FROM bets WHERE created_at >= ?', now() - DAY,
   ).n;
-  const wdPending = db.get("SELECT COUNT(*) AS n, COALESCE(SUM(amount_units),0) AS s FROM withdrawals WHERE state='pending'");
-  const wdFailed = db.get("SELECT COUNT(*) AS n FROM withdrawals WHERE state='failed'").n;
 
   return {
     bankroll,
@@ -55,9 +53,6 @@ function overview(db, cfg) {
     maxProfitPerBet: ledger.maxProfitAllowed(db, cfg),
     users,
     activeToday,
-    withdrawalsPending: wdPending.n,
-    withdrawalsPendingUnits: wdPending.s,
-    withdrawalsFailed: wdFailed,
     windows,
     audit: ledger.auditBalances(db),
     config: {
@@ -65,7 +60,6 @@ function overview(db, cfg) {
       risk: cfg.risk,
       referralCommission: cfg.referralCommission,
       rakeback: cfg.rakeback,
-      walletDriver: cfg.wallet.driver,
     },
   };
 }
@@ -226,8 +220,6 @@ function userDetail(db, id) {
     balances: { main: main.balance, rakeback: rake.balance, affiliate: aff.balance },
     stats,
     bets,
-    deposits: db.all('SELECT * FROM deposits WHERE user_id=? ORDER BY id DESC LIMIT 20', id),
-    withdrawals: db.all('SELECT * FROM withdrawals WHERE user_id=? ORDER BY id DESC LIMIT 20', id),
     referrals: db.get('SELECT COUNT(*) AS n FROM users WHERE referred_by=?', id).n,
   };
 }
@@ -241,35 +233,6 @@ function setFrozen(db, id, frozen, actor) {
     db.audit(actor, frozen ? 'user.freeze' : 'user.unfreeze', { id });
     return { id, frozen: !!frozen };
   });
-}
-
-/** Manual balance correction. Always audited, and never allowed to go negative. */
-function adjustBalance(db, id, units, actor, note) {
-  if (!Number.isSafeInteger(units) || units === 0) throw new U.BadRequest('bad amount');
-  return db.tx(() => {
-    const user = db.get('SELECT * FROM users WHERE id=?', id);
-    if (!user) throw new U.NotFound('no such user');
-    const acct = ledger.userAccount(db, id);
-    const house = ledger.houseAccount(db);
-    if (units > 0) ledger.transfer(db, house.id, acct.id, units, 'adjust.credit', note || 'operator credit');
-    else ledger.transfer(db, acct.id, house.id, -units, 'adjust.debit', note || 'operator debit');
-    db.audit(actor, 'balance.adjust', { id, units, note });
-    return { balance: ledger.userAccount(db, id).balance };
-  });
-}
-
-function withdrawalQueue(db, state = null) {
-  const rows = state
-    ? db.all(
-      `SELECT w.*, u.username FROM withdrawals w JOIN users u ON u.id=w.user_id
-        WHERE w.state=? ORDER BY w.id DESC LIMIT 200`, state,
-    )
-    : db.all(
-      `SELECT w.*, u.username FROM withdrawals w JOIN users u ON u.id=w.user_id
-        ORDER BY CASE w.state WHEN 'pending' THEN 0 WHEN 'failed' THEN 1 WHEN 'approved' THEN 2 ELSE 3 END,
-                 w.id DESC LIMIT 200`,
-    );
-  return rows;
 }
 
 const auditTail = (db, limit = 100) => db.all(
@@ -292,6 +255,6 @@ const affiliateReport = (db) => db.all(
 module.exports = {
   overview, dailySeries, riskReport,
   addBankroll, removeBankroll, sweepFees,
-  listUsers, userDetail, setFrozen, adjustBalance,
-  withdrawalQueue, auditTail, affiliateReport,
+  listUsers, userDetail, setFrozen,
+  auditTail, affiliateReport,
 };

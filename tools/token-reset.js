@@ -45,7 +45,11 @@ function main() {
   if (!confirmed) {
     console.log('');
     console.log('Nothing was changed. Re-run with --yes to destroy the above and start again.');
-    console.log('Player accounts, casino balances and the bankroll are not affected.');
+    console.log('Sign-in accounts are kept. Tugrik wallets, balances, open matches and');
+    console.log('arcade plays are not: every account gets a new welcome grant afterwards.');
+    console.log('');
+    console.log('This is a development tool. The moment anyone else holds a copy of the');
+    console.log('chain, a reset here is a fork rather than a fresh start.');
     db.close();
     return;
   }
@@ -55,6 +59,19 @@ function main() {
     db.run('DELETE FROM token_balances');
     db.run('DELETE FROM token_blocks');
     db.run('DELETE FROM token_keys');
+    // The once-per-account grant record. Without this the reset is worse than useless:
+    // every existing account stays marked as already granted, `registerKey` pays them
+    // nothing, and everybody ends up on a fresh chain holding zero with no way to get any.
+    db.run('DELETE FROM token_grants');
+    // The bet log points at rounds staked on a chain that no longer exists.
+    db.run('DELETE FROM token_bets');
+    // Arcade plays and match seats carry pubkeys from the destroyed chain. A match left
+    // open would otherwise report `held=0, owed>0` at the next boot and send the sweeper
+    // looking for a refund out of an empty house key.
+    db.run('DELETE FROM arcade_plays');
+    db.run('DELETE FROM match_moves');
+    db.run('DELETE FROM match_seats');
+    db.run('DELETE FROM matches');
     // The keys themselves go too. A treasury key that once held a different supply is
     // confusing to look at later, and nothing signed by it survives this.
     db.run("DELETE FROM kv WHERE key IN ('token.treasuryKey','token.houseKey')");

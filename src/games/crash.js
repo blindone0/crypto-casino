@@ -223,7 +223,7 @@ function createCrash({ db, cfg, bankFor, logger = console }) {
   /** Credit a winning crash bet. Caller must be inside a transaction. */
   function payWin(bet, atMultiplier) {
     const user = db.get('SELECT * FROM users WHERE id=?', bet.user_id);
-    const bank = bankFor(bet.mode);
+    const bank = bankFor();
     const raw = U.mulUnits(bet.wager, atMultiplier);
     const payout = Math.min(raw, bet.max_payout || raw);
 
@@ -261,7 +261,7 @@ function createCrash({ db, cfg, bankFor, logger = console }) {
       for (const bet of losers) {
         const user = db.get('SELECT * FROM users WHERE id=?', bet.user_id);
         db.run("UPDATE crash_bets SET state='lost' WHERE id=?", bet.id);
-        bankFor(bet.mode).settle({
+        bankFor().settle({
           user,
           game: 'crash',
           wager: bet.wager,
@@ -290,7 +290,15 @@ function createCrash({ db, cfg, bankFor, logger = console }) {
   }
 
   // ------------------------------------------------------------ player API
-  function placeBet(user, body, mode = 'real') {
+  /**
+   * Take a crash bet.
+   *
+   * `spend` is the player's signature over their stake and it has to reach the bank. It
+   * did not before: this took a wallet name instead and dropped the signature, so every
+   * tugrik crash bet was refused by `takeStake`. It went unnoticed because crash was only
+   * ever played with credits.
+   */
+  function placeBet(user, body, spend) {
     if (!round || round.state !== 'betting') throw new U.BadRequest('betting is closed for this round');
     const wager = U.parseAmount(body.amount);
     const autoRaw = body.autoCashout == null || body.autoCashout === '' ? 0 : Number(body.autoCashout);
@@ -303,7 +311,7 @@ function createCrash({ db, cfg, bankFor, logger = console }) {
       if (db.get('SELECT 1 FROM crash_bets WHERE round_id=? AND user_id=?', round.id, user.id)) {
         throw new U.BadRequest('you already have a bet on this round');
       }
-      const bank = bankFor(mode);
+      const bank = bankFor(spend);
       bank.checkLimits(user, wager, 1);
       const maxPayout = bank.capPayout(wager, Infinity).ceiling;
 
@@ -344,7 +352,7 @@ function createCrash({ db, cfg, bankFor, logger = console }) {
         payout,
         profit: payout - bet.wager,
         mode: bet.mode,
-        balance: bankFor(bet.mode).balance(user.id),
+        balance: bankFor().balance(user.id),
       };
     });
     broadcast('cashout', { username: user.username, at: live, auto: false });
@@ -367,7 +375,7 @@ function createCrash({ db, cfg, bankFor, logger = console }) {
           const user = db.get('SELECT * FROM users WHERE id=?', b.user_id);
           // Refund to whichever bank took the stake, then record it as a settled
           // zero-multiplier round so the books and the bet log stay consistent.
-          bankFor(b.mode).settle({
+          bankFor().settle({
             user,
             game: 'crash',
             wager: b.wager,

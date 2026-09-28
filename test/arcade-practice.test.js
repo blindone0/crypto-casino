@@ -168,11 +168,10 @@ test('practice refuses a cabinet that does not exist', (t) => {
   assert.throws(() => arcade.practicePlay(db, cfg, users.alice, ''), /no such cabinet/);
 });
 
-test('practice refuses when practice mode is switched off', (t) => {
-  const { cfg, db, users } = setup({ demo: { enabled: false } });
-  t.after(() => cleanup(cfg, db));
-  assert.throws(() => arcade.practicePlay(db, cfg, users.alice, 'pinball'), /practice mode is off/);
-});
+// There used to be a test here asserting that a free play is refused when practice mode
+// is switched off. Practice mode was a property of the play-money wallet, and that wallet
+// is gone: a free go is now simply what the arcade offers when you are short of a tugrik.
+// The arcade's own switch still closes the room, which the next test covers.
 
 test('practice refuses when the arcade is closed', (t) => {
   const { cfg, db, users } = setup({ arcade: { enabled: false } });

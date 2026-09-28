@@ -61,14 +61,15 @@ function register(db, cfg, { username, password, referralCode, ip }) {
     ledger.userAccount(db, user.id, 'rakeback');
     rotateSeed(db, user.id);
 
-    // Welcome credit so a new player can try the games without funding first.
-    if (cfg.faucetUnits > 0) {
-      const house = ledger.houseAccount(db);
-      const acct = ledger.userAccount(db, user.id);
-      if (house.balance >= cfg.faucetUnits) {
-        ledger.transfer(db, house.id, acct.id, cfg.faucetUnits, 'faucet', 'signup bonus');
-      }
-    }
+    // The welcome grant is NOT paid here, and that is deliberate rather than an omission.
+    //
+    // Tugriks live on a key the player holds, and the browser has to generate that key
+    // before there is anywhere to put them. So the grant is paid by `registerKey` when
+    // the client posts its new public key, moments after this returns — out of the
+    // treasury, once per account, recorded in `token_grants`. See src/tokenchain.js.
+    //
+    // The server never sees the private half, which is the whole point, and is why this
+    // cannot simply hand out a balance the way the old credit faucet did.
     db.audit(`user:${user.id}`, 'register', { username: name, referrer }, ip);
     return db.get('SELECT * FROM users WHERE id=?', user.id);
   });

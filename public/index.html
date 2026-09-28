@@ -19,12 +19,6 @@
 
   <span class="spacer"></span>
 
-  <div class="mode-switch hide" id="modeSwitch" role="group">
-    <button data-wallet="real" class="on" data-i18n="demo.real">Real</button>
-    <button data-wallet="demo" data-i18n="demo.practice">Practice</button>
-    <button data-wallet="token" data-i18n="tok.wallet">Tugriks</button>
-  </div>
-
   <div class="balance" id="balanceBox" hidden>
     <span class="label" data-i18n="nav.balance">Balance</span>
     <span class="value" id="balanceValue">0.00000000</span>
@@ -47,11 +41,10 @@
     <button class="ghost tiny menu-trigger" id="btnAccount" aria-haspopup="true"
             aria-expanded="false" aria-controls="userButtons" data-i18n="nav.account">Account</button>
     <div class="menu-panel" id="userButtons" hidden>
-      <button class="menu-item" id="btnWallet" data-i18n="nav.wallet">Wallet</button>
+      <button class="menu-item" id="btnToken" data-i18n="nav.wallet">Wallet</button>
       <button class="menu-item" id="btnFair" data-i18n="nav.fair">Fairness</button>
       <button class="menu-item" id="btnAff" data-i18n="nav.affiliate">Referrals</button>
       <button class="menu-item" id="btnLimits" data-i18n="nav.limits">Limits</button>
-      <button class="menu-item" id="btnToken" data-i18n="tok.nav">Token</button>
       <a class="menu-item hide" id="btnAdmin" href="/admin" data-i18n="nav.admin">Admin</a>
       <div class="menu-sep"></div>
       <button class="menu-item" id="btnSignout" data-i18n="nav.signout">Sign out</button>

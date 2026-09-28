@@ -196,7 +196,7 @@ function reveal({ db, cfg, user, bankFor }, body) {
 
     const broken = JSON.parse(g.broken);
     const edge = cfg.houseEdge.puzzle;
-    const bank = bankFor(g.mode);
+    const bank = bankFor();
 
     if (broken.includes(tile)) {
       db.run("UPDATE puzzle_games SET state='lost', ended_at=? WHERE id=?", now(), g.id);
@@ -246,7 +246,7 @@ function cashout({ db, cfg, user, bankFor }) {
 
 /** Pay out a puzzle. Caller must already hold a transaction. */
 function finish({ db, cfg, user, bankFor }, g) {
-  const bank = bankFor(g.mode);
+  const bank = bankFor();
   const tier = tierOf(g.difficulty);
   const picks = JSON.parse(g.picks);
   const broken = JSON.parse(g.broken);

@@ -13,8 +13,6 @@ const ledger = require('./ledger');
 const limits = require('./limits');
 const fair = require('./fair');
 const adminApi = require('./admin');
-const walletApi = require('./wallet');
-const treasury = require('./treasury');
 const bankMod = require('./bank');
 const tokenchain = require('./tokenchain');
 const arcade = require('./arcade');
@@ -47,8 +45,7 @@ const MIME = {
 
 function build(cfg) {
   const db = dbMod.open(cfg.dbPath);
-  const driver = walletApi.loadDriver(cfg);
-  const bankFor = (mode, spend) => bankMod.bankFor(db, cfg, mode, spend);
+  const bankFor = (spend) => bankMod.bankFor(db, cfg, spend);
   const crash = crashMod.createCrash({ db, cfg, bankFor });
   const geo = geoMod.createGeo(cfg);
   const publicDir = path.join(cfg.root, 'public');
@@ -137,29 +134,19 @@ function build(cfg) {
   add('GET', '/api/config', async () => ({
     siteName: cfg.siteName,
     locale: cfg.defaultLocale,
-    currency: cfg.currencyLabel,
+    // There is one currency, so the ticker is the tugrik symbol and nothing chooses.
+    currency: cfg.token.symbol,
     unit: U.UNIT,
     houseEdge: cfg.houseEdge,
     risk: {
-      minBetUnits: cfg.risk.minBetUnits,
-      maxBetUnits: cfg.risk.maxBetUnits,
+      // The stake bounds a client should enforce. They come from the token config now:
+      // the old `risk.minBetUnits`/`maxBetUnits` priced credits, which no longer exist.
+      minBetUnits: cfg.token.bet.min,
+      maxBetUnits: cfg.token.bet.max,
       maxMultiplier: cfg.risk.maxMultiplier,
-      maxProfitPerBet: ledger.maxProfitAllowed(db, cfg),
-    },
-    wallet: {
-      driver: driver.name,
-      label: driver.label,
-      minConfirmations: cfg.wallet.minConfirmations,
-      minDeposit: cfg.wallet.minDepositUnits,
-      minWithdrawal: cfg.wallet.minWithdrawalUnits,
-      withdrawalFee: cfg.wallet.withdrawalFeeUnits,
-      isMock: !!driver.isMock,
-      isManual: !!driver.isManual,
-      depositNote: driver.depositNote || null,
     },
     rakeback: cfg.rakeback,
     referralCommission: cfg.referralCommission,
-    demo: { enabled: cfg.demo.enabled, startingUnits: cfg.demo.startingUnits },
     token: { enabled: cfg.token.enabled, symbol: cfg.token.symbol },
     arcade: { enabled: cfg.arcade.enabled, tokenCost: cfg.arcade.tokenCost },
     match: {
@@ -216,9 +203,6 @@ function build(cfg) {
       user: auth.publicUser(db, user),
       csrf: ctx.auth.session.csrf,
       play: limits.playTimeToday(db, user.id),
-      maxProfitPerBet: ledger.maxProfitAllowed(db, cfg),
-      demoEnabled: cfg.demo.enabled,
-      demoBalance: cfg.demo.enabled ? bankMod.demoBank(db, cfg).balance(user.id) : 0,
     };
   });
 
@@ -317,43 +301,36 @@ function build(cfg) {
 
   // --------------------------------------------------------------- games
   /**
-    * Build the context a game runs in. `mode` picks which bank the stake and payout move
-    * through; anything but an explicit "demo" is real money. Games that persist a round
-    * also get `bankFor`, so they can settle against the bank the round was opened with
-    * rather than whatever the current request claims.
-    */
-  const gameCtx = (ctx, mode, spend) => {
+   * Build the context a game runs in.
+   *
+   * This used to pick a bank from a `wallet` field on the request body. There is one
+   * currency now, so the only thing it still carries is `spend` — the player's signature
+   * over their stake, which the bank closes over. Games that persist a round keep
+   * `bankFor` so they can settle a round opened before this change.
+   */
+  const gameCtx = (ctx, spend) => {
     const user = requireUser(ctx);
     limits.requireNotExcluded(user);
-    const wanted = ['demo', 'token'].includes(mode) ? mode : 'real';
-    if (wanted === 'demo' && !cfg.demo.enabled) throw new U.BadRequest('practice mode is disabled');
-    if (wanted === 'token' && !cfg.token.enabled) throw new U.BadRequest('the site token is disabled');
-    return { db, cfg, user, bank: bankFor(wanted, spend), bankFor };
+    if (!cfg.token.enabled) throw new U.BadRequest('the site token is disabled');
+    return { db, cfg, user, bank: bankFor(spend), bankFor };
   };
-
-  /**
-   * Which bank a bet should move through. Deliberately called `wallet` and not `mode`:
-   * dice already uses `mode` for the roll direction, and overloading it would have made
-   * "play for free" and "roll over" the same field.
-   */
-  const modeOf = (src) => (['demo', 'token'].includes(src?.wallet) ? src.wallet : 'real');
 
   add('POST', '/api/bet/dice', async (ctx, req) => {
     checkCsrf(req, ctx);
     const body = await U.readJsonBody(req);
-    return dice.play(gameCtx(ctx, modeOf(body), body.spend), body);
+    return dice.play(gameCtx(ctx, body.spend), body);
   });
 
   add('POST', '/api/bet/limbo', async (ctx, req) => {
     checkCsrf(req, ctx);
     const body = await U.readJsonBody(req);
-    return limbo.play(gameCtx(ctx, modeOf(body), body.spend), body);
+    return limbo.play(gameCtx(ctx, body.spend), body);
   });
 
   add('POST', '/api/bet/mines/start', async (ctx, req) => {
     checkCsrf(req, ctx);
     const body = await U.readJsonBody(req);
-    return mines.start(gameCtx(ctx, modeOf(body), body.spend), body);
+    return mines.start(gameCtx(ctx, body.spend), body);
   });
 
   add('POST', '/api/bet/mines/reveal', async (ctx, req) => {
@@ -375,7 +352,7 @@ function build(cfg) {
   add('POST', '/api/bet/slots', async (ctx, req) => {
     checkCsrf(req, ctx);
     const body = await U.readJsonBody(req);
-    return slots.play(gameCtx(ctx, modeOf(body), body.spend), body);
+    return slots.play(gameCtx(ctx, body.spend), body);
   });
 
   add('GET', '/api/bet/slots/info', async () => slots.info(cfg));
@@ -384,7 +361,7 @@ function build(cfg) {
   add('POST', '/api/bet/puzzle/start', async (ctx, req) => {
     checkCsrf(req, ctx);
     const body = await U.readJsonBody(req);
-    return puzzle.start(gameCtx(ctx, modeOf(body), body.spend), body);
+    return puzzle.start(gameCtx(ctx, body.spend), body);
   });
 
   add('POST', '/api/bet/puzzle/reveal', async (ctx, req) => {
@@ -408,7 +385,7 @@ function build(cfg) {
   add('POST', '/api/bet/debertz/start', async (ctx, req) => {
     checkCsrf(req, ctx);
     const body = await U.readJsonBody(req);
-    return debertz.start(gameCtx(ctx, modeOf(body), body.spend), body);
+    return debertz.start(gameCtx(ctx, body.spend), body);
   });
 
   add('POST', '/api/bet/debertz/trump', async (ctx, req) => {
@@ -432,7 +409,7 @@ function build(cfg) {
   add('POST', '/api/bet/preferans/start', async (ctx, req) => {
     checkCsrf(req, ctx);
     const body = await U.readJsonBody(req);
-    return preferans.start(gameCtx(ctx, modeOf(body), body.spend), body);
+    return preferans.start(gameCtx(ctx, body.spend), body);
   });
 
   add('POST', '/api/bet/preferans/trump', async (ctx, req) => {
@@ -469,9 +446,12 @@ function build(cfg) {
   add('POST', '/api/crash/bet', async (ctx, req) => {
     checkCsrf(req, ctx);
     const body = await U.readJsonBody(req);
-    const mode = modeOf(body);
-    const { user } = gameCtx(ctx, mode);
-    return crash.placeBet(user, body, mode);
+    // The signature has to travel with the stake. It did not before: this route read the
+    // wallet name and threw the signature away, so `takeStake` refused every tugrik crash
+    // bet. Nobody hit it because nobody played crash in tugriks; with one currency, every
+    // crash bet hits it.
+    const { user } = gameCtx(ctx, body.spend);
+    return crash.placeBet(user, body, body.spend);
   });
 
   add('POST', '/api/crash/cashout', async (ctx, req) => {
@@ -483,26 +463,6 @@ function build(cfg) {
   add('GET', '/api/crash/mine', async (ctx) => {
     const user = requireUser(ctx);
     return { bet: crash.myBet(user) };
-  });
-
-  // ------------------------------------------------------------ free play
-  add('GET', '/api/demo', async (ctx) => {
-    const user = requireUser(ctx);
-    const demo = bankMod.demoBank(db, cfg);
-    return {
-      enabled: cfg.demo.enabled,
-      balance: demo.balance(user.id),
-      startingUnits: cfg.demo.startingUnits,
-      topUpBelowUnits: cfg.demo.topUpBelowUnits,
-      bets: demo.history(user.id, 40),
-    };
-  });
-
-  add('POST', '/api/demo/topup', async (ctx, req) => {
-    const user = requireUser(ctx);
-    checkCsrf(req, ctx);
-    if (!cfg.demo.enabled) throw new U.BadRequest('practice mode is disabled');
-    return bankMod.demoBank(db, cfg).topUp(user.id);
   });
 
   // ------------------------------------------------------------ site token
@@ -748,56 +708,6 @@ function build(cfg) {
     return { commitment: crash.commitment, rounds };
   });
 
-  // ---------------------------------------------------------------- wallet
-  add('GET', '/api/wallet/deposit', async (ctx) => {
-    const user = requireUser(ctx);
-    const row = await walletApi.addressFor(db, driver, user.id);
-    return {
-      driver: driver.name,
-      label: driver.label,
-      address: row.address,
-      memo: row.memo ?? null,
-      minConfirmations: cfg.wallet.minConfirmations,
-      note: driver.depositNote ?? null,
-      isMock: !!driver.isMock,
-    };
-  });
-
-  add('POST', '/api/wallet/withdraw', async (ctx, req) => {
-    const user = requireUser(ctx);
-    checkCsrf(req, ctx);
-    limits.requireNotExcluded(user);
-    const body = await U.readJsonBody(req);
-    return walletApi.requestWithdrawal(db, cfg, driver, user, body, ctx.ip);
-  });
-
-  add('GET', '/api/wallet/history', async (ctx) => {
-    const user = requireUser(ctx);
-    return {
-      deposits: db.all(
-        'SELECT id,txid,amount_units,confirmations,credited_at,created_at FROM deposits WHERE user_id=? ORDER BY id DESC LIMIT 50',
-        user.id,
-      ),
-      withdrawals: db.all(
-        'SELECT id,address,amount_units,fee_units,send_units,state,txid,requested_at FROM withdrawals WHERE user_id=? ORDER BY id DESC LIMIT 50',
-        user.id,
-      ),
-    };
-  });
-
-  // Mock-driver test hook so the deposit path can be exercised without a chain.
-  add('POST', '/api/wallet/simulate-deposit', async (ctx, req) => {
-    const user = requireUser(ctx);
-    checkCsrf(req, ctx);
-    if (!driver.isMock) throw new U.Forbidden('only available with the mock wallet driver');
-    const body = await U.readJsonBody(req);
-    const units = U.parseAmount(body.amount ?? '1');
-    const row = await walletApi.addressFor(db, driver, user.id);
-    const sim = driver.simulate(row.address, units);
-    await walletApi.syncDeposits(db, cfg, driver);
-    return { ...sim, note: `credits after ${cfg.wallet.minConfirmations} polls`, address: row.address };
-  });
-
   // ----------------------------------------------------------------- admin
   add('GET', '/api/admin/overview', async (ctx, req) => {
     requireAdmin(req, ctx);
@@ -841,14 +751,6 @@ function build(cfg) {
     return adminApi.setFrozen(db, U.toInt(params.id, { min: 1, name: 'id' }), !!body.frozen, actor);
   });
 
-  add('POST', '/api/admin/users/:id/adjust', async (ctx, req, res, params) => {
-    const { actor } = requireAdmin(req, ctx);
-    const body = await U.readJsonBody(req);
-    const sign = body.direction === 'debit' ? -1 : 1;
-    const units = sign * U.parseAmount(body.amount);
-    return adminApi.adjustBalance(db, U.toInt(params.id, { min: 1, name: 'id' }), units, actor, body.note);
-  });
-
   add('POST', '/api/admin/bankroll', async (ctx, req) => {
     const { actor } = requireAdmin(req, ctx);
     const body = await U.readJsonBody(req);
@@ -863,95 +765,6 @@ function build(cfg) {
     return adminApi.sweepFees(db, actor);
   });
 
-  add('GET', '/api/admin/withdrawals', async (ctx, req) => {
-    requireAdmin(req, ctx);
-    const url = new URL(req.url, 'http://x');
-    return { withdrawals: adminApi.withdrawalQueue(db, url.searchParams.get('state')) };
-  });
-
-  add('POST', '/api/admin/withdrawals/:id/decide', async (ctx, req, res, params) => {
-    const { actor } = requireAdmin(req, ctx);
-    const body = await U.readJsonBody(req);
-    const out = walletApi.decideWithdrawal(
-      db, U.toInt(params.id, { min: 1, name: 'id' }), !!body.approve, body.note, actor,
-    );
-    // Push it out immediately rather than waiting for the next poll.
-    walletApi.processApproved(db, cfg, driver).catch(() => {});
-    return out;
-  });
-
-  add('POST', '/api/admin/withdrawals/:id/mark-sent', async (ctx, req, res, params) => {
-    const { actor } = requireAdmin(req, ctx);
-    const body = await U.readJsonBody(req);
-    return walletApi.markSent(db, U.toInt(params.id, { min: 1, name: 'id' }), body.txid, actor);
-  });
-
-  add('POST', '/api/admin/withdrawals/:id/retry', async (ctx, req, res, params) => {
-    const { actor } = requireAdmin(req, ctx);
-    const out = walletApi.retryWithdrawal(db, U.toInt(params.id, { min: 1, name: 'id' }), actor);
-    walletApi.processApproved(db, cfg, driver).catch(() => {});
-    return out;
-  });
-
-  add('POST', '/api/admin/deposits/credit', async (ctx, req) => {
-    const { actor } = requireAdmin(req, ctx);
-    const body = await U.readJsonBody(req);
-    return walletApi.creditManualDeposit(db, cfg, driver, {
-      userId: U.toInt(body.userId, { min: 1, name: 'userId' }),
-      amountUnits: U.parseAmount(body.amount),
-      txid: body.txid,
-      address: body.address,
-    }, actor);
-  });
-
-  // -------------------------------------------------------------- treasury
-  add('GET', '/api/admin/treasury', async (ctx, req) => {
-    requireAdmin(req, ctx);
-    return {
-      addresses: treasury.list(cfg),
-      exposure: treasury.exposure(db, cfg),
-      minPayout: cfg.treasury.minPayoutUnits,
-      requireWhitelist: cfg.treasury.requireWhitelist,
-      totalPaidOut: treasury.totalPaidOut(db),
-      history: treasury.history(db, 50),
-      activeDriver: driver.name,
-      isManual: !!driver.isManual,
-    };
-  });
-
-  add('POST', '/api/admin/treasury/addresses', async (ctx, req) => {
-    const { actor } = requireAdmin(req, ctx);
-    const body = await U.readJsonBody(req);
-    const out = treasury.addAddress(cfg, body);
-    db.audit(actor, 'treasury.address.add', out.added);
-    return out;
-  });
-
-  add('POST', '/api/admin/treasury/addresses/remove', async (ctx, req) => {
-    const { actor } = requireAdmin(req, ctx);
-    const body = await U.readJsonBody(req);
-    const out = treasury.removeAddress(cfg, body.address);
-    db.audit(actor, 'treasury.address.remove', out);
-    return out;
-  });
-
-  add('POST', '/api/admin/treasury/payout', async (ctx, req) => {
-    const { actor } = requireAdmin(req, ctx);
-    const body = await U.readJsonBody(req);
-    return treasury.payout(db, cfg, driver, body, actor);
-  });
-
-  add('POST', '/api/admin/treasury/payout/:id/mark-sent', async (ctx, req, res, params) => {
-    const { actor } = requireAdmin(req, ctx);
-    const body = await U.readJsonBody(req);
-    return treasury.markPayoutSent(db, U.toInt(params.id, { min: 1, name: 'id' }), body.txid, actor);
-  });
-
-  add('POST', '/api/admin/treasury/payout/:id/cancel', async (ctx, req, res, params) => {
-    const { actor } = requireAdmin(req, ctx);
-    return treasury.cancelPayout(db, U.toInt(params.id, { min: 1, name: 'id' }), actor);
-  });
-
   add('GET', '/api/admin/audit', async (ctx, req) => {
     requireAdmin(req, ctx);
     const url = new URL(req.url, 'http://x');
@@ -961,15 +774,6 @@ function build(cfg) {
   add('GET', '/api/admin/affiliates', async (ctx, req) => {
     requireAdmin(req, ctx);
     return { affiliates: adminApi.affiliateReport(db) };
-  });
-
-  add('GET', '/api/admin/wallet', async (ctx, req) => {
-    requireAdmin(req, ctx);
-    try {
-      return { driver: driver.name, info: await driver.info() };
-    } catch (e) {
-      return { driver: driver.name, error: e.message };
-    }
   });
 
   // ------------------------------------------------------------ static files
@@ -1106,7 +910,6 @@ function build(cfg) {
     }
   });
 
-  let stopPoller = null;
   let sweeper = null;
   let heartbeats = null;
 
@@ -1118,7 +921,11 @@ function build(cfg) {
       console.log(`\n  Admin token written to config.json:\n  ${cfg.adminToken}\n`);
     }
     crash.start();
-    stopPoller = walletApi.startPoller(db, cfg, driver);
+    // The chain is created here rather than on the first wallet registration. It used to
+    // be lazy, which meant whoever signed up first silently triggered a 21,000,000-tugrik
+    // genesis mint inside their own request. Idempotent: it returns immediately if a head
+    // already exists.
+    tokenchain.ensureGenesis(db, cfg);
 
     // Rate-limit rows, and tables nobody is coming back to.
     //
@@ -1161,12 +968,16 @@ function build(cfg) {
 
     return new Promise((resolve) => {
       server.listen(cfg.port, cfg.host, () => {
-        const bank = U.formatAmount(ledger.bankroll(db));
+        const supply = tokenchain.supply(db);
         console.log(`  ${cfg.siteName} listening on http://${cfg.host}:${cfg.port}`);
-        console.log(`  wallet driver: ${driver.name}   bankroll: ${bank} ${cfg.currencyLabel}`);
+        // `circulating` counts the treasury too, so what players actually hold is the
+        // difference. Printing `circulating` here would read as if every tugrik were out.
+        const held = supply.circulating - supply.treasury;
+        console.log(`  treasury: ${U.formatAmount(supply.treasury)} ${cfg.token.symbol}`
+          + `   held by players: ${U.formatAmount(held)} ${cfg.token.symbol}`);
         console.log(`  log level: ${cfg.logLevel}   (CASINO_LOG=debug logs every request)`);
-        if (ledger.bankroll(db) === 0) {
-          console.log('  bankroll is empty: fund it in the admin panel or no bets can be accepted');
+        if (supply.treasury === 0) {
+          console.log('  the treasury is empty: new players will not receive a welcome grant');
         }
         resolve(server);
       });
@@ -1175,13 +986,12 @@ function build(cfg) {
 
   function stop() {
     crash.stop();
-    if (stopPoller) stopPoller();
     if (sweeper) clearInterval(sweeper);
     if (heartbeats) clearInterval(heartbeats);
     return new Promise((resolve) => server.close(resolve));
   }
 
-  return { server, db, cfg, driver, crash, geo, start, stop };
+  return { server, db, cfg, crash, geo, start, stop };
 }
 
 if (require.main === module) {

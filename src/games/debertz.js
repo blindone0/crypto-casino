@@ -545,7 +545,7 @@ function runBot(ctx, game) {
 
 /** Score and pay a finished hand. */
 function settle({ db, cfg, user, bankFor }, g) {
-  const bank = bankFor(g.mode);
+  const bank = bankFor();
   const st = loadState(g);
   const table = payoutTable(cfg.houseEdge.debertz);
 

@@ -1,159 +1,20 @@
 'use strict';
-// The banking interface every game talks to, so a game does not know or care whether it
-// is moving real money or play money.
+// The banking interface every game talks to.
 //
-// Why the separation is strict:
-// Demo money must never touch the real ledger. If it did, a demo win would be paid out
-// of the operator's bankroll, demo balances would inflate the "owed to players" figure,
-// and the books-balance audit would be measuring fiction. So the demo bank is a wholly
-// separate store with its own balances and its own bet log, and the operator's P&L never
-// sees it.
+// There used to be three banks here — real credits, play money and tugriks — and a game
+// was handed whichever one the request named. There is one now. Tugriks are the only
+// money on the site, so there is nothing to choose between and no way for a game to reach
+// the wrong ledger.
 //
-// What demo players still get: the identical games, the identical maths, the identical
-// provably-fair seed chain. The only difference is which ledger the numbers land in.
+// What that buys, beyond the obvious: a stake can no longer be taken without the player's
+// signature, because the only bank there is demands one. Under the old arrangement the
+// operator could move a credit balance unilaterally; here the chain refuses.
 const U = require('./util');
 const ledger = require('./ledger');
 const tokenchain = require('./tokenchain');
 
 const now = () => Math.floor(Date.now() / 1000);
 
-// ------------------------------------------------------------- real money
-function realBank(db, cfg) {
-  return {
-    isDemo: false,
-    mode: 'real',
-
-    balance: (userId) => ledger.userAccount(db, userId).balance,
-
-    checkLimits(user, wager, maxMultiplier) {
-      return ledger.checkBetLimits(db, cfg, user, wager, maxMultiplier);
-    },
-
-    capPayout(wager, rawPayout) {
-      return ledger.capPayout(db, cfg, wager, rawPayout);
-    },
-
-    maxProfit: () => ledger.maxProfitAllowed(db, cfg),
-
-    takeStake(user, wager, memo) {
-      return ledger.transfer(
-        db,
-        ledger.userAccount(db, user.id).id,
-        ledger.houseAccount(db).id,
-        wager, 'bet', memo,
-      );
-    },
-
-    settle(bet) {
-      return ledger.settleBet(db, cfg, bet);
-    },
-  };
-}
-
-// -------------------------------------------------------------- play money
-/**
- * Demo bank. Balances live in `demo_balances` and bets in `demo_bets`; nothing here
- * touches accounts, ledger, bets or the bankroll.
- */
-function demoBank(db, cfg) {
-  const limits = cfg.demo || {};
-  const startingUnits = limits.startingUnits ?? 1000 * U.UNIT;
-  const topUpTo = limits.topUpToUnits ?? startingUnits;
-  const topUpBelow = limits.topUpBelowUnits ?? Math.floor(startingUnits / 100);
-
-  function row(userId) {
-    let r = db.get('SELECT * FROM demo_balances WHERE user_id=?', userId);
-    if (!r) {
-      db.run('INSERT INTO demo_balances(user_id,balance,created_at,updated_at) VALUES(?,?,?,?)',
-        userId, startingUnits, now(), now());
-      r = db.get('SELECT * FROM demo_balances WHERE user_id=?', userId);
-    }
-    return r;
-  }
-
-  function move(userId, delta) {
-    const r = row(userId);
-    const next = r.balance + delta;
-    if (next < 0) throw new U.BadRequest('insufficient play balance');
-    if (!Number.isSafeInteger(next)) throw new U.BadRequest('balance overflow');
-    db.run('UPDATE demo_balances SET balance=?, updated_at=? WHERE user_id=?', next, now(), userId);
-    return next;
-  }
-
-  return {
-    isDemo: true,
-    mode: 'demo',
-
-    balance: (userId) => row(userId).balance,
-
-    /**
-     * Play money still respects the table minimum and maximum, so the game feels the
-     * same. It deliberately does NOT respect the bankroll cap: there is no bankroll to
-     * protect, and a demo player hitting an invisible ceiling would just be confusing.
-     */
-    checkLimits(user, wager) {
-      const r = cfg.risk;
-      if (!Number.isSafeInteger(wager) || wager < r.minBetUnits) {
-        throw new U.BadRequest(`minimum bet is ${r.minBetUnits} units`);
-      }
-      if (wager > r.maxBetUnits) throw new U.BadRequest('bet above table maximum');
-      if (user.frozen) throw new U.Forbidden('account frozen');
-      // Self-exclusion covers play money too. Someone who asked to be kept away from the
-      // games asked to be kept away from all of them.
-      if (user.self_excluded_until > now()) throw new U.Forbidden('self-exclusion active');
-      if (this.balance(user.id) < wager) throw new U.BadRequest('insufficient play balance');
-      return wager;
-    },
-
-    // No bankroll to blow up, so an open-ended win is capped only by sane arithmetic.
-    capPayout: (wager, rawPayout) => ({ payout: rawPayout, capped: false, ceiling: Infinity }),
-
-    maxProfit: () => Number.MAX_SAFE_INTEGER,
-
-    takeStake(user, wager) {
-      move(user.id, -wager);
-      return null;
-    },
-
-    settle(bet) {
-      const { user, game, wager, multiplier, payout, detail, nonce, stakeTaken } = bet;
-      if (!stakeTaken) move(user.id, -wager);
-      if (payout > 0) move(user.id, payout);
-      db.run(
-        `INSERT INTO demo_bets(user_id,game,wager,multiplier,payout,profit,nonce,detail,created_at)
-         VALUES(?,?,?,?,?,?,?,?,?)`,
-        user.id, game, wager, multiplier, payout, payout - wager, nonce,
-        JSON.stringify(detail ?? null), now(),
-      );
-      return db.get('SELECT last_insert_rowid() AS id').id;
-    },
-
-    /** Refill a spent play balance. Free, unlimited, and worth nothing. */
-    topUp(userId) {
-      const r = row(userId);
-      if (r.balance >= topUpBelow) {
-        throw new U.BadRequest(
-          `top-up is available once your play balance drops below ${U.formatAmount(topUpBelow)}`,
-        );
-      }
-      db.run('UPDATE demo_balances SET balance=?, updated_at=? WHERE user_id=?',
-        topUpTo, now(), userId);
-      db.audit(`user:${userId}`, 'demo.topup', { to: topUpTo });
-      return { balance: topUpTo, added: topUpTo - r.balance };
-    },
-
-    history(userId, limit = 50) {
-      return db.all(
-        `SELECT id,game,wager,multiplier,payout,profit,created_at
-           FROM demo_bets WHERE user_id=? ORDER BY id DESC LIMIT ?`,
-        userId, U.clamp(Number(limit) || 50, 1, 200),
-      );
-    },
-  };
-}
-
-
-// ------------------------------------------------------------- site tokens
 /**
  * The tugrik bank: the same games, staked in the site token instead of the casino
  * currency.
@@ -205,7 +66,9 @@ function tokenBank(db, cfg, spend) {
   }
 
   return {
-    isDemo: false,
+    // Games stamp this into their own `mode` column so a round that is already open
+    // settles through the bank it started in. There is only one now, but the column
+    // still tells you what a historic row was played with.
     mode: 'token',
 
     balance(userId) {
@@ -214,11 +77,10 @@ function tokenBank(db, cfg, spend) {
     },
 
     checkLimits(user, wager) {
-      // Said plainly and first. Without this the answer to "why was my bet refused" is
-      // "not enough tugriks", which is true and useless when the real answer is that
-      // there is no wallet to have tugriks in.
+      // A wallet is made at registration, so this cannot happen through the interface.
+      // It stays because the server must not assume the interface is the only caller.
       if (!tokenchain.keyFor(db, user.id)) {
-        throw new U.BadRequest('create a token wallet before staking tugriks');
+        throw new U.BadRequest('this account has no tugrik wallet');
       }
       const limits = cfg.token.bet;
       if (!Number.isSafeInteger(wager) || wager < limits.min) {
@@ -270,25 +132,30 @@ function tokenBank(db, cfg, spend) {
       return null;
     },
 
+    /**
+     * Pay the round out and write it down.
+     *
+     * The record goes in `bets`, which is the same table every other bet has always used
+     * and the only one carrying `seed_id` and `client_seed`. That matters more than it
+     * looks: those two columns are what a player replays to check the round was not
+     * decided after they bet. Tugrik bets used to go into `token_bets`, which has neither,
+     * so until now a tugrik round could not be verified at all — and tugriks are the only
+     * money there is. Writing one record for one currency fixes that and removes the
+     * second history nobody could read.
+     */
     settle(bet) {
-      const { user, game, wager, multiplier, payout, detail, nonce, stakeTaken } = bet;
+      const { user, wager, payout, stakeTaken } = bet;
       // The instant games settle in one call and never took the stake separately, so it
       // is taken here. The persistent ones took it when the round opened.
       if (!stakeTaken) this.takeStake(user, wager);
-      if (payout > 0) move(user.id, payout, game);
-      db.run(
-        `INSERT INTO token_bets(user_id,game,wager,multiplier,payout,profit,nonce,detail,created_at)
-         VALUES(?,?,?,?,?,?,?,?,?)`,
-        user.id, game, wager, multiplier, payout, payout - wager, nonce,
-        JSON.stringify(detail ?? null), now(),
-      );
-      return db.get('SELECT last_insert_rowid() AS id').id;
+      if (payout > 0) move(user.id, payout, bet.game);
+      return ledger.recordBet(db, cfg, bet);
     },
 
     history(userId, limit = 50) {
       return db.all(
         `SELECT id,game,wager,multiplier,payout,profit,created_at
-           FROM token_bets WHERE user_id=? ORDER BY id DESC LIMIT ?`,
+           FROM bets WHERE user_id=? ORDER BY id DESC LIMIT ?`,
         userId, U.clamp(Number(limit) || 50, 1, 200),
       );
     },
@@ -296,27 +163,14 @@ function tokenBank(db, cfg, spend) {
 }
 
 /**
- * Pick the bank for a request. Anything unrecognised means real money.
- * `spend` is the player's signature over their stake, and only the token bank wants it.
+ * The bank for a request.
+ *
+ * There is only one, so this no longer chooses anything — it exists because every game
+ * calls it, and because `spend` (the player's signature over their stake) has to be
+ * closed over per request rather than threaded through every game as an argument.
  */
-function bankFor(db, cfg, mode, spend) {
-  if (mode === 'demo') return demoBank(db, cfg);
-  if (mode === 'token') return tokenBank(db, cfg, spend);
-  return realBank(db, cfg);
+function bankFor(db, cfg, spend) {
+  return tokenBank(db, cfg, spend);
 }
 
-/** Aggregate play-money activity, so the operator can see engagement without P&L noise. */
-function demoStats(db) {
-  const b = db.get(
-    `SELECT COUNT(*) AS bets, COUNT(DISTINCT user_id) AS players,
-            COALESCE(SUM(wager),0) AS wagered, COALESCE(SUM(payout),0) AS paid
-       FROM demo_bets`,
-  );
-  return {
-    ...b,
-    balances: db.get('SELECT COALESCE(SUM(balance),0) AS n FROM demo_balances').n,
-    accounts: db.get('SELECT COUNT(*) AS n FROM demo_balances').n,
-  };
-}
-
-module.exports = { realBank, demoBank, tokenBank, bankFor, demoStats };
+module.exports = { tokenBank, bankFor };

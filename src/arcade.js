@@ -143,7 +143,6 @@ function practicePlay(db, cfg, user, gameKey) {
   const game = GAMES[String(gameKey || '')];
   if (!game) throw new U.BadRequest('no such cabinet');
   if (!cfg.arcade.enabled) throw new U.BadRequest('the arcade is closed');
-  if (!cfg.demo.enabled) throw new U.BadRequest('practice mode is off');
 
   return db.tx(() => {
     const ticket = crypto.randomBytes(16).toString('hex');

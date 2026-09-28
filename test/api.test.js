@@ -3,9 +3,13 @@
 // plus the security controls that are supposed to stop the paths they should not take.
 const test = require('node:test');
 const assert = require('node:assert');
+const crypto = require('node:crypto');
 const { testConfig, cleanup } = require('./helpers');
 const { build } = require('../src/server');
 const U = require('../src/util');
+const tc = require('../src/tokenchain');
+
+const TUG = 100000000;
 
 /** Tiny client that remembers cookies and the CSRF token, like a browser would. */
 function makeClient(base) {
@@ -50,71 +54,111 @@ async function shutdown(app, cfg) {
 
 const admin = (cfg) => ({ 'x-admin-token': cfg.adminToken });
 
-test('a player can register, deposit, bet and see it reflected in the books', async (t) => {
+/**
+ * Register, then create the tugrik wallet the way the browser does: a key derived on the
+ * client and posted to the server, which pays the welcome grant out of the treasury.
+ *
+ * This is how a player gets money now. There is no deposit to make and no bankroll to
+ * credit them from — the grant is the only way tugriks reach a new account.
+ */
+async function wallet(client, username, password = 'longpassword1') {
+  const reg = await client.call('/api/auth/register', { method: 'POST', body: { username, password } });
+  const seed = crypto.randomBytes(32).toString('hex');
+  const priv = tc.privateKeyFromSeed(seed);
+  const pub = tc.rawPublicKey(crypto.createPublicKey(priv));
+  await client.call('/api/token/key', { method: 'POST', body: { pubkey: pub } });
+  return { reg, priv, pub };
+}
+
+/**
+ * Put tugriks in the house so it can pay a win.
+ *
+ * The house builds its float from losing bets in normal play; a fresh test server has
+ * none, and `capPayout` will not promise more than the house holds — correctly, since the
+ * supply is fixed and the chain would refuse the block. So the float is seeded from the
+ * treasury, which is the only place tugriks come from.
+ */
+function fundHouse(app, units) {
+  const matches = require('../src/match');
+  const house = matches.houseKey(app.db).publicRaw;
+  tc.appendBlock(app.db, [tc.treasuryTransfer(app.db, house, units)]);
+}
+
+/**
+ * Sign a stake to the house, exactly as public/app.js does before every bet.
+ *
+ * Every bet is a transfer on the chain now, so nothing can be wagered without this: the
+ * operator cannot place a bet on someone's behalf, which is the property the whole token
+ * design exists to give.
+ */
+async function spendFor(client, w, amountUnits) {
+  const info = await client.call('/api/token');
+  const tx = {
+    type: 'transfer', from: w.pub, to: info.houseKey, amount: amountUnits, nonce: info.nextNonce,
+  };
+  const sig = crypto.sign(null, Buffer.from(tc.canonical(tc.transferPayload(tx))), w.priv).toString('hex');
+  return { from: w.pub, nonce: tx.nonce, sig };
+}
+
+test('a player registers, is granted tugriks, bets and it lands on the chain', async (t) => {
   const { cfg, app, base, client } = await boot();
   t.after(() => shutdown(app, cfg));
 
-  await client.call('/api/admin/bankroll',
-    { method: 'POST', body: { action: 'add', amount: '1000' }, headers: admin(cfg) });
+  const w = await wallet(client, 'alice');
+  assert.strictEqual(w.reg.user.username, 'alice');
+  assert.strictEqual(w.reg.user.role, 'admin', 'the first account becomes the operator');
+  assert.match(w.reg.user.serverSeedHash, /^[0-9a-f]{64}$/);
 
-  const reg = await client.call('/api/auth/register',
-    { method: 'POST', body: { username: 'alice', password: 'longpassword1' } });
-  assert.strictEqual(reg.user.username, 'alice');
-  assert.strictEqual(reg.user.role, 'admin', 'the first account becomes the operator');
-  assert.match(reg.user.serverSeedHash, /^[0-9a-f]{64}$/);
+  // No deposit anywhere in this test, which is the point: registering a wallet is what
+  // funds an account now, out of a fixed supply rather than out of thin air.
+  const info = await client.call('/api/token');
+  assert.strictEqual(info.balance, cfg.token.welcomeGrant);
+  fundHouse(app, 100 * TUG);
 
-  // Deposit: the mock driver needs minConfirmations polls before it credits.
-  for (let i = 0; i <= cfg.wallet.minConfirmations; i += 1) {
-    await client.call('/api/wallet/simulate-deposit', { method: 'POST', body: { amount: '10' } });
-  }
-  const me = await client.call('/api/me');
-  assert.ok(me.user.balance >= 10 * U.UNIT, `expected a credited deposit, got ${me.user.balance}`);
-
+  const spend = await spendFor(client, w, 2 * TUG);
   const bet = await client.call('/api/bet/dice',
-    { method: 'POST', body: { amount: '0.5', target: 5000, mode: 'under' } });
+    { method: 'POST', body: { amount: '2', target: 5000, mode: 'under', spend } });
   assert.ok(typeof bet.won === 'boolean');
   assert.strictEqual(bet.multiplier, 1.98);
   assert.strictEqual(bet.payout, bet.won ? U.mulUnits(bet.wager, 1.98) : 0);
 
+  // The stake really moved on the chain, and the chain still verifies.
+  const after = await client.call('/api/token');
+  const expected = cfg.token.welcomeGrant - 2 * TUG + (bet.won ? bet.payout : 0);
+  assert.strictEqual(after.balance, expected, 'the balance is whatever the chain says');
+  assert.strictEqual(tc.verifyChain(app.db).ok, true);
+
   const ov = await client.call('/api/admin/overview', { headers: admin(cfg) });
-  assert.ok(ov.audit.ok, 'books must balance after real traffic');
-  assert.strictEqual(ov.windows.all.bets, 1);
-  assert.strictEqual(ov.windows.all.wagered, U.parseAmount('0.5'));
+  assert.strictEqual(ov.windows.all.bets, 1, 'the round is written down once');
+  assert.strictEqual(ov.windows.all.wagered, 2 * TUG);
 });
 
-test('bets are refused without enough balance and nothing is charged', async (t) => {
+test('a bet beyond the balance is refused and nothing moves', async (t) => {
   const { cfg, app, client } = await boot();
   t.after(() => shutdown(app, cfg));
-  await client.call('/api/admin/bankroll',
-    { method: 'POST', body: { action: 'add', amount: '1000' }, headers: admin(cfg) });
-  await client.call('/api/auth/register',
-    { method: 'POST', body: { username: 'broke', password: 'longpassword1' } });
+  const w = await wallet(client, 'broke');
 
+  const tooMuch = cfg.token.welcomeGrant + 10 * TUG;
+  const spend = await spendFor(client, w, tooMuch);
   const r = await client.call('/api/bet/dice',
-    { method: 'POST', body: { amount: '5', target: 5000, mode: 'under' }, raw: true });
+    { method: 'POST', body: { amount: String(tooMuch / TUG), target: 5000, mode: 'under', spend }, raw: true });
   assert.strictEqual(r.status, 400);
-  assert.match(r.data.error, /insufficient funds/);
+  assert.match(r.data.error, /not enough tugriks|table maximum/);
 
-  const me = await client.call('/api/me');
-  assert.strictEqual(me.user.balance, 0);
+  const info = await client.call('/api/token');
+  assert.strictEqual(info.balance, cfg.token.welcomeGrant, 'not a single tugrik moved');
   const ov = await client.call('/api/admin/overview', { headers: admin(cfg) });
   assert.strictEqual(ov.windows.all.bets, 0, 'a refused bet must not be recorded');
-  assert.ok(ov.audit.ok);
 });
 
 test('dice rejects out-of-range targets', async (t) => {
   const { cfg, app, client } = await boot();
   t.after(() => shutdown(app, cfg));
-  await client.call('/api/admin/bankroll',
-    { method: 'POST', body: { action: 'add', amount: '1000' }, headers: admin(cfg) });
-  await client.call('/api/auth/register',
-    { method: 'POST', body: { username: 'edge', password: 'longpassword1' } });
-  for (let i = 0; i <= cfg.wallet.minConfirmations; i += 1) {
-    await client.call('/api/wallet/simulate-deposit', { method: 'POST', body: { amount: '10' } });
-  }
+  const w = await wallet(client, 'edge');
+  fundHouse(app, 100 * TUG);
   for (const target of [0, 50, 9999, 9990]) {
     const r = await client.call('/api/bet/dice',
-      { method: 'POST', body: { amount: '0.01', target, mode: 'under' }, raw: true });
+      { method: 'POST', body: { amount: '1', target, mode: 'under', spend: await spendFor(client, w, TUG) }, raw: true });
     assert.strictEqual(r.status, 400, `target ${target} should be refused`);
   }
 });
@@ -122,20 +166,15 @@ test('dice rejects out-of-range targets', async (t) => {
 test('mines pays the ladder and refuses a second concurrent round', async (t) => {
   const { cfg, app, client } = await boot();
   t.after(() => shutdown(app, cfg));
-  await client.call('/api/admin/bankroll',
-    { method: 'POST', body: { action: 'add', amount: '1000' }, headers: admin(cfg) });
-  await client.call('/api/auth/register',
-    { method: 'POST', body: { username: 'miner', password: 'longpassword1' } });
-  for (let i = 0; i <= cfg.wallet.minConfirmations; i += 1) {
-    await client.call('/api/wallet/simulate-deposit', { method: 'POST', body: { amount: '10' } });
-  }
+  const w = await wallet(client, 'miner');
+  fundHouse(app, 100 * TUG);
 
-  const g = await client.call('/api/bet/mines/start', { method: 'POST', body: { amount: '1', mines: 3 } });
+  const g = await client.call('/api/bet/mines/start', { method: 'POST', body: { amount: '1', mines: 3, spend: await spendFor(client, w, TUG) } });
   assert.strictEqual(g.mineCount, 3);
   assert.strictEqual(g.state, 'active');
 
   const dup = await client.call('/api/bet/mines/start',
-    { method: 'POST', body: { amount: '1', mines: 3 }, raw: true });
+    { method: 'POST', body: { amount: '1', mines: 3, spend: await spendFor(client, w, TUG) }, raw: true });
   assert.strictEqual(dup.status, 400);
   assert.match(dup.data.error, /current mines round/);
 
@@ -161,13 +200,8 @@ test('mines pays the ladder and refuses a second concurrent round', async (t) =>
 test('mines will not reveal the same tile twice', async (t) => {
   const { cfg, app, client } = await boot();
   t.after(() => shutdown(app, cfg));
-  await client.call('/api/admin/bankroll',
-    { method: 'POST', body: { action: 'add', amount: '1000' }, headers: admin(cfg) });
-  await client.call('/api/auth/register',
-    { method: 'POST', body: { username: 'twice', password: 'longpassword1' } });
-  for (let i = 0; i <= cfg.wallet.minConfirmations; i += 1) {
-    await client.call('/api/wallet/simulate-deposit', { method: 'POST', body: { amount: '10' } });
-  }
+  const w = await wallet(client, 'twice');
+  fundHouse(app, 100 * TUG);
   await client.call('/api/bet/mines/start', { method: 'POST', body: { amount: '1', mines: 1 } });
   const first = await client.call('/api/bet/mines/reveal', { method: 'POST', body: { tile: 0 } });
   if (first.safe) {
@@ -182,17 +216,12 @@ test('provably fair: a bet replays to the same result after the seed is revealed
   t.after(() => shutdown(app, cfg));
   const fair = require('../src/fair');
 
-  await client.call('/api/admin/bankroll',
-    { method: 'POST', body: { action: 'add', amount: '1000' }, headers: admin(cfg) });
-  await client.call('/api/auth/register',
-    { method: 'POST', body: { username: 'auditor', password: 'longpassword1' } });
-  for (let i = 0; i <= cfg.wallet.minConfirmations; i += 1) {
-    await client.call('/api/wallet/simulate-deposit', { method: 'POST', body: { amount: '10' } });
-  }
+  const w = await wallet(client, 'auditor');
+  fundHouse(app, 100 * TUG);
 
   const committed = (await client.call('/api/fair/seed')).serverSeedHash;
   const bet = await client.call('/api/bet/dice',
-    { method: 'POST', body: { amount: '0.01', target: 2500, mode: 'under' } });
+    { method: 'POST', body: { amount: '1', target: 2500, mode: 'under', spend: await spendFor(client, w, TUG) } });
 
   const rot = await client.call('/api/me/rotate-seed', { method: 'POST' });
   assert.strictEqual(rot.revealedHash, committed, 'the revealed seed must be the committed one');
@@ -225,137 +254,6 @@ test('changing the client seed rotates the chain and resets the counter', async 
   assert.strictEqual(bad.status, 400);
 });
 
-test('withdrawals reserve funds, and a rejection refunds them exactly', async (t) => {
-  const { cfg, app, client } = await boot({
-    wallet: { driver: 'mock', pollIntervalMs: 999999, autoApproveBelowUnits: 0 },
-  });
-  t.after(() => shutdown(app, cfg));
-
-  await client.call('/api/admin/bankroll',
-    { method: 'POST', body: { action: 'add', amount: '1000' }, headers: admin(cfg) });
-  await client.call('/api/auth/register',
-    { method: 'POST', body: { username: 'casher', password: 'longpassword1' } });
-  for (let i = 0; i <= cfg.wallet.minConfirmations; i += 1) {
-    await client.call('/api/wallet/simulate-deposit', { method: 'POST', body: { amount: '10' } });
-  }
-
-  const before = (await client.call('/api/me')).user.balance;
-  // Reserve everything except one credit, so the remaining balance is known exactly.
-  const reserve = U.formatAmount(before - U.UNIT);
-  const wd = await client.call('/api/wallet/withdraw',
-    { method: 'POST', body: { address: 'mock1qdestination', amount: reserve } });
-  assert.strictEqual(wd.state, 'pending');
-
-  const during = (await client.call('/api/me')).user.balance;
-  assert.strictEqual(during, U.UNIT, 'reserved funds must leave the spendable balance');
-
-  // The reserved money cannot be bet with while it is held for the withdrawal.
-  const blocked = await client.call('/api/bet/dice',
-    { method: 'POST', body: { amount: '2', target: 5000, mode: 'under' }, raw: true });
-  assert.strictEqual(blocked.status, 400);
-
-  await client.call(`/api/admin/withdrawals/${wd.id}/decide`,
-    { method: 'POST', body: { approve: false, note: 'test' }, headers: admin(cfg) });
-  const after = (await client.call('/api/me')).user.balance;
-  assert.strictEqual(after, before, 'a rejection must refund the full amount');
-
-  const ov = await client.call('/api/admin/overview', { headers: admin(cfg) });
-  assert.ok(ov.audit.ok);
-});
-
-test('an approved withdrawal is sent once and charges the fee', async (t) => {
-  const { cfg, app, client } = await boot({
-    wallet: { driver: 'mock', pollIntervalMs: 999999, autoApproveBelowUnits: 0 },
-  });
-  t.after(() => shutdown(app, cfg));
-
-  await client.call('/api/admin/bankroll',
-    { method: 'POST', body: { action: 'add', amount: '1000' }, headers: admin(cfg) });
-  await client.call('/api/auth/register',
-    { method: 'POST', body: { username: 'payee', password: 'longpassword1' } });
-  for (let i = 0; i <= cfg.wallet.minConfirmations; i += 1) {
-    await client.call('/api/wallet/simulate-deposit', { method: 'POST', body: { amount: '10' } });
-  }
-  const wd = await client.call('/api/wallet/withdraw',
-    { method: 'POST', body: { address: 'mock1qdestination', amount: '5' } });
-  await client.call(`/api/admin/withdrawals/${wd.id}/decide`,
-    { method: 'POST', body: { approve: true }, headers: admin(cfg) });
-
-  // The send is queued asynchronously by the decide handler.
-  await new Promise((r) => setTimeout(r, 400));
-  const q = await client.call('/api/admin/withdrawals', { headers: admin(cfg) });
-  const row = q.withdrawals.find((x) => x.id === wd.id);
-  assert.strictEqual(row.state, 'sent');
-  assert.ok(row.txid, 'a sent withdrawal must record a txid');
-  assert.strictEqual(row.send_units, row.amount_units - row.fee_units);
-
-  const ov = await client.call('/api/admin/overview', { headers: admin(cfg) });
-  assert.strictEqual(ov.feesCollected, cfg.wallet.withdrawalFeeUnits);
-  assert.ok(ov.audit.ok);
-  // Deciding twice must not double-send.
-  const again = await client.call(`/api/admin/withdrawals/${wd.id}/decide`,
-    { method: 'POST', body: { approve: true }, headers: admin(cfg), raw: true });
-  assert.strictEqual(again.status, 400);
-});
-
-test('a deposit is never credited twice for the same transaction', async (t) => {
-  const { cfg, app, client } = await boot();
-  t.after(() => shutdown(app, cfg));
-  const walletApi = require('../src/wallet');
-
-  await client.call('/api/auth/register',
-    { method: 'POST', body: { username: 'dupe', password: 'longpassword1' } });
-  for (let i = 0; i <= cfg.wallet.minConfirmations; i += 1) {
-    await client.call('/api/wallet/simulate-deposit', { method: 'POST', body: { amount: '3' } });
-  }
-  // Let every simulated transaction reach the confirmation threshold first.
-  for (let i = 0; i < 6; i += 1) await walletApi.syncDeposits(app.db, cfg, app.driver);
-  const settled = (await client.call('/api/me')).user.balance;
-  const deposited = app.db.get('SELECT COALESCE(SUM(amount_units),0) AS n FROM deposits').n;
-  assert.strictEqual(settled, deposited, 'every deposit should be credited exactly once');
-
-  // Re-polling the same on-chain transactions must now change nothing at all.
-  const rowsBefore = app.db.get('SELECT COUNT(*) AS n FROM ledger').n;
-  for (let i = 0; i < 5; i += 1) await walletApi.syncDeposits(app.db, cfg, app.driver);
-  assert.strictEqual((await client.call('/api/me')).user.balance, settled);
-  assert.strictEqual(app.db.get('SELECT COUNT(*) AS n FROM ledger').n, rowsBefore,
-    're-polling must not write new ledger rows');
-  const ov = await client.call('/api/admin/overview', { headers: admin(cfg) });
-  assert.ok(ov.audit.ok);
-});
-
-test('treasury payouts validate the address and stay inside free capital', async (t) => {
-  const { cfg, app, client } = await boot();
-  t.after(() => shutdown(app, cfg));
-  const treasury = require('../src/treasury');
-
-  await client.call('/api/admin/bankroll',
-    { method: 'POST', body: { action: 'add', amount: '100' }, headers: admin(cfg) });
-  await client.call('/api/auth/register',
-    { method: 'POST', body: { username: 'owner', password: 'longpassword1' } });
-
-  // Work on the in-memory config only, so the repo's config.json is never touched.
-  cfg.treasury.addresses = [{ label: 'cold', driver: 'mock', address: 'mock1qcoldstorage' }];
-
-  const ok = await treasury.payout(app.db, cfg, app.driver,
-    { label: 'cold', amount: '25' }, 'test');
-  assert.strictEqual(ok.state, 'sent');
-  assert.ok(ok.txid);
-
-  await assert.rejects(
-    () => treasury.payout(app.db, cfg, app.driver, { label: 'cold', amount: '500' }, 'test'),
-    /free capital/,
-  );
-  await assert.rejects(
-    () => treasury.payout(app.db, cfg, app.driver,
-      { address: 'some-address-not-whitelisted', amount: '1' }, 'test'),
-    /not whitelisted/,
-  );
-  assert.strictEqual(treasury.totalPaidOut(app.db), U.parseAmount('25'));
-  assert.ok(require('../src/ledger').auditBalances(app.db).ok);
-});
-
-// ------------------------------------------------------------------ security
 test('mutating requests without a CSRF token are refused', async (t) => {
   const { cfg, app, client } = await boot();
   t.after(() => shutdown(app, cfg));
@@ -397,7 +295,7 @@ test('admin endpoints reject a bad token and a non-admin session', async (t) => 
 test('signed-out callers cannot reach player endpoints', async (t) => {
   const { cfg, app, base } = await boot();
   t.after(() => shutdown(app, cfg));
-  for (const path of ['/api/me', '/api/wallet/deposit', '/api/fair/seed', '/api/me/bets']) {
+  for (const path of ['/api/me', '/api/token', '/api/fair/seed', '/api/me/bets']) {
     const res = await fetch(base + path);
     assert.strictEqual(res.status, 401, `${path} should require a session`);
   }
@@ -493,13 +391,8 @@ test('oversized and malformed bodies are rejected cleanly', async (t) => {
 test('self-exclusion locks the account out of betting', async (t) => {
   const { cfg, app, base, client } = await boot();
   t.after(() => shutdown(app, cfg));
-  await client.call('/api/admin/bankroll',
-    { method: 'POST', body: { action: 'add', amount: '1000' }, headers: admin(cfg) });
-  await client.call('/api/auth/register',
-    { method: 'POST', body: { username: 'breaker', password: 'longpassword1' } });
-  for (let i = 0; i <= cfg.wallet.minConfirmations; i += 1) {
-    await client.call('/api/wallet/simulate-deposit', { method: 'POST', body: { amount: '10' } });
-  }
+  const w = await wallet(client, 'breaker');
+  fundHouse(app, 100 * TUG);
   await client.call('/api/me/limits/self-exclude', { method: 'POST', body: { days: 7 } });
 
   // Self-exclusion also kills every session, so signing back in is the only way to test.

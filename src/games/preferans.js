@@ -544,7 +544,7 @@ function runBots(ctx, game) {
 function settle({ db, cfg, user, bankFor }, g) {
   // Settle against the bank the hand was dealt with, never the one the request asks for:
   // a hand opened with play money must never pay out real money.
-  const bank = bankFor(g.mode);
+  const bank = bankFor();
   const s = loadState(g);
   const table = payoutTable(cfg.houseEdge.preferans);
   const tricks = s.tricksWon[PLAYER];

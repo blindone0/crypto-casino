@@ -145,19 +145,19 @@ function capPayout(db, cfg, wager, rawPayout) {
  * commission and rakeback, both of which are paid out of the edge, never out of
  * the stake, so they can shrink the margin but can never invert it.
  *
- * Call inside db.tx(). Returns the bet row id.
+ * Call inside db.tx(). Returns the bet row id. Moves no money: the bank that called
+ * it has already moved the stake and the payout in whatever it holds. This writes the
+ * record — including the seed, nonce and client seed a player needs to verify the
+ * round — which is the part that must happen for every bet in every currency.
  */
-function settleBet(db, cfg, {
-  user, game, wager, multiplier, payout, edgeUnits,
-  seedId, nonce, clientSeed, detail, stakeTaken = false,
+function recordBet(db, cfg, {
+  user, game, wager, multiplier, payout, edgeUnits = 0,
+  seedId = null, nonce = 0, clientSeed = '', detail = null,
 }) {
-  const uAcc = userAccount(db, user.id);
-  const hAcc = houseAccount(db);
-
-  // Interactive games (mines, crash) debit the stake when the round opens, so by
-  // settlement time it has already moved. Instant games move it here.
-  if (!stakeTaken) transfer(db, uAcc.id, hAcc.id, wager, 'bet', `${game}#${nonce}`);
-  if (payout > 0) transfer(db, hAcc.id, uAcc.id, payout, 'payout', `${game}#${nonce}`);
+  // `edge_units` and `client_seed` are NOT NULL, and not every caller has a seed: the
+  // arcade and a settled match are money moving without a dice roll behind it. The games
+  // that do have one always pass it, so defaulting here loses nothing and stops a
+  // settlement throwing on a column it was never going to fill.
 
   db.run(
     `INSERT INTO bets(user_id,game,wager,multiplier,payout,profit,edge_units,seed_id,nonce,client_seed,detail,created_at)
@@ -170,6 +170,11 @@ function settleBet(db, cfg, {
   payCommissions(db, cfg, user, edgeUnits, betId);
   return betId;
 }
+
+// `payCommissions` moves credits, and credits no longer exist as a player currency.
+// Both dials are off in the shipped config, so this is a no-op; it is kept whole rather
+// than deleted because paying them in tugriks later is a small change, and deleting the
+// referral and rakeback plumbing to re-add it would not be.
 
 /** Affiliate commission and player rakeback, both carved out of the theoretical edge. */
 function payCommissions(db, cfg, user, edgeUnits, betId) {
@@ -251,6 +256,6 @@ module.exports = {
   balanceOf, bankroll,
   transfer, mint, burn, post,
   maxProfitAllowed, checkBetLimits, capPayout,
-  settleBet, payCommissions,
+  recordBet, payCommissions,
   houseStats, playerLiabilities, auditBalances,
 };

@@ -203,18 +203,11 @@ const STRINGS = {
   },
   'arc.insert': { en: 'Insert token ({n} {sym})', ru: 'Бросить жетон ({n} {sym})' },
   'arc.balance': { en: 'Tokens', ru: 'Жетоны' },
+  'arc.freeGo': {
+    en: 'A free go: not enough tugriks for a token, so this one stays off the board.',
+    ru: 'Бесплатная попытка: тугриков на жетон не хватило, в таблицу рекордов не пойдёт.',
+  },
   'arc.cost': { en: 'A play costs', ru: 'Игра стоит' },
-  'arc.free': { en: 'nothing, while practising', ru: 'ничего, в тренировке' },
-  'arc.practiceNote': {
-    en: 'Practice plays are free and take no tokens. They do not go on the high scores: '
-      + 'that board is for plays somebody paid for.',
-    ru: 'В режиме тренировки игра бесплатная и жетоны не тратятся. В таблицу '
-      + 'рекордов такие игры не попадают: там только те, за которые заплатили.',
-  },
-  'arc.practiceScore': {
-    en: 'Practice run — not recorded',
-    ru: 'Тренировка — результат не засчитан',
-  },
   'arc.g.pinball': { en: 'Orbit Pinball', ru: 'Орбитальный пинбол' },
   'arc.g.pinball.blurb': {
     en: 'Flippers, bumpers and a plunger. Keep the ball alive.',
@@ -377,17 +370,24 @@ const STRINGS = {
     en: 'The token wallet is not ready yet. Try again in a moment.',
     ru: 'Токен-кошелёк ещё не готов. Попробуйте через мгновение.',
   },
-  'tok.betHint': {
-    en: 'Staking tugriks signs a transfer with your key. The operator cannot place a bet for you.',
-    ru: 'Ставка в тугриках подписывается вашим ключом. Оператор не может сделать ставку за вас.',
-  },
-  'tok.coins': { en: 'tugriks', ru: 'тугриков' },
   'tok.title': { en: 'Token wallet', ru: 'Токен-кошелёк' },
   'tok.nav': { en: 'Token', ru: 'Токен' },
   'tok.balance': { en: 'Token balance', ru: 'Баланс токенов' },
   'tok.create': { en: 'Create a wallet', ru: 'Создать кошелёк' },
   'tok.restore': { en: 'Restore from phrase', ru: 'Восстановить по фразе' },
   'tok.phrase': { en: 'Your recovery phrase', ru: 'Ваша фраза восстановления' },
+  'tok.granted': {
+    en: 'Your wallet is ready and {n} {c} are in it. They came out of a fixed supply, '
+      + 'not out of thin air.',
+    ru: 'Кошелёк готов, на нём {n} {c}. Они взяты из ограниченного запаса, '
+      + 'а не созданы из воздуха.',
+  },
+  'tok.phraseLater': {
+    en: 'You can read this phrase again any time under Wallet. It is the only way back '
+      + 'in from another device, and nobody else has a copy — not even us.',
+    ru: 'Эту фразу можно посмотреть в любой момент в разделе «Кошелёк». Только по ней '
+      + 'можно войти с другого устройства, и копии нет ни у кого — у нас тоже.',
+  },
   'tok.phraseWarn': {
     en: 'Write these 16 words down now. They are the only way to reach this balance. Nobody can recover them for you, including us, and anyone who reads them owns the tokens.',
     ru: 'Запишите эти 16 слов прямо сейчас. Это единственный доступ к балансу. Восстановить их не может никто, включая нас, а любой, кто их увидит, получит ваши токены.',
@@ -441,19 +441,6 @@ const STRINGS = {
   'sound.musicOff': { en: 'Music off', ru: 'Музыка выключена' },
 
   // ---- free play
-  'demo.real': { en: 'Real', ru: 'На деньги' },
-  'demo.practice': { en: 'Practice', ru: 'Тренировка' },
-  'demo.mode': { en: 'Play mode', ru: 'Режим игры' },
-  'demo.banner': {
-    en: 'Practice mode: play money only. Nothing here can be won or lost, and nothing can be withdrawn.',
-    ru: 'Режим тренировки: только игровые фишки. Здесь ничего нельзя выиграть, проиграть или вывести.',
-  },
-  'demo.topUp': { en: 'Refill play balance', ru: 'Пополнить игровой баланс' },
-  'demo.toppedUp': { en: 'Play balance refilled', ru: 'Игровой баланс пополнен' },
-  'demo.switchHint': {
-    en: 'No deposit needed. Switch to Practice and learn the games for free.',
-    ru: 'Депозит не нужен. Переключитесь на Тренировку и изучайте игры бесплатно.',
-  },
 
   // ---- wallet
   'wallet.deposit': { en: 'Deposit', ru: 'Пополнение' },
@@ -475,10 +462,6 @@ const STRINGS = {
   'wallet.requestWithdraw': { en: 'Request withdrawal', ru: 'Запросить вывод' },
   'wallet.youReceive': { en: 'You receive', ru: 'Вы получите' },
   'wallet.simulate': { en: 'Simulate a deposit (test mode)', ru: 'Смоделировать пополнение (тест)' },
-  'wallet.mockWarning': {
-    en: 'Test wallet: no real coins move. Switch the driver in config.json for real funds.',
-    ru: 'Тестовый кошелёк: реальные монеты не двигаются. Смените драйвер в config.json.',
-  },
   'wallet.pending': { en: 'Pending', ru: 'В обработке' },
   'wallet.sent': { en: 'Sent', ru: 'Отправлено' },
   'wallet.rejected': { en: 'Rejected', ru: 'Отклонено' },

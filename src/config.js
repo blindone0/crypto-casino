@@ -17,8 +17,9 @@ const DEFAULTS = {
 
   // ---- branding
   siteName: 'Nullstake',
-  currencyLabel: 'CRD',       // display ticker for the internal credit
-  faucetUnits: 100000000,     // 1.00 credit handed to new accounts (set 0 to disable)
+  // There is no site credit any more. The only money is the tugrik, whose ticker lives
+  // in token.symbol below, and the only starting balance is token.welcomeGrant, paid out
+  // of the treasury when a new account's wallet is created.
   defaultLocale: 'en',        // 'en' or 'ru'; players can switch and the choice sticks
 
   // ---- THE MARGIN ------------------------------------------------------
@@ -57,26 +58,6 @@ const DEFAULTS = {
     minBetUnits: 1000,           // 0.00001 credit
     maxMultiplier: 10000,        // cap on limbo/crash multipliers
   },
-
-  // ---- LOGGING ----------------------------------------------------------
-  // quiet  only server faults, which is what a production log should be
-  // info   every refused request too: method, path, status and the reason
-  // debug  every request, with timing
-  //
-  // Refused requests are the ones worth seeing while building. A 400 is the server
-  // telling a client it did something wrong, and with no log of it the only evidence is
-  // a message in a browser that may already be gone. Override with CASINO_LOG.
-  logLevel: 'info',
-
-  // ---- LOGGING ----------------------------------------------------------
-  // quiet  only server faults, which is what a production log should be
-  // info   every refused request too: method, path, status and the reason
-  // debug  every request, with timing
-  //
-  // Refused requests are the ones worth seeing while building. A 400 is the server
-  // telling a client it did something wrong, and with no log of it the only evidence is
-  // a message in a browser that may already be gone. Override with CASINO_LOG.
-  logLevel: 'info',
 
   // ---- LOGGING ----------------------------------------------------------
   // quiet  only server faults, which is what a production log should be
@@ -173,18 +154,6 @@ const DEFAULTS = {
     heartbeatSeconds: 15,
   },
 
-  // ---- FREE PLAY --------------------------------------------------------
-  // Practice mode for people with no money to deposit. Play money is a completely
-  // separate ledger: it never touches the bankroll, never counts as a liability, and can
-  // never be withdrawn. It costs the operator nothing and is the cheapest way to let
-  // someone learn the games before risking anything.
-  demo: {
-    enabled: true,
-    startingUnits: 1000 * 100000000,   // 1000 play credits on first use
-    topUpToUnits: 1000 * 100000000,
-    topUpBelowUnits: 10 * 100000000,   // refill only once they are nearly out
-  },
-
   // ---- CRASH ROUND PACING ----------------------------------------------
   // Round length is a direct revenue lever: revenue is volume times edge, and volume is
   // rounds per hour times stake. Shorter betting windows mean more rounds, but too short
@@ -203,78 +172,21 @@ const DEFAULTS = {
   // Referrals are the cheapest acquisition channel a small site has.
   // Commission is paid from house edge, so it is never a loss-maker:
   // keep referralCommission well below 1.0 or you give the margin away.
-  referralCommission: 0.20,     // affiliate earns 20% of the edge their players generate
+  // Both of these pay out of the house edge into a *credit* balance, and there is no
+  // credit balance any more. Paying them in tugriks would mean extra chain blocks per bet
+  // for an acquisition mechanic a non-commercial site does not need, so they are switched
+  // off rather than removed: `payCommissions` becomes a no-op, and turning them back on —
+  // in tugriks — stays a small change rather than a rewrite.
+  referralCommission: 0,
   rakeback: {
-    enabled: true,
-    rate: 0.05,                 // 5% of the edge returned to the player as loyalty credit
+    enabled: false,
+    rate: 0.05,                 // share of the edge, if it is ever switched back on
   },
 
   // ---- responsible gambling (also keeps you out of trouble)
   limits: {
-    maxDailyDepositUnits: 0,    // 0 = unlimited
     selfExclusionMaxDays: 365,
     minAgeConfirmed: true,
-  },
-
-  // ---- crypto wallet
-  wallet: {
-    driver: 'mock',             // mock | manual | bitcoind | monero
-    minConfirmations: 2,
-
-    // MINIMUM DEPOSIT: 1 unit, i.e. effectively none. Anything that arrives on-chain is
-    // credited in full. There is no point setting a higher floor: the chain already has
-    // its own dust limit (about 546 sat on Bitcoin) and a transaction below it simply
-    // never confirms, so a site-side minimum would only reject money you already have.
-    minDepositUnits: 1,
-
-    // MINIMUM WITHDRAWAL must stay above the network fee or every small cashout loses
-    // money for the house. These are deliberately low; see assets{} below for per-coin
-    // values that override them.
-    withdrawalFeeUnits: 20000,  // 0.0002 flat fee kept by the house per withdrawal
-    minWithdrawalUnits: 100000, // 0.001
-    autoApproveBelowUnits: 10 * 100000000, // bigger cashouts wait for a human
-    pollIntervalMs: 20000,
-
-    // Per-asset overrides. Keyed by driver name, applied over the values above, so each
-    // coin gets a floor that matches its real fee level rather than one global guess.
-    // Values are in units (1e8 per coin).
-    assets: {
-      // Bitcoin: fee-dominated, so the floor has to cover a payout at busy times.
-      bitcoind: { minDepositUnits: 1, minWithdrawalUnits: 50000, withdrawalFeeUnits: 20000 },
-      // Monero: fees are tiny and stable, so the floor can be near-dust.
-      monero: { minDepositUnits: 1, minWithdrawalUnits: 2000, withdrawalFeeUnits: 500 },
-      // Manual payouts cost the operator only their own time.
-      manual: { minDepositUnits: 1, minWithdrawalUnits: 10000, withdrawalFeeUnits: 0 },
-      mock: { minDepositUnits: 1, minWithdrawalUnits: 1000, withdrawalFeeUnits: 0 },
-    },
-    // driver-specific settings, e.g.
-    // bitcoind: { url:'http://127.0.0.1:8332', user:'x', pass:'y', walletName:'casino' }
-    // evm:      { rpcUrl:'https://...', chainId:1, hotWallet:'0x..', xpub:'...' }
-    // monero:   { url:'http://127.0.0.1:18082/json_rpc', user:'', pass:'' }
-  },
-
-  // ---- TREASURY: where operator profit goes ----------------------------
-  // The hot wallet is the wallet the site spends from to pay players. It must stay
-  // online, so it must never hold your profit. The treasury is the opposite: cold,
-  // offline, and the only place profit is allowed to land.
-  //
-  // Create these wallets in real, audited wallet software, never in this codebase:
-  //   Bitcoin  -> Sparrow or Electrum, write the seed phrase on paper
-  //   Monero   -> Monero GUI or Feather, keep the 25-word seed offline
-  // Then paste the receive addresses here. `npm run treasury` walks you through it and
-  // checks each address before it is saved.
-  //
-  // Withdrawals to the treasury only ever come out of free capital (bankroll minus what
-  // you owe players), so taking profit can never leave the site unable to pay out.
-  treasury: {
-    requireWhitelist: true,   // refuse payouts to any address not listed here
-    minPayoutUnits: 100000,
-    addresses: [
-      // { label: 'BTC cold', driver: 'bitcoind', address: 'bc1q...' },
-      // { label: 'XMR cold', driver: 'monero',   address: '4...' },
-    ],
-    // Keep at most this fraction of free capital in the hot wallet; sweep the rest.
-    hotWalletMaxFraction: 0.25,
   },
 
   // ---- JURISDICTION CONTROL --------------------------------------------
@@ -345,8 +257,6 @@ function load() {
   if (process.env.CASINO_ADMIN_TOKEN) cfg.adminToken = process.env.CASINO_ADMIN_TOKEN;
   if (process.env.CASINO_DB) cfg.dbFile = process.env.CASINO_DB;
   if (process.env.CASINO_LOG) cfg.logLevel = String(process.env.CASINO_LOG).toLowerCase();
-  if (process.env.CASINO_LOG) cfg.logLevel = String(process.env.CASINO_LOG).toLowerCase();
-  if (process.env.CASINO_LOG) cfg.logLevel = String(process.env.CASINO_LOG).toLowerCase();
   if (process.env.CASINO_TRUST_PROXY) cfg.trustProxy = process.env.CASINO_TRUST_PROXY === '1';
   if (process.env.CASINO_SECURE_COOKIES) cfg.secureCookies = process.env.CASINO_SECURE_COOKIES === '1';
 
@@ -356,23 +266,6 @@ function load() {
   // Where optional data files live, next to the database. The Балда dictionary is read
   // from here if the operator has supplied a bigger one than the built-in list.
   cfg.dataDir = path.dirname(cfg.dbPath);
-  applyAssetOverrides(cfg);
-  return cfg;
-}
-
-/**
- * Fold wallet.assets[driver] over the generic wallet settings, so the rest of the code
- * can just read cfg.wallet.minWithdrawalUnits and get the value for the active coin.
- */
-function applyAssetOverrides(cfg) {
-  const over = cfg.wallet.assets?.[cfg.wallet.driver];
-  if (over) Object.assign(cfg.wallet, over);
-  if (cfg.wallet.minWithdrawalUnits <= cfg.wallet.withdrawalFeeUnits) {
-    throw new Error(
-      `wallet.minWithdrawalUnits (${cfg.wallet.minWithdrawalUnits}) must exceed `
-      + `withdrawalFeeUnits (${cfg.wallet.withdrawalFeeUnits}) or small cashouts lose money`,
-    );
-  }
   return cfg;
 }
 
@@ -418,4 +311,4 @@ function save(patch) {
   return next;
 }
 
-module.exports = { load, save, DEFAULTS, deepMerge, applyAssetOverrides, ROOT };
+module.exports = { load, save, DEFAULTS, deepMerge, ROOT };

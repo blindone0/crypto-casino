@@ -86,15 +86,14 @@ const state = {
   cfg: null, user: null, csrf: null,
   game: 'slots', feed: 'recent',
   mines: null, crash: null, es: null,
-  // 'real' or 'demo'. Practice money is a completely separate balance that cannot be
-  // deposited to or withdrawn from; it exists so someone with nothing can still learn.
-  wallet: 'real', demoBalance: 0,
   // Head-to-head matches: the lobby, the one being watched, its board and its poll.
   matchLobby: null, matchId: null, matchView: null, board: null, matchTimer: null,
   // Pictures the operator imported for the puzzle, keyed the same way the drawn ones are.
   puzzlePictures: null,
-  // The tugrik wallet, when it is the active one.
-  tokenBalance: 0, tokenNonce: 0, tokenPubkey: null, tokenHouse: null,
+  // The tugrik wallet. There is no other kind: `balance` below is the only balance the
+  // site has. `nonce` is the next one this key may sign with, `house` is who a stake is
+  // signed to.
+  tokenBalance: 0, tokenNonce: 0, tokenHouse: null,
 };
 
 const UNIT = 1e8;
@@ -113,12 +112,12 @@ async function api(path, { method = 'GET', body } = {}) {
   // Anything that stakes money carries the active wallet, set in one place rather than
   // at each of the dozen call sites, so a new game cannot forget it and bet real funds.
   let payload = body;
-  if (method === 'POST' && state.wallet !== 'real' && STAKE_ROUTES.some((r) => path.startsWith(r))) {
-    payload = { ...(body || {}), wallet: state.wallet };
-    // A tugrik stake is a transfer, and a transfer needs the player's signature. Done here,
-    // in the one place every staking request passes through, so a new game cannot forget
-    // it and cannot send an unsigned bet the server would refuse.
-    if (state.wallet === 'token') payload.spend = await signStakeFor(payload);
+  if (method === 'POST' && STAKE_ROUTES.some((r) => path.startsWith(r))) {
+    // A stake is a transfer, and a transfer needs the player's signature. Done here, in
+    // the one place every staking request passes through, so a new game cannot forget it
+    // and cannot send an unsigned bet the server would refuse. There is no longer a
+    // currency to name alongside it — there is only one.
+    payload = { ...(body || {}), spend: await signStakeFor(body) };
   }
   if (payload !== undefined) headers['content-type'] = 'application/json';
   if (state.csrf && method !== 'GET') headers['x-csrf-token'] = state.csrf;
@@ -145,25 +144,11 @@ function toast(msg, kind = '') {
   }, 3600);
 }
 
-/** Put a already-formatted figure in the balance box. Tugriks are whole and not divided. */
-function setBalanceRaw(text, direction) {
-  const box = $('#balanceBox');
-  const v = $('#balanceValue');
-  box.hidden = false;
-  v.textContent = text;
-  if (direction) {
-    v.className = `value ${direction > 0 ? 'flash' : 'flash-down'}`;
-    setTimeout(() => { v.className = 'value'; }, 320);
-  }
-}
-
 function setBalance(units, direction) {
   const box = $('#balanceBox');
   const v = $('#balanceValue');
   box.hidden = false;
-  if (state.wallet === 'demo') state.demoBalance = units;
-  else if (state.wallet === 'token') state.tokenBalance = units;
-  else if (state.user) state.user.balance = units;
+  state.tokenBalance = units;
   v.textContent = fmt(units);
   if (direction) {
     v.className = `value ${direction > 0 ? 'flash' : 'flash-down'}`;
@@ -287,6 +272,56 @@ function radioModal(onSettingsChange) {
 }
 
 // ------------------------------------------------------------------- auth
+/**
+ * Make this account's tugrik wallet, then show the phrase.
+ *
+ * The key is generated in the browser and the server only ever sees the public half, so
+ * registering it is also what pays the welcome grant out of the treasury. That is why
+ * this runs before the player reaches a game: it is the difference between an account
+ * that can play and one that is told to go and set something up first.
+ *
+ * The phrase is shown, not demanded. Nobody wants to copy sixteen words before their
+ * first spin, and it stays in Wallet for whenever they do. What is not softened is the
+ * consequence: lose the device without it and those tugriks are unreachable, by design.
+ */
+async function newWalletStep() {
+  const body = openModal(t('tok.title'), (b) => addKids(b,
+    el('p', { class: 'hint' }, t('common.loading'))));
+  if (!(await tokenKeys.supported())) {
+    // Nothing can be held without Ed25519, so say so plainly rather than handing over an
+    // account that silently cannot have money.
+    setKids(body, el('div', { class: 'banner' }, t('tok.unsupported')));
+    return;
+  }
+  const phrase = tokenKeys.generatePhrase();
+  try {
+    // PBKDF2 at 210k rounds: about a second on a phone, and it blocks. The line above is
+    // there so the box does not look like it missed the tap.
+    const key = await tokenKeys.keyFromPhrase(phrase);
+    const res = await api('/api/token/key', { method: 'POST', body: { pubkey: key.publicKey } });
+    await tokenKeys.remember(key);
+    tokenKey = key;
+    await refreshTokenBalance();
+
+    setKids(body,
+      el('p', {}, t('tok.granted', { n: fmt(res.balance ?? 0), c: state.cfg?.token?.symbol || 'TUG' })),
+      el('div', { class: 'banner' }, t('tok.phraseWarn')),
+      el('div', { class: 'phrase-box mono' }, phrase),
+      el('div', { class: 'row wrap' },
+        el('button', {
+          class: 'tiny',
+          onclick: async () => {
+            try { await navigator.clipboard.writeText(phrase); toast(t('wallet.copied')); }
+            catch { toast(t('tok.phrase'), 'warn'); }
+          },
+        }, t('wallet.copy')),
+        el('button', { class: 'primary', onclick: closeModal }, t('tok.saved'))),
+      el('p', { class: 'hint' }, t('tok.phraseLater')));
+  } catch (e) {
+    setKids(body, el('div', { class: 'banner' }, e.message));
+  }
+}
+
 function authModal(mode = 'login') {
   const build = (body) => {
     const u = el('input', { id: 'au', autocomplete: 'username', maxlength: '20' });
@@ -305,8 +340,15 @@ function authModal(mode = 'login') {
         const out = await api(path, { method: 'POST', body: payload });
         state.user = out.user;
         state.csrf = out.csrf;
-        closeModal();
-        afterAuth();
+        if (mode === 'register') {
+          // A new account has no wallet, and tugriks live on a key the player holds. So
+          // the wallet is made here, before anything else: register, and you are funded
+          // and playing. Nothing anywhere else has to check whether a wallet exists.
+          await newWalletStep();
+        } else {
+          closeModal();
+        }
+        await afterAuth();
         toast(t('auth.welcome', { name: out.user.username }));
       } catch (e) {
         err.textContent = e.message;
@@ -335,52 +377,41 @@ function authModal(mode = 'login') {
   openModal(t(mode === 'login' ? 'auth.login' : 'auth.register'), build);
 }
 
-function afterAuth() {
+async function afterAuth() {
   $('#authButtons').classList.add('hide');
   $('#accountMenu').classList.remove('hide');
   $('#btnAdmin').classList.toggle('hide', state.user.role !== 'admin');
-  $('#modeSwitch').classList.toggle('hide', !state.cfg?.demo?.enabled);
+  // Fetch the balance before painting it. This used to be the wallet switch's job, and
+  // when that went the balance stopped being fetched at all: a signed-in player reloaded
+  // the page, saw 0.00000000 with a thousand tugriks sitting on the chain, and could not
+  // place a bet — the stake was clamped against a balance of zero. The chain is the only
+  // source of the number, so it has to be asked.
+  await refreshTokenBalance();
+  // Signed in with no wallet: an account made before wallets existed at sign-up, or one
+  // whose chain was reset in development. Make it now rather than letting them reach a
+  // game and be told they cannot play. The grant pays here, so they arrive funded.
+  if (!state.tokenPubkey && await tokenKeys.supported()) {
+    await newWalletStep();
+    await refreshTokenBalance();
+  }
   applyWallet();
   renderGame();
   loadFeed();
 }
 
-/** Reflect the active wallet everywhere: balance, styling, banner, switch. */
-/** True while the active wallet is the site token. Same units; a different currency. */
-const inTokens = () => state.wallet === 'token';
-
+/**
+ * Paint the balance box.
+ *
+ * This used to be the three-way switch between credits, play money and tugriks. There is
+ * one currency now, so all it does is put the tugrik figure and its ticker on screen.
+ */
 function applyWallet() {
-  const demo = state.wallet === 'demo';
-  document.body.classList.toggle('practice', demo);
-  document.body.classList.toggle('tokens', inTokens());
-  for (const b of document.querySelectorAll('#modeSwitch button')) {
-    b.classList.toggle('on', b.dataset.wallet === state.wallet);
-  }
-  // The currency label follows the wallet, because a tugrik balance shown as "1000.00000000
-  // CRD" is not a smaller mistake than showing the wrong number.
   const label = $('#currencyLabel');
-  if (label) label.textContent = inTokens() ? (state.cfg?.token?.symbol || 'TUG') : state.cfg?.currency;
-  if (inTokens()) setBalance(state.tokenBalance ?? 0);
-  else setBalance(demo ? state.demoBalance : (state.user?.balance ?? 0));
+  if (label) label.textContent = state.cfg?.token?.symbol || 'TUG';
+  setBalance(state.tokenBalance ?? 0);
   renderBanners();
 }
 
-async function setWallet(next) {
-  if (state.wallet === next) return;
-  if (next === 'token' && !state.cfg?.token?.enabled) return;
-  state.wallet = next;
-  try { localStorage.setItem('wallet', next); } catch { /* private mode */ }
-  if (next === 'demo' && state.user) {
-    try { state.demoBalance = (await api('/api/demo')).balance; } catch { /* keep last */ }
-  }
-  if (next === 'token' && state.user) await refreshTokenBalance();
-  if (next === 'token' && state.user && !tokenKey) toast(t('arc.needUnlock'), 'warn');
-  // Any half-finished round belongs to the other wallet, so start clean.
-  state.mines = null;
-  state.pref = null;
-  applyWallet();
-  renderGame();
-}
 
 /**
  * Sign the stake on an outgoing bet.
@@ -396,9 +427,12 @@ async function signStakeFor(payload) {
   const units = Math.round(Number(amount) * UNIT);
   if (!Number.isSafeInteger(units) || units <= 0) return undefined;
 
-  if (!tokenKey) {
-    await refreshTokenBalance();
-    throw new Error(t('arc.needUnlock'));
+  // No key on this device — which, with a wallet made at registration, means somebody
+  // signing in somewhere new. Ask for the phrase here and carry on with the bet they
+  // already pressed, rather than refusing it and telling them to go and unlock something.
+  if (!tokenKey && !(await ensureWallet())) {
+    // They closed the box. That is an answer, not an error: say nothing and do nothing.
+    return undefined;
   }
   await refreshTokenBalance();
   if (!state.tokenHouse) throw new Error(t('tok.noHouse'));
@@ -430,10 +464,9 @@ async function signOut() {
   state.csrf = null;
   $('#authButtons').classList.remove('hide');
   $('#accountMenu').classList.add('hide');
-  $('#modeSwitch').classList.add('hide');
   $('#balanceBox').hidden = true;
-  state.wallet = 'real';
-  document.body.classList.remove('practice');
+  state.tokenBalance = 0;
+  state.tokenNonce = 0;
   renderBanners();
   renderGame();
 }
@@ -445,29 +478,83 @@ const requireLogin = () => {
 
 // ------------------------------------------------------- shared bet controls
 /** Amount input with ½ / 2× / max helpers. Returns { node, get, set }. */
-function amountControl(initial = '0.001') {
-  const input = el('input', { class: 'mono', value: initial, inputmode: 'decimal' });
-  const bump = (f) => () => {
-    const cur = Number(input.value) || 0;
-    input.value = Math.max(0, f(cur)).toFixed(8).replace(/0+$/, '').replace(/\.$/, '');
+/**
+ * What a legal stake looks like right now.
+ *
+ * The limits come from the server's config and the balance from the chain, so this is the
+ * same arithmetic the server will do — which is the point. If the field cannot express an
+ * illegal bet, the server's two refusals stop being reachable through the interface.
+ */
+function betBounds() {
+  const min = state.cfg?.risk?.minBetUnits ?? UNIT;
+  const max = state.cfg?.risk?.maxBetUnits ?? 1000 * UNIT;
+  const balance = state.tokenBalance ?? 0;
+  // A tenth of the minimum is the step: fine enough to be worth adjusting, coarse enough
+  // that the field never shows something like 0.28374651.
+  const step = Math.max(Math.round(min / 10), 1);
+  return { min, max, step, balance, ceiling: Math.min(max, balance), playable: balance >= min };
+}
+
+/** Round to the step and hold inside the bounds. Every path through the control uses it. */
+function clampStake(units) {
+  const { min, step, ceiling } = betBounds();
+  const snapped = Math.round((Number(units) || 0) / step) * step;
+  if (snapped <= min) return min;
+  if (snapped >= ceiling) return Math.max(min, Math.floor(ceiling / step) * step);
+  return snapped;
+}
+
+/** A stake as the field should show it: no trailing noise, no more places than the step. */
+function fmtStake(units) {
+  const { step } = betBounds();
+  const places = Math.max(0, Math.min(8, Math.ceil(Math.log10(UNIT / step))));
+  return (units / UNIT).toFixed(places).replace(/\.?0+$/, '') || '0';
+}
+
+/**
+ * The stake field, shared by every game.
+ *
+ * It used to accept any number at all and let the server say no — which is how a new
+ * player's very first spin met "minimum stake is 1.00000000 TUG", because the field
+ * opened at 0.20. Nothing here validates: the value is corrected as it is set, so there
+ * is never a wrong one to report. `Макс` means the largest legal bet you can afford,
+ * which is what people mean by it — it used to mean the whole balance, ignoring the table
+ * maximum entirely.
+ */
+function amountControl(initial) {
+  const start = clampStake(initial === undefined ? betBounds().min : Number(initial) * UNIT);
+  const input = el('input', { class: 'mono', value: fmtStake(start), inputmode: 'decimal' });
+
+  const put = (units) => {
+    input.value = fmtStake(clampStake(units));
     input.dispatchEvent(new Event('input'));
   };
+  const units = () => clampStake(Math.round((Number(input.value) || 0) * UNIT));
+  // Correct on blur rather than on every keystroke: rewriting the field mid-type fights
+  // the person using it.
+  input.addEventListener('blur', () => put(units()));
+
   const node = el('label', { class: 'field' },
     el('span', { 'data-i18n': 'bet.amount' }),
     el('div', { class: 'input-row' },
       input,
-      el('button', { class: 'tiny', onclick: bump((v) => v / 2), type: 'button' }, '½'),
-      el('button', { class: 'tiny', onclick: bump((v) => v * 2), type: 'button' }, '2×'),
+      el('button', { class: 'tiny', type: 'button', onclick: () => put(units() / 2) }, '½'),
+      el('button', { class: 'tiny', type: 'button', onclick: () => put(units() * 2) }, '2×'),
       el('button', {
         class: 'tiny',
         type: 'button',
-        onclick: () => {
-          if (!state.user) return;
-          input.value = fmt(state.user.balance);
-          input.dispatchEvent(new Event('input'));
-        },
+        onclick: () => put(betBounds().ceiling),
       }, t('bet.max'))));
-  return { node, input, get: () => input.value, set: (v) => { input.value = v; } };
+
+  return {
+    node,
+    input,
+    get: () => fmtStake(units()),
+    units,
+    set: (v) => put(Number(v) * UNIT),
+    /** False when the balance cannot cover even the minimum: the action should say so. */
+    playable: () => betBounds().playable,
+  };
 }
 
 const statRow = (key, valueNode) => el('div', { class: 'stat-row' },
@@ -479,18 +566,17 @@ const statRow = (key, valueNode) => el('div', { class: 'stat-row' },
  */
 function arcadeInfoPanel() {
   const info = state.arcade || {};
-  const practising = state.wallet === 'demo';
+  // Both figures go through fmt(). They did not before, and since everything here is in
+  // hundred-millionths the panel was printing a ten-tugrik play as "1000000000".
   setKids($('#infoPanel'),
     el('h3', {}, t('arc.title')),
     el('div', { class: 'stat-row' },
       el('span', { class: 'k' }, t('arc.cost')),
-      el('span', { class: 'v' }, practising
-        ? t('arc.free')
-        : `${info.tokenCost ?? '-'} ${info.symbol || ''}`)),
-    practising ? null : el('div', { class: 'stat-row' },
+      el('span', { class: 'v' }, `${fmt(info.tokenCost ?? 0)} ${info.symbol || ''}`)),
+    el('div', { class: 'stat-row' },
       el('span', { class: 'k' }, t('arc.balance')),
-      el('span', { class: 'v' }, `${info.balance ?? 0} ${info.symbol || ''}`)),
-    el('p', { class: 'hint' }, practising ? t('arc.practiceNote') : t('arc.noPayout')));
+      el('span', { class: 'v' }, `${fmt(info.balance ?? 0)} ${info.symbol || ''}`)),
+    el('p', { class: 'hint' }, t('arc.noPayout')));
 }
 
 function infoPanel(extra = []) {
@@ -989,141 +1075,6 @@ async function loadFeed() {
 }
 
 // ----------------------------------------------------------------- wallet
-async function walletModal() {
-  if (!requireLogin()) return;
-
-  const depositTab = async (body) => {
-    setKids(body, el('p', { class: 'hint' }, t('common.loading')));
-    try {
-      const d = await api('/api/wallet/deposit');
-      const kids = [];
-      if (d.isMock) kids.push(el('div', { class: 'banner', 'data-i18n': 'wallet.mockWarning' }));
-      kids.push(
-        el('h3', { 'data-i18n': 'wallet.yourAddress' }),
-        el('div', { class: 'addr' }, d.address),
-        el('div', { class: 'row', style: 'margin-top:8px' },
-          el('button', {
-            class: 'tiny',
-            onclick: async () => {
-              try { await navigator.clipboard.writeText(d.address); toast(t('wallet.copied')); }
-              catch { toast(t('common.error'), 'bad'); }
-            },
-          }, t('wallet.copy'))),
-      );
-      if (d.memo) {
-        kids.push(
-          el('h3', { style: 'margin-top:16px', 'data-i18n': 'wallet.memo' }),
-          el('div', { class: 'addr' }, d.memo),
-        );
-      }
-      if (d.note) kids.push(el('p', { class: 'hint' }, d.note));
-      kids.push(
-        el('p', { class: 'hint' }, t('wallet.confirmations', { n: d.minConfirmations })),
-        el('div', { class: 'stat-row' },
-          el('span', { class: 'k', 'data-i18n': 'wallet.minDeposit' }),
-          el('span', { class: 'v' }, state.cfg.wallet.minDeposit <= 1
-            ? t('wallet.noMinimum')
-            : fmt(state.cfg.wallet.minDeposit))),
-      );
-      if (d.isMock) {
-        const amt = el('input', { class: 'mono', value: '5', inputmode: 'decimal' });
-        kids.push(
-          el('h3', { style: 'margin-top:16px', 'data-i18n': 'wallet.simulate' }),
-          el('div', { class: 'input-row' }, amt,
-            el('button', {
-              class: 'tiny',
-              onclick: async () => {
-                try {
-                  await api('/api/wallet/simulate-deposit', { method: 'POST', body: { amount: amt.value } });
-                  toast('deposit queued, credits after the confirmation delay');
-                  refreshMe();
-                } catch (e) { toast(e.message, 'bad'); }
-              },
-            }, '+')),
-        );
-      }
-      setKids(body, ...kids);
-      applyAll(body);
-    } catch (e) {
-      setKids(body, el('p', { class: 'hint neg' }, e.message));
-    }
-  };
-
-  const withdrawTab = (body) => {
-    const w = state.cfg.wallet;
-    const addr = el('input', { class: 'mono' });
-    const amt = el('input', { class: 'mono', value: fmt(Math.max(w.minWithdrawal, 0)), inputmode: 'decimal' });
-    const recv = el('span', {});
-    const recalc = () => {
-      const units = Math.round((Number(amt.value) || 0) * UNIT);
-      recv.textContent = fmt(Math.max(0, units - w.withdrawalFee));
-    };
-    amt.addEventListener('input', recalc);
-    setKids(body, 
-      el('label', { class: 'field' }, el('span', { 'data-i18n': 'wallet.destination' }), addr),
-      el('label', { class: 'field' }, el('span', { 'data-i18n': 'bet.amount' }), amt),
-      el('div', { class: 'stat-row' },
-        el('span', { class: 'k', 'data-i18n': 'wallet.minWithdraw' }),
-        el('span', { class: 'v' }, fmt(w.minWithdrawal))),
-      el('div', { class: 'stat-row' },
-        el('span', { class: 'k', 'data-i18n': 'wallet.fee' }),
-        el('span', { class: 'v' }, fmt(w.withdrawalFee))),
-      el('div', { class: 'stat-row' },
-        el('span', { class: 'k', 'data-i18n': 'wallet.youReceive' }),
-        el('span', { class: 'v' }, recv)),
-      el('button', {
-        class: 'primary big',
-        onclick: async (e) => {
-          e.target.disabled = true;
-          try {
-            const out = await api('/api/wallet/withdraw', {
-              method: 'POST', body: { address: addr.value, amount: amt.value },
-            });
-            toast(`${t('wallet.requestWithdraw')}: ${out.state}`);
-            refreshMe();
-          } catch (err) { toast(err.message, 'bad'); }
-          finally { e.target.disabled = false; }
-        },
-      }, t('wallet.requestWithdraw')),
-    );
-    recalc();
-    applyAll(body);
-  };
-
-  const historyTab = async (body) => {
-    setKids(body, el('p', { class: 'hint' }, t('common.loading')));
-    try {
-      const h = await api('/api/wallet/history');
-      const rows = [
-        ...h.deposits.map((d) => ({
-          kind: t('wallet.deposit'), amount: d.amount_units, at: d.created_at,
-          state: d.credited_at ? t('wallet.credited') : `${d.confirmations} conf`,
-        })),
-        ...h.withdrawals.map((w) => ({
-          kind: t('wallet.withdraw'), amount: -w.amount_units, at: w.requested_at, state: w.state,
-        })),
-      ].sort((a, b) => b.at - a.at);
-      if (!rows.length) { setKids(body, el('p', { class: 'hint' }, t('feed.empty'))); return; }
-      setKids(body, el('table', { class: 'grid' },
-        el('tbody', {}, ...rows.map((r) => el('tr', {},
-          el('td', { class: 'name' }, r.kind),
-          el('td', { class: r.amount > 0 ? 'pos' : 'neg' }, fmtShort(r.amount)),
-          el('td', { class: 'name faint' }, r.state),
-          el('td', { class: 'faint' }, new Date(r.at * 1000).toLocaleString()))))));
-    } catch (e) {
-      setKids(body, el('p', { class: 'hint neg' }, e.message));
-    }
-  };
-
-  openModal(t('nav.wallet'), null, {
-    tabs: [
-      { label: t('wallet.deposit'), build: depositTab },
-      { label: t('wallet.withdraw'), build: withdrawTab },
-      { label: t('wallet.history'), build: historyTab },
-    ],
-  });
-}
-
 // --------------------------------------------------------------- fairness
 async function fairModal() {
   if (!requireLogin()) return;
@@ -1311,7 +1262,7 @@ async function renderSlots() {
   ensureSymbolDefs();
   applySlotTheme();
   const panel = $('#betPanel');
-  const amount = amountControl('0.20');
+  const amount = amountControl();
   const spin = el('button', { class: 'primary big' }, t('slots.spin'));
   const perLine = el('span', {});
 
@@ -1915,7 +1866,7 @@ function paintPuzzle() {
   const panel = $('#betPanel');
 
   if (!live) {
-    const amount = amountControl('0.10');
+    const amount = amountControl();
     const diff = el('select', {}, ...(puzzleInfo?.tiers || []).map((tier) => el('option', {
       value: tier.key, selected: tier.key === (state.puzzleTier || 'medium') ? 'selected' : false,
     }, `${t(`puzzle.${tier.key}`)} — ${tier.cols}x${tier.rows}, ${tier.broken} broken`)));
@@ -2125,7 +2076,7 @@ function paintPreferans() {
   const stage = $('#stage');
 
   if (g.state === 'none' || g.state === 'done') {
-    const amount = amountControl('0.50');
+    const amount = amountControl();
     const deal = el('button', { class: 'primary big' },
       t(g.state === 'done' ? 'pref.newHand' : 'pref.deal'));
     deal.addEventListener('click', async () => {
@@ -2335,7 +2286,7 @@ function paintDebertz() {
   const stage = $('#stage');
 
   if (g.state === 'none' || g.state === 'done') {
-    const amount = amountControl('0.50');
+    const amount = amountControl();
     const deal = el('button', { class: 'primary big' },
       t(g.state === 'done' ? 'deb.newHand' : 'deb.deal'));
     deal.addEventListener('click', async () => {
@@ -2490,6 +2441,69 @@ async function recallTokenKey() {
   return tokenKey;
 }
 
+/**
+ * Make sure this device can sign, and if it cannot, ask right here.
+ *
+ * The rule is that no step leads to an error. Telling someone to go and unlock a wallet
+ * before they can press the thing they just pressed is exactly that kind of dead end, so
+ * this asks for the one thing it needs — the phrase — in place, and the caller carries on
+ * as though nothing happened.
+ *
+ * A wallet is created at registration, so the only person who ever sees this is one
+ * signing in on a second device, where the key genuinely is not on this machine.
+ *
+ * Resolves true when a key is ready, false when the player closed the box.
+ */
+async function ensureWallet() {
+  await recallTokenKey();
+  await refreshTokenBalance();
+  if (tokenKey && (!state.tokenPubkey || tokenKey.publicKey === state.tokenPubkey)) return true;
+  if (!(await tokenKeys.supported())) { toast(t('tok.unsupported'), 'bad'); return false; }
+
+  // The account has no wallet on the server at all. Asking for a phrase would be asking
+  // for something that has never existed, so make one instead — the same step registration
+  // runs. This is the path an account takes when it was created before wallets were made
+  // at sign-up, and after a development chain reset, which wipes every key.
+  if (!state.tokenPubkey) {
+    await newWalletStep();
+    return !!tokenKey;
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (ok) => { if (!settled) { settled = true; resolve(ok); } };
+    const err = el('p', { class: 'err' });
+    const phrase = el('input', { class: 'mono', placeholder: t('tok.enterPhrase') });
+    const go = el('button', { class: 'primary' }, t('tok.unlock'));
+    go.onclick = async () => {
+      err.textContent = '';
+      go.disabled = true;
+      const was = go.textContent;
+      go.textContent = t('common.loading');
+      try {
+        // Deriving the key is PBKDF2 at 210k rounds and takes about a second on a phone,
+        // which is why the button says so rather than appearing to have missed the tap.
+        const key = await tokenKeys.keyFromPhrase(phrase.value);
+        await tokenKeys.remember(key);
+        tokenKey = key;
+        await refreshTokenBalance();
+        closeModal();
+        done(true);
+      } catch (e) {
+        err.textContent = e.message;
+        go.disabled = false;
+        go.textContent = was;
+      }
+    };
+    openModal(t('tok.unlock'), (b) => addKids(b,
+      el('p', { class: 'hint' }, t('tok.locked')),
+      el('div', { class: 'input-row' }, phrase, go),
+      err,
+      el('button', { class: 'ghost', onclick: () => { closeModal(); done(false); } }, t('common.cancel'))));
+    phrase.focus();
+  });
+}
+
 async function tokenModal() {
   if (!requireLogin()) return;
   const body = openModal(t('tok.title'), (b) => addKids(b, el('p', { class: 'hint' }, t('common.loading'))));
@@ -2620,7 +2634,7 @@ function renderTokenWallet(body, info) {
     el('div', { class: 'stat-grid' },
       el('div', { class: 'stat-card' },
         el('div', { class: 'k' }, t('tok.balance')),
-        el('div', { class: 'v pos' }, `${info.balance} ${info.symbol}`)),
+        el('div', { class: 'v pos' }, `${fmt(info.balance ?? 0)} ${info.symbol || ''}`)),
       el('div', { class: 'stat-card' },
         el('div', { class: 'k' }, t('tok.height')),
         el('div', { class: 'v' }, String(info.height)))),
@@ -2785,17 +2799,11 @@ function paintArcadeFloor() {
   const info = state.arcade;
   const panel = $('#betPanel');
 
-  // In practice mode there is no balance to show and nothing to buy, so offering a token
-  // wallet would be answering a question nobody asked.
-  const practising = state.wallet === 'demo';
   setKids(panel,
     el('div', { class: 'stat-card' },
-      el('div', { class: 'k' }, practising ? t('arc.cost') : t('arc.balance')),
-      el('div', { class: 'v pos' }, practising ? t('arc.free') : `${info.balance} ${info.symbol}`)),
-    el('p', { class: 'hint' }, practising ? t('arc.practiceNote') : t('arc.intro')),
-    !practising && !info.pubkey
-      ? el('button', { class: 'big', style: 'margin-top:10px', onclick: tokenModal }, t('tok.nav'))
-      : null,
+      el('div', { class: 'k' }, t('arc.balance')),
+      el('div', { class: 'v pos' }, `${fmt(info.balance ?? 0)} ${info.symbol || ''}`)),
+    el('p', { class: 'hint' }, t('arc.intro')),
   );
   applyAll(panel);
 
@@ -2862,28 +2870,13 @@ function cabinetCard(game, info) {
 async function insertToken(game) {
   if (!requireLogin()) return;
 
-  // Practice mode plays free. The arcade pays nothing out in any mode — the prize is a
-  // place on the board — so the only thing a free play could take from anybody is that
-  // place, and the server keeps practice scores off it.
-  if (state.wallet === 'demo') {
-    try {
-      const play = await api('/api/arcade/practice', { method: 'POST', body: { game: game.key } });
-      audio.sfx('click');
-      startCabinet(game, play);
-    } catch (e) {
-      toast(e.message, 'bad');
-    }
-    return;
-  }
-
   const info = state.arcade;
-  if (!info.pubkey) { toast(t('arc.needTokens'), 'bad'); tokenModal(); return; }
-  if (info.balance < info.tokenCost) { toast(t('arc.needTokens'), 'bad'); return; }
-  if (!tokenKey || tokenKey.publicKey !== info.pubkey) {
-    toast(t('arc.needUnlock'), 'warn');
-    tokenModal();
-    return;
-  }
+  // Short of tugriks: the one case where the answer really is "not now". Play free
+  // instead rather than refusing outright — the arcade pays nothing out in any case, so a
+  // free play costs nobody anything except a place on the board, which the server keeps
+  // practice scores off.
+  if (info.balance < info.tokenCost) return practicePlay(game);
+  if (!(await ensureWallet())) return;
 
   try {
     const fresh = await api('/api/arcade');
@@ -2893,6 +2886,18 @@ async function insertToken(game) {
     const sig = await tokenKeys.signSpend(tokenKey, spend);
     const play = await api('/api/arcade/play', { method: 'POST', body: { ...spend, sig } });
     audio.sfx('click');
+    startCabinet(game, play);
+  } catch (e) {
+    toast(e.message, 'bad');
+  }
+}
+
+/** A free go. No tugrik, no leaderboard place — the server keeps these off the board. */
+async function practicePlay(game) {
+  try {
+    const play = await api('/api/arcade/practice', { method: 'POST', body: { game: game.key } });
+    audio.sfx('click');
+    toast(t('arc.freeGo'));
     startCabinet(game, play);
   } catch (e) {
     toast(e.message, 'bad');
@@ -3462,27 +3467,17 @@ async function refreshMe() {
   } catch { /* session may have expired */ }
 }
 
-/** Banners depend on the active language, so they are rebuilt whenever it changes. */
+/**
+ * The banner strip.
+ *
+ * It used to carry two: one saying you were in practice mode, one saying the crypto
+ * wallet driver was a test one. Both described a split that no longer exists, so the
+ * strip is empty — but the function stays, because it is called on every language change
+ * and is where anything genuinely site-wide would go.
+ */
 function renderBanners() {
   const box = $('#banners');
-  if (!box) return;
-  setKids(box);
-  if (state.wallet === 'demo') {
-    addKids(box, el('div', { class: 'banner practice' },
-      t('demo.banner'), ' ',
-      el('button', {
-        class: 'tiny', style: 'margin-left:8px',
-        onclick: async () => {
-          try {
-            const r = await api('/api/demo/topup', { method: 'POST' });
-            state.demoBalance = r.balance;
-            setBalance(r.balance, 1);
-            toast(t('demo.toppedUp'));
-          } catch (e) { toast(e.message, 'bad'); }
-        },
-      }, t('demo.topUp'))));
-  }
-  if (state.cfg?.wallet?.isMock) addKids(box, el('div', { class: 'banner' }, t('wallet.mockWarning')));
+  if (box) setKids(box);
 }
 
 async function boot() {
@@ -3513,13 +3508,9 @@ async function boot() {
 
   renderBanners();
 
-  try {
-    const savedWallet = localStorage.getItem('wallet');
-    if (savedWallet === 'demo' && state.cfg?.demo?.enabled) state.wallet = 'demo';
-  } catch { /* private mode */ }
-  for (const b of document.querySelectorAll('#modeSwitch button')) {
-    b.onclick = () => setWallet(b.dataset.wallet);
-  }
+  // A leftover from when there were three wallets to choose between. Cleared rather than
+  // read, so a device that remembers "demo" does not carry a dead preference forever.
+  try { localStorage.removeItem('wallet'); } catch { /* private mode */ }
 
   // Before anything asks whether the wallet is unlocked.
   await recallTokenKey();
@@ -3563,7 +3554,6 @@ async function boot() {
   $('#btnSignin').onclick = () => authModal('login');
   $('#btnSignup').onclick = () => authModal('register');
   $('#btnSignout').onclick = signOut;
-  $('#btnWallet').onclick = walletModal;
   $('#btnFair').onclick = fairModal;
   $('#btnAff').onclick = affiliateModal;
   $('#btnLimits').onclick = limitsModal;
@@ -3581,9 +3571,7 @@ async function boot() {
     const me = await api('/api/me');
     state.user = me.user;
     state.csrf = me.csrf;
-    state.demoBalance = me.demoBalance || 0;
-    if (!me.demoEnabled) state.wallet = 'real';
-    afterAuth();
+    await afterAuth();
   } catch {
     renderGame();
     loadFeed();

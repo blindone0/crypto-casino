@@ -17,17 +17,14 @@ function testConfig(overrides = {}) {
   );
   const cfg = configMod.deepMerge(structuredClone(configMod.DEFAULTS), {
     adminToken: 'test-admin-token',
-    faucetUnits: 0,
     host: '127.0.0.1',
     port: 0,
-    wallet: { driver: 'mock', pollIntervalMs: 999999 },
     ...overrides,
   });
   cfg.root = ROOT;
   cfg.dbPath = dbPath;
   cfg.dbFile = dbPath;
   cfg.dataDir = path.dirname(dbPath);
-  configMod.applyAssetOverrides(cfg);
   return cfg;
 }
 

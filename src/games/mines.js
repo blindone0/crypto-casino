@@ -91,7 +91,7 @@ function reveal({ db, cfg, user, bankFor }, body) {
     const edge = cfg.houseEdge.mines;
     // Settle against the bank this round was opened with, not the one the request asks
     // for: a round started with play money must never pay out real money.
-    const bank = bankFor(g.mode);
+    const bank = bankFor();
 
     if (mines.includes(tile)) {
       db.run("UPDATE mines_games SET state='lost', ended_at=? WHERE id=?", now(), g.id);
@@ -141,7 +141,7 @@ function cashout({ db, cfg, user, bankFor }) {
 
 /** Pay out a mines round. Caller must already be inside a transaction. */
 function finish({ db, cfg, user, bankFor }, g) {
-  const bank = bankFor(g.mode);
+  const bank = bankFor();
   const picks = JSON.parse(g.picks);
   const mines = JSON.parse(g.mines);
   const edge = cfg.houseEdge.mines;

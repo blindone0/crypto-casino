@@ -58,7 +58,7 @@ function sign(db, key, amount) {
   return { from: key.pub, nonce: tx.nonce, sig };
 }
 
-const bankWith = (db, cfg, spend) => bankMod.bankFor(db, cfg, 'token', spend);
+const bankWith = (db, cfg, spend) => bankMod.bankFor(db, cfg, spend);
 
 /** Give the house something to pay wins out of. */
 function fundHouse(db, cfg, amount) {
@@ -69,13 +69,15 @@ function fundHouse(db, cfg, amount) {
   return amount;
 }
 
-test('the bank is chosen by the wallet named on the request', (t) => {
+test('there is one bank, and it is the tugrik one', (t) => {
   const { cfg, db } = setup();
   t.after(() => cleanup(cfg, db));
-  assert.strictEqual(bankMod.bankFor(db, cfg, 'token').mode, 'token');
-  assert.strictEqual(bankMod.bankFor(db, cfg, 'demo').mode, 'demo');
-  assert.strictEqual(bankMod.bankFor(db, cfg, 'real').mode, 'real');
-  assert.strictEqual(bankMod.bankFor(db, cfg, 'nonsense').mode, 'real', 'anything odd is real money');
+  // This used to assert that a request could pick between three banks by naming one.
+  // It cannot any more, and that is the point: there is nothing to name and no way to
+  // reach a bank that moves anything but tugriks.
+  assert.strictEqual(bankMod.bankFor(db, cfg).mode, 'token');
+  assert.strictEqual(typeof bankMod.realBank, 'undefined', 'the credit bank is gone');
+  assert.strictEqual(typeof bankMod.demoBank, 'undefined', 'the play-money bank is gone');
 });
 
 test('the balance is whatever the chain says it is', (t) => {
@@ -150,7 +152,7 @@ test('a losing bet leaves the stake with the house and writes the round down', (
 
   assert.strictEqual(tc.balanceOf(db, keys.alice.pub), before - 20 * TUG);
   assert.strictEqual(tc.balanceOf(db, house), 20 * TUG);
-  const row = db.get('SELECT * FROM token_bets WHERE user_id=1');
+  const row = db.get('SELECT * FROM bets WHERE user_id=1');
   assert.strictEqual(row.game, 'dice');
   assert.strictEqual(row.wager, 20 * TUG);
   assert.strictEqual(row.profit, -20 * TUG);
@@ -171,7 +173,7 @@ test('a winning bet is paid out of the house balance', (t) => {
   // Staked ten, paid nineteen point eight: up nine point eight.
   assert.strictEqual(tc.balanceOf(db, keys.alice.pub), before - 10 * TUG + Math.round(19.8 * TUG));
   assert.strictEqual(tc.verifyChain(db).ok, true);
-  assert.strictEqual(db.get('SELECT profit FROM token_bets WHERE nonce=2').profit,
+  assert.strictEqual(db.get('SELECT profit FROM bets WHERE nonce=2').profit,
     Math.round(19.8 * TUG) - 10 * TUG);
 });
 
@@ -238,7 +240,7 @@ test('an account with no wallet is told that, rather than that it is poor', (t) 
   const carol = { id: 3, frozen: 0, self_excluded_until: 0 };
   assert.throws(
     () => bankWith(db, cfg).checkLimits(carol, 10 * TUG),
-    /create a token wallet/,
+    /no tugrik wallet/,
   );
 });
 
@@ -276,18 +278,3 @@ test('tugriks are conserved across a run of bets', (t) => {
   assert.strictEqual(tc.verifyChain(db).ok, true);
 });
 
-test('play money and tugriks never touch each other', (t) => {
-  const { cfg, db, user, keys } = setup();
-  t.after(() => cleanup(cfg, db));
-  const demo = bankMod.bankFor(db, cfg, 'demo');
-  const tokenBefore = tc.balanceOf(db, keys.alice.pub);
-
-  demo.settle({
-    user, game: 'dice', wager: 100000, multiplier: 0, payout: 0,
-    detail: null, nonce: 1, stakeTaken: false,
-  });
-
-  assert.strictEqual(tc.balanceOf(db, keys.alice.pub), tokenBefore, 'a demo bet moved no tugriks');
-  assert.strictEqual(db.get('SELECT COUNT(*) AS n FROM token_bets').n, 0);
-  assert.strictEqual(db.get('SELECT COUNT(*) AS n FROM demo_bets').n, 1);
-});
