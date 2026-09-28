@@ -110,6 +110,23 @@ was intended. Put `adult woman, mature female` in the prompt and
 not tuned that way — Animagine and Illustrious are fine, some community merges are not.
 Look at what comes out and bin anything ambiguous. This is not a style note.
 
+## What is already there
+
+Four drawn pictures ship with the site, in `public/pictures.js`: **deco** (a gold art-deco
+fan under a moon), **peacock** (a teal feather eye), **skyline** (a city at night with lit
+windows) and **mandala**. They are vectors rather than image files, so they stay sharp at
+any tile size, and they are original work — there is no licence to honour and nobody in
+them who never agreed to appear.
+
+To look at them outside the game, or to use them as a starting point:
+
+```bash
+npm run export-pictures          # into export/pictures/
+```
+
+Imported pictures join these in the pool rather than replacing them. `--clear` removes
+only the imported ones.
+
 ## Importing
 
 ```bash

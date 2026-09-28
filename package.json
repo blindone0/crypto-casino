@@ -16,6 +16,7 @@
     "treasury": "node tools/treasury-setup.js",
     "token-reset": "node tools/token-reset.js",
     "migrate": "node tools/migrate.js",
-    "doctor": "node tools/doctor.js"
+    "doctor": "node tools/doctor.js",
+    "export-pictures": "node tools/export-pictures.js"
   }
 }
