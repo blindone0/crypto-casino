@@ -492,6 +492,157 @@ const RESTING = {
   4: [0, 0, -Math.PI / 2],             // -X up
 };
 
+/**
+ * Every orientation that shows a given face, not just one.
+ *
+ * `RESTING` above gives ONE pose per face. But a cube sitting with face `v` upward has
+ * FOUR — the same face stays up through any quarter turn about the vertical axis. With
+ * only one target, a die that finished its tumble a quarter turn away had to rotate up to
+ * 180 degrees to reach it, and that final swing is what read as the die teleporting onto
+ * its answer rather than rolling to a stop.
+ *
+ * Generated rather than typed. All 24 orientations of a cube are combinations of quarter
+ * turns, so this enumerates every triple of multiples of PI/2, throws away the ones that
+ * are the same rotation written differently — Euler angles alias, and 64 triples collapse
+ * to 24 rotations — keeps those that leave a face squarely up, and buckets them by which
+ * face that is. Typing out 24 triples by hand would be 24 chances to put one wrong, and
+ * a wrong one shows the player the wrong number.
+ */
+const RESTING_ALL = (() => {
+  const Q = [0, Math.PI / 2, Math.PI, -Math.PI / 2];
+  const mul3 = (a, b) => {
+    const o = new Array(9);
+    for (let c = 0; c < 3; c += 1) {
+      for (let r = 0; r < 3; r += 1) {
+        let s = 0;
+        for (let k = 0; k < 3; k += 1) s += a[k * 3 + r] * b[c * 3 + k];
+        o[c * 3 + r] = s;
+      }
+    }
+    return o;
+  };
+  // The same Z-then-Y-then-X composition `rotation()` uses. If that ever changes, this
+  // must change with it, and the test that checks every candidate shows the right face
+  // will say so.
+  const rot3 = (rx, ry, rz) => {
+    const cx = Math.cos(rx); const sx = Math.sin(rx);
+    const cy = Math.cos(ry); const sy = Math.sin(ry);
+    const cz = Math.cos(rz); const sz = Math.sin(rz);
+    const X = [1, 0, 0, 0, cx, sx, 0, -sx, cx];
+    const Y = [cy, 0, -sy, 0, 1, 0, sy, 0, cy];
+    const Z = [cz, sz, 0, -sz, cz, 0, 0, 0, 1];
+    return mul3(Z, mul3(Y, X));
+  };
+  const apply3 = (m, v) => [
+    m[0] * v[0] + m[3] * v[1] + m[6] * v[2],
+    m[1] * v[0] + m[4] * v[1] + m[7] * v[2],
+    m[2] * v[0] + m[5] * v[1] + m[8] * v[2],
+  ];
+  const NORMALS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+
+  const seen = new Map();
+  for (const rx of Q) {
+    for (const ry of Q) {
+      for (const rz of Q) {
+        const m = rot3(rx, ry, rz);
+        // Dedupe by the MATRIX, not the angles. Euler triples alias badly — (1, 2, 2) and
+        // (-1, 0, 0) quarter turns are the SAME rotation — so 64 triples collapse to 24.
+        const key = m.map((x) => Math.round(x)).join(',');
+        if (!seen.has(key)) seen.set(key, [rx, ry, rz]);
+      }
+    }
+  }
+
+  const out = {};
+  for (const euler of seen.values()) {
+    const m = rot3(...euler);
+    let best = 0;
+    let bestY = -Infinity;
+    NORMALS.forEach((n, i) => {
+      const y = apply3(m, n)[1];
+      if (y > bestY) { bestY = y; best = i; }
+    });
+    // Square to the table only: a cube balanced on an edge is not resting.
+    if (bestY < 0.999) continue;
+    const value = FACE_VALUES[best];
+    (out[value] = out[value] || []).push(euler);
+  }
+
+  // Keep the canonical pose as each face's first candidate.
+  //
+  // The generator picks whichever alias it happened to meet first, which is not
+  // necessarily the one `RESTING` names — face 2's canonical (-1, 0, 0) came out as
+  // (1, 2, 2), the same rotation written differently. That is harmless for the physics
+  // and confusing for everything else, so the canonical form is substituted back in.
+  for (let v = 1; v <= 6; v += 1) {
+    const canon = RESTING[v];
+    const mc = rot3(...canon).map((x) => Math.round(x)).join(',');
+    out[v] = out[v].map((e) => (rot3(...e).map((x) => Math.round(x)).join(',') === mc
+      ? canon.slice()
+      : e));
+  }
+  return out;
+})();
+
+/** Shortest signed angle, in (-PI, PI]. */
+function wrapAngle(a) {
+  return a - Math.PI * 2 * Math.round(a / (Math.PI * 2));
+}
+
+/**
+ * Of the four poses that show this die's face, the one it is already closest to.
+ *
+ * "Closest" is the real angle between two orientations, not the sum of their Euler
+ * differences. Those are not the same thing and the difference matters here: Euler
+ * angles alias, so two triples that look far apart on paper can be the identical
+ * rotation, and the naive sum picks a pose that is further away in the only sense a
+ * viewer cares about. The angle comes from the trace of R1 transpose times R2, which is
+ * the standard way and needs no quaternions.
+ *
+ * Chosen when the tumble ends rather than at launch, because only then is the arrival
+ * pose known. This is what bounds the final turn at a quarter turn instead of a half, and
+ * it is the difference between a die tipping onto its face and a die spinning to its
+ * answer.
+ */
+function nearestRest(value, rot) {
+  const candidates = RESTING_ALL[value] || [RESTING[value] || [0, 0, 0]];
+  const mul3 = (a, b) => {
+    const o = new Array(9);
+    for (let c = 0; c < 3; c += 1) {
+      for (let r = 0; r < 3; r += 1) {
+        let s = 0;
+        for (let k = 0; k < 3; k += 1) s += a[k * 3 + r] * b[c * 3 + k];
+        o[c * 3 + r] = s;
+      }
+    }
+    return o;
+  };
+  const rot3 = (rx, ry, rz) => {
+    const cx = Math.cos(rx); const sx = Math.sin(rx);
+    const cy = Math.cos(ry); const sy = Math.sin(ry);
+    const cz = Math.cos(rz); const sz = Math.sin(rz);
+    return mul3([cz, sz, 0, -sz, cz, 0, 0, 0, 1],
+      mul3([cy, 0, -sy, 0, 1, 0, sy, 0, cy], [1, 0, 0, 0, cx, sx, 0, -sx, cx]));
+  };
+  const here = rot3(rot[0], rot[1], rot[2]);
+  const transpose = [here[0], here[3], here[6], here[1], here[4], here[7],
+    here[2], here[5], here[8]];
+
+  let best = candidates[0];
+  let bestAngle = Infinity;
+  for (const c of candidates) {
+    const rel = mul3(transpose, rot3(c[0], c[1], c[2]));
+    const trace = rel[0] + rel[4] + rel[8];
+    const angle = Math.acos(Math.max(-1, Math.min(1, (trace - 1) / 2)));
+    if (angle < bestAngle) { bestAngle = angle; best = c; }
+  }
+
+  // Return it in the turn frame the die is already in, so the servo walks the short way
+  // rather than unwinding several turns of accumulated tumble.
+  return best.map((a, i) => rot[i] + wrapAngle(a - rot[i]));
+}
+
+
 function loadTexture(gl, url, { repeat = true, onReady = null } = {}) {
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -657,12 +808,37 @@ export function createDice(host, opts = {}) {
   const WALL_Z = 2.1;
   const RESTITUTION = 0.52;    // how much speed survives a bounce off the table
   const WALL_BOUNCE = 0.62;    // walls are harder than felt
-  const FRICTION = 0.94;       // horizontal damping on each floor contact
-  const SPIN_DAMP = 0.84;      // a bounce costs angular speed too
+  // Two kinds of loss, and separating them is what fixes the die that stopped dead.
+  //
+  // FRICTION and SPIN_DAMP are IMPULSIVE: the hit itself costs something, applied once
+  // per bounce. They used to be 0.94 and 0.84, which took 16% of the tumble at every
+  // contact — and because a die bounces several times in the first half second, most of
+  // the spin was gone before it had rolled anywhere.
+  //
+  // ROLL_FRICTION and SPIN_FRICTION are CONTINUOUS, per second, while a die is on the
+  // felt. That is the right shape: friction acts while something slides, not once when it
+  // lands. Applied as an exponential decay so a 30Hz device loses the same energy per
+  // second as a 60Hz one rather than twice as much.
+  const FRICTION = 0.985;      // impulsive: what one bounce costs horizontally
+  const SPIN_DAMP = 0.96;      // impulsive: what one bounce costs the tumble
+  const ROLL_FRICTION = 2.2;   // per second on the felt: lateral speed halves every 0.32s
+  const SPIN_FRICTION = 2.6;   // per second on the felt: about 1.5 more tumbles after landing
   const DIE_RADIUS = 0.58;     // for the die-vs-die test, a sphere is close enough
 
-  /** How fast a die must be moving to still count as tumbling. */
-  const ASLEEP = 0.40;
+  /**
+   * How slow is stopped.
+   *
+   * With continuous friction this is what actually ends a throw, rather than the frame
+   * ceiling. It was 0.40, which cut the roll-out short; at 0.12 the die creeps to a halt
+   * over about another half second, which is the part a player reads as "it rolled".
+   */
+  const ASLEEP = 0.12;
+
+  /** Below this, a bounce is not a bounce. Was an unnamed 0.9, which ate most of them. */
+  const BOUNCE_FLOOR = 0.25;
+
+  /** How hard the die is turned onto its face once it has stopped, in 1/seconds. */
+  const SETTLE_RATE = 7.0;
 
   /**
    * One die-vs-die collision, as two spheres.
@@ -743,12 +919,28 @@ export function createDice(host, opts = {}) {
       if (d.vel[1] < 0) {
         d.vel[1] = -d.vel[1] * RESTITUTION;
         // Below a threshold a bounce is not a bounce, it is a die buzzing against the
-        // felt forever. Kill it rather than let it ring.
-        if (d.vel[1] < 0.9) d.vel[1] = 0;
+        // felt forever. This used to be 0.9, which killed the bounce on the second or
+        // third contact and took the rest of the throw with it.
+        if (d.vel[1] < BOUNCE_FLOOR) d.vel[1] = 0;
+        // What the impact itself costs. Small now: the sliding loss below does the work.
         d.vel[0] *= FRICTION;
         d.vel[2] *= FRICTION;
         for (let i = 0; i < 3; i += 1) d.spin[i] *= SPIN_DAMP;
       }
+    }
+
+    // Rolling and sliding, while the die is on the felt.
+    //
+    // This is the term that was missing, and its absence is the whole reported bug: with
+    // friction applied only on impact, a die that had stopped bouncing had nothing slowing
+    // it at all, so the only thing that could end a throw was a frame ceiling. Now it
+    // slides, decelerates and comes to rest the way an object on cloth does.
+    if (d.pos[1] <= FLOOR + 0.01) {
+      const slide = Math.exp(-ROLL_FRICTION * dt);
+      const turn = Math.exp(-SPIN_FRICTION * dt);
+      d.vel[0] *= slide;
+      d.vel[2] *= slide;
+      for (let i = 0; i < 3; i += 1) d.spin[i] *= turn;
     }
 
     // The walls. Reflect and lose a little, so a die thrown hard ricochets back into
@@ -769,12 +961,13 @@ export function createDice(host, opts = {}) {
    * the end, which is the most visible moment. Reducing the difference into (-PI, PI]
    * first makes every settle a short, plausible final quarter-turn.
    */
-  function settleTowards(d, k) {
+  function settleTowards(d) {
     for (let i = 0; i < 3; i += 1) {
-      let diff = d.rest[i] - d.rot[i];
-      diff -= Math.PI * 2 * Math.round(diff / (Math.PI * 2));
-      d.rot[i] += diff * k;
-      d.spin[i] *= 0.6;
+      // Drive the SPIN towards closing the gap, and let `step` integrate it. Writing
+      // `rot` directly — which is what this did — meant rotation ran on its own clock
+      // while position ran on none at all, and the die stopped moving the instant it
+      // started righting itself.
+      d.spin[i] = wrapAngle(d.rest[i] - d.rot[i]) * SETTLE_RATE;
     }
   }
 
@@ -917,28 +1110,36 @@ export function createDice(host, opts = {}) {
     last = now;
     const elapsed = now - t0;
 
+    // Every die is stepped, settling or not.
+    //
+    // The old loop ran `step` only while tumbling and replaced it with a lerp once the
+    // die began righting itself — so gravity, friction, the walls and the other die all
+    // stopped applying at the exact moment the player was watching most closely. The die
+    // froze where it stood and rotated onto its answer. Now settling only changes WHO
+    // OWNS THE SPIN: the servo writes it, `step` integrates it, and the die keeps
+    // sliding to a halt while it tips onto its face.
     let busy = false;
+    for (const d of dice) step(d, dt);
+    collide(dice[0], dice[1]);
+
     for (const d of dice) {
+      if (!d.settling && !moving(d)) {
+        // The tumble is spent. Pick the target NOW, against the pose it actually
+        // arrived in, so the last turn is the short way round.
+        d.settling = true;
+        d.rest = nearestRest(d.value, d.rot);
+      }
       if (d.settling) {
-        // Energy spent: ease onto the face the server asked for. `k` rises with time so
-        // the last moments converge rather than crawling asymptotically.
-        settleTowards(d, Math.min(1, 0.12 + elapsed / 2600));
-        d.pos[1] += (FLOOR - d.pos[1]) * 0.35;
-        const off = Math.abs(d.rest[0] - d.rot[0]) + Math.abs(d.rest[1] - d.rot[1])
-          + Math.abs(d.rest[2] - d.rot[2]);
-        if (off > 0.004) busy = true;
+        settleTowards(d);
+        const off = Math.abs(wrapAngle(d.rest[0] - d.rot[0]))
+          + Math.abs(wrapAngle(d.rest[1] - d.rot[1]))
+          + Math.abs(wrapAngle(d.rest[2] - d.rot[2]));
+        // Still turning, or still sliding: either one means the throw is not over.
+        if (off > 0.01 || moving(d)) busy = true;
       } else {
-        step(d, dt);
-        if (moving(d)) busy = true;
-        else {
-          // It has come to rest wherever the tumble left it. Hand it to the settle,
-          // which turns it onto the face the seed chose.
-          d.settling = true;
-          busy = true;
-        }
+        busy = true;
       }
     }
-    collide(dice[0], dice[1]);
 
     draw();
 
@@ -985,8 +1186,12 @@ export function createDice(host, opts = {}) {
      * from there gravity, the table, the walls and the other die decide where it goes.
      * That part is genuinely unpredictable and different every time. Only the final
      * orientation is steered, once the die has stopped moving.
+     *
+     * `ms` is a CEILING, not a duration: a throw that settles sooner ends sooner. It has
+     * to cover the roll-out — flight, bounces, slide and the final tip — or the ceiling
+     * truncates the motion and the snap at the end becomes visible.
      */
-    roll(faces, { ms = 2600 } = {}) {
+    roll(faces, { ms = 3400 } = {}) {
       const values = Array.isArray(faces) && faces.length === 2 ? faces : [1, 1];
       return new Promise((resolve) => {
         values.forEach((v, i) => {
@@ -1077,4 +1282,4 @@ export function createDice(host, opts = {}) {
   };
 }
 
-export { FACE_VALUES, RESTING };
+export { FACE_VALUES, RESTING, RESTING_ALL, nearestRest, wrapAngle };

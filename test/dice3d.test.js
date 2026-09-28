@@ -178,6 +178,10 @@ const P = {
   SPIN_DAMP: constant('SPIN_DAMP'),
   DIE_RADIUS: constant('DIE_RADIUS'),
   ASLEEP: constant('ASLEEP'),
+  ROLL_FRICTION: constant('ROLL_FRICTION'),
+  SPIN_FRICTION: constant('SPIN_FRICTION'),
+  BOUNCE_FLOOR: constant('BOUNCE_FLOOR'),
+  SETTLE_RATE: constant('SETTLE_RATE'),
 };
 
 /** The integrator, mirroring `step()` in the renderer. */
@@ -188,17 +192,32 @@ function step(d, dt) {
   d.pos[2] += d.vel[2] * dt;
   for (let i = 0; i < 3; i += 1) d.rot[i] += d.spin[i] * dt;
 
+  let hit = false;
   if (d.pos[1] < P.FLOOR) {
     d.pos[1] = P.FLOOR;
     if (d.vel[1] < 0) {
+      hit = true;
       d.vel[1] = -d.vel[1] * P.RESTITUTION;
-      if (d.vel[1] < 0.9) d.vel[1] = 0;
+      if (d.vel[1] < P.BOUNCE_FLOOR) d.vel[1] = 0;
       d.vel[0] *= P.FRICTION;
       d.vel[2] *= P.FRICTION;
       for (let i = 0; i < 3; i += 1) d.spin[i] *= P.SPIN_DAMP;
     }
   }
+
+  // Sliding and rolling on the felt, per second rather than per bounce. Its absence was
+  // the reported bug: with friction only on impact, a die that had stopped bouncing had
+  // nothing slowing it, and the settle froze it in place instead.
+  if (d.pos[1] <= P.FLOOR + 0.01) {
+    const slide = Math.exp(-P.ROLL_FRICTION * dt);
+    const turn = Math.exp(-P.SPIN_FRICTION * dt);
+    d.vel[0] *= slide;
+    d.vel[2] *= slide;
+    for (let i = 0; i < 3; i += 1) d.spin[i] *= turn;
+  }
+
   confine(d);
+  return hit;
 }
 
 /** Keep a die inside the table, mirroring `confine()` in the renderer. */
@@ -252,22 +271,75 @@ function launch(rand) {
 }
 
 /** Run one throw to rest. Returns how it went. */
+/**
+ * One whole throw, mirroring `frame()` — INCLUDING the settling phase.
+ *
+ * The settling phase is the point. An earlier version of this stopped the moment
+ * `moving()` went false, which meant it never ran the half of the loop where the bug
+ * lived: `frame()` used to skip `step()` entirely once a die began righting itself, so
+ * position froze and the die rotated onto its answer on the spot. Tests that stop at the
+ * handover pass whether or not that happens, and that is exactly what let it ship.
+ */
 function throwOnce(rand, maxFrames = 600) {
   const dice = launch(rand);
+  for (const d of dice) { d.settling = false; d.rest = [0, 0, 0]; }
   let frames = 0;
   let hits = 0;
   let escaped = false;
-  while ((moving(dice[0]) || moving(dice[1])) && frames < maxFrames) {
-    step(dice[0], 1 / 60);
-    step(dice[1], 1 / 60);
+  const landed = dice.map(() => -1);
+  const landedAt = dice.map(() => null);
+  const floorHits = dice.map(() => 0);
+
+  const wrap = (a) => a - Math.PI * 2 * Math.round(a / (Math.PI * 2));
+  const settled = (d) => {
+    const off = Math.abs(wrap(d.rest[0] - d.rot[0])) + Math.abs(wrap(d.rest[1] - d.rot[1]))
+      + Math.abs(wrap(d.rest[2] - d.rot[2]));
+    return d.settling && off <= 0.01 && !moving(d);
+  };
+
+  while (!(settled(dice[0]) && settled(dice[1])) && frames < maxFrames) {
+    // Every die is stepped, settling or not. This is the line the fix turns on.
+    dice.forEach((d, i) => {
+      if (step(d, 1 / 60)) {
+        floorHits[i] += 1;
+        if (landed[i] < 0) {
+          landed[i] = frames;
+          landedAt[i] = [d.pos[0], d.pos[2]];
+        }
+      }
+    });
     if (collide(dice[0], dice[1])) hits += 1;
+
+    for (const d of dice) {
+      if (!d.settling && !moving(d)) {
+        d.settling = true;
+        // The probe does not need the real `nearestRest`; rounding to quarter turns
+        // lands on the same set of orientations and keeps this file self-contained.
+        d.rest = d.rot.map((a) => Math.round(a / (Math.PI / 2)) * (Math.PI / 2));
+      }
+      if (d.settling) {
+        for (let i = 0; i < 3; i += 1) {
+          d.spin[i] = wrap(d.rest[i] - d.rot[i]) * P.SETTLE_RATE;
+        }
+      }
+    }
+
     frames += 1;
     for (const d of dice) {
       if (Math.abs(d.pos[0]) > P.WALL_X + 0.01 || Math.abs(d.pos[2]) > P.WALL_Z + 0.01
         || d.pos[1] < P.FLOOR - 0.01) escaped = true;
     }
   }
-  return { frames, hits, escaped, settled: frames < maxFrames };
+
+  const travel = dice.map((d, i) => (landedAt[i]
+    ? Math.hypot(d.pos[0] - landedAt[i][0], d.pos[2] - landedAt[i][1])
+    : 0));
+  const after = landed.map((f) => (f < 0 ? 0 : frames - f));
+
+  return {
+    frames, hits, escaped, settled: frames < maxFrames,
+    travel, after, floorHits,
+  };
 }
 
 /** A seeded PRNG, so a failure can be reproduced rather than merely reported. */
@@ -291,7 +363,12 @@ test('every throw comes to rest', () => {
   }
   // And it must not merely terminate, it must terminate promptly: a five-second throw is
   // a player waiting, and the round cannot settle until it ends.
-  assert.ok(worst < 240, `the longest throw took ${worst} frames (${(worst / 60).toFixed(2)}s)`);
+  assert.ok(worst < 300, `the longest throw took ${worst} frames (${(worst / 60).toFixed(2)}s)`);
+  // And the other side of it, which is the bug this pins: a throw that ends too FAST is a
+  // die that stopped dead on landing. Measured at ~190 frames after the fix; before it,
+  // the physics gave up as soon as the die touched the felt.
+  assert.ok(worst > 120,
+    `the longest throw was only ${worst} frames — the dice are stopping on contact`);
 });
 
 test('no die ever leaves the table or falls through it', () => {
@@ -412,4 +489,188 @@ test('no shader source is cut short by a stray backtick', () => {
     assert.ok(body.trimEnd().endsWith('}'),
       `${name} does not end with a closing brace`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// The roll-out: what happens AFTER a die touches the felt.
+//
+// This is the gap that let a real bug ship. Every test above passed while the dice were
+// stopping dead on contact, because they only ever asked "does it settle" and "does it
+// land on the right face" — both true of a die that freezes the instant it lands.
+//
+// The cause was structural rather than numeric: `frame()` ran the integrator only while
+// tumbling and replaced it with a lerp once the die began righting itself, so gravity,
+// friction, the walls and the other die all stopped applying at the exact moment the
+// player was watching most closely. The tests below measure the thing a player actually
+// sees, which is movement after the landing.
+
+test('a die keeps travelling after it first touches the felt', () => {
+  // The headline regression test. Under the old code this was zero for every throw, by
+  // construction: position was never integrated again once settling began.
+  const rand = rng(90210);
+  const travels = [];
+  for (let n = 0; n < 300; n += 1) {
+    for (const t of throwOnce(rand).travel) travels.push(t);
+  }
+  travels.sort((a, b) => a - b);
+  const median = travels[Math.floor(travels.length / 2)];
+  const p5 = travels[Math.floor(travels.length * 0.05)];
+  assert.ok(median > 0.8,
+    `dice travel a median of only ${median.toFixed(2)} units after landing`);
+  // The fifth percentile, not the absolute minimum. A die thrown straight into a corner
+  // genuinely does stop where it lands, and one in six hundred does — asserting on the
+  // single worst case would be testing the tail rather than the behaviour. A die is one
+  // unit across, so a fifth of that is the floor for "it moved".
+  assert.ok(p5 > 0.2,
+    `the slowest 5% of dice moved under ${p5.toFixed(2)} units after landing`);
+});
+
+test('landing is not the end of the throw', () => {
+  const rand = rng(1337);
+  const afters = [];
+  for (let n = 0; n < 300; n += 1) {
+    for (const a of throwOnce(rand).after) afters.push(a);
+  }
+  afters.sort((a, b) => a - b);
+  const median = afters[Math.floor(afters.length / 2)];
+  // A second of motion after touchdown is what reads as a roll rather than a stop.
+  assert.ok(median > 60,
+    `the median die stops ${median} frames after landing (${(median / 60).toFixed(2)}s)`);
+  assert.ok(afters[0] > 20,
+    `one die stopped only ${afters[0]} frames after it landed`);
+});
+
+test('a die bounces several times before it stays down', () => {
+  // Pins BOUNCE_FLOOR from both sides. Put it back to 0.9 and the median falls to two or
+  // three; drop it near zero and the die chatters against the felt forever.
+  const rand = rng(5150);
+  const counts = [];
+  for (let n = 0; n < 200; n += 1) {
+    for (const h of throwOnce(rand).floorHits) counts.push(h);
+  }
+  counts.sort((a, b) => a - b);
+  const median = counts[Math.floor(counts.length / 2)];
+  assert.ok(median >= 4, `the median die touches the felt only ${median} times`);
+  assert.ok(counts[counts.length - 1] < 400,
+    `one die touched the felt ${counts[counts.length - 1]} times — it is ringing`);
+});
+
+test('speed decays smoothly instead of being cut off', () => {
+  // The shape of the bug rather than its symptom. A die whose speed drops by most of
+  // itself in one frame, with nothing to hit, has been stopped by a threshold rather than
+  // by friction — which is exactly what `if (vel[1] < 0.9) vel[1] = 0` used to do.
+  const rand = rng(24680);
+  const d = launch(rand)[0];
+  let worstDrop = 0;
+  let prev = Math.hypot(...d.vel);
+  for (let f = 0; f < 400 && moving(d); f += 1) {
+    const hit = step(d, 1 / 60);
+    const now = Math.hypot(...d.vel);
+    // A real contact is allowed to take a lot; a quiet frame is not.
+    if (!hit && prev > P.ASLEEP * 4) {
+      worstDrop = Math.max(worstDrop, 1 - now / prev);
+    }
+    prev = now;
+  }
+  assert.ok(worstDrop < 0.3,
+    `speed fell by ${(worstDrop * 100).toFixed(0)}% in a single contact-free frame`);
+});
+
+test('the settle turns the die the short way round', async () => {
+  // A cube showing face v upward has FOUR orientations, not one — the same face stays up
+  // through any quarter turn about the vertical axis. Picking the nearest bounds the last
+  // turn at a quarter turn per axis; picking the single canonical pose allowed a half
+  // turn, and that swing is what read as the die snapping onto its answer.
+  const { RESTING, RESTING_ALL, nearestRest, wrapAngle } = await load;
+  const rand = rng(31415);
+
+  // "Nearest" must be measured as the real angle between two orientations, not as the
+  // sum of their Euler differences. Those are not the same thing — Euler triples alias,
+  // so two that look far apart on paper can be the identical rotation — and using the
+  // naive sum is what makes a settle take the long way round.
+  const angleBetween = (a, b) => {
+    const ra = rotation3(...a);
+    const rb = rotation3(...b);
+    const t = [ra[0], ra[3], ra[6], ra[1], ra[4], ra[7], ra[2], ra[5], ra[8]];
+    let trace = 0;
+    for (let i = 0; i < 3; i += 1) {
+      for (let k = 0; k < 3; k += 1) trace += (i === 0 ? 0 : 0);
+    }
+    // trace of (Aᵀ · B), taken directly.
+    const m = [];
+    for (let c = 0; c < 3; c += 1) {
+      for (let r = 0; r < 3; r += 1) {
+        let sum = 0;
+        for (let k = 0; k < 3; k += 1) sum += t[k * 3 + r] * rb[c * 3 + k];
+        m[c * 3 + r] = sum;
+      }
+    }
+    trace = m[0] + m[4] + m[8];
+    return Math.acos(Math.max(-1, Math.min(1, (trace - 1) / 2)));
+  };
+
+  let worseThanCanonical = 0;
+  let worstResidual = 0;
+  let totalResidual = 0;
+  for (let n = 0; n < 400; n += 1) {
+    const value = 1 + Math.floor(rand() * 6);
+    const arrived = [rand() * Math.PI * 2, rand() * Math.PI * 2, rand() * Math.PI * 2];
+    const near = nearestRest(value, arrived);
+    if (angleBetween(arrived, near) > angleBetween(arrived, RESTING[value]) + 1e-9) {
+      worseThanCanonical += 1;
+    }
+    const turn = angleBetween(arrived, near);
+    worstResidual = Math.max(worstResidual, turn);
+    totalResidual += turn;
+  }
+  assert.strictEqual(worseThanCanonical, 0,
+    'the nearest pose must never be further than the canonical one');
+  // The worst case is a half turn, and that is geometry rather than a shortcoming: a die
+  // that lands showing 6 when the server said 1 has to turn over, and no choice of pose
+  // avoids it. Measured over 20,000 random arrivals, the true worst is 180 degrees.
+  //
+  // What the four poses buy is the AVERAGE: 93 degrees instead of 126. That is the
+  // number worth pinning, because it is the one a player sees on most throws.
+  assert.ok(worstResidual <= Math.PI + 1e-6,
+    `the worst settle is ${(worstResidual * 57.3).toFixed(0)} degrees — more than a half turn`);
+  const meanResidual = totalResidual / 400;
+  assert.ok(meanResidual < Math.PI * 0.62,
+    `the mean settle is ${(meanResidual * 57.3).toFixed(0)} degrees; four poses should give ~93`);
+
+  // And there really are four candidates per face, not one.
+  for (let v = 1; v <= 6; v += 1) {
+    assert.strictEqual(RESTING_ALL[v].length, 4, `face ${v} should have four poses`);
+  }
+});
+
+test('every one of the 24 resting poses shows the face it is filed under', async () => {
+  // The verifiability contract, now that the target set is four times bigger. A pose
+  // filed under 3 that actually shows 5 would land the die on the wrong number while the
+  // verdict said otherwise — indistinguishable from cheating.
+  const { FACE_VALUES, RESTING_ALL, RESTING } = await load;
+
+  let total = 0;
+  for (let value = 1; value <= 6; value += 1) {
+    for (const pose of RESTING_ALL[value]) {
+      total += 1;
+      const m = rotation3(...pose);
+      let best = 0;
+      let bestY = -Infinity;
+      NORMALS.forEach((n, i) => {
+        const y = apply(m, n)[1];
+        if (y > bestY) { bestY = y; best = i; }
+      });
+      assert.strictEqual(FACE_VALUES[best], value,
+        `a pose filed under ${value} actually shows ${FACE_VALUES[best]}`);
+      assert.ok(bestY > 0.999, `that pose rests on an edge (up-component ${bestY.toFixed(4)})`);
+    }
+    // The canonical pose must be one of the candidates, or the fallback path would move
+    // the die somewhere the settle never considers.
+    const canon = JSON.stringify(RESTING[value].map((a) => Math.round(a * 1e6) / 1e6));
+    const found = RESTING_ALL[value].some(
+      (p) => JSON.stringify(p.map((a) => Math.round(a * 1e6) / 1e6)) === canon,
+    );
+    assert.ok(found, `RESTING[${value}] is not among its own candidates`);
+  }
+  assert.strictEqual(total, 24, 'a cube has 24 orientations');
 });

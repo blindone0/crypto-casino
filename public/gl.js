@@ -62,7 +62,10 @@ export function program(gl, vertSrc, fragSrc) {
 /**
  * Attribute and uniform locations, looked up once.
  *
- * `dice3d.js` called `getUniformLocation` fifteen times per frame before this existed.
+ * `dice3d.js` made TWENTY-FIVE location lookups per frame before this existed: thirteen
+ * uniforms and six attributes in the dice pass, plus six more in the table pass. An
+ * earlier version of this comment said fifteen, which was wrong when it was written —
+ * it counted only the uniforms and only in one of the two programs.
  * The lookups are cheap individually and pointless collectively: they cannot change while
  * the program lives.
  */
