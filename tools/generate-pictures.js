@@ -149,16 +149,19 @@ async function main() {
   const file = args.find((a) => !a.startsWith('--'));
   const go = args.includes('--yes');
   const each = Number(args[args.indexOf('--each') + 1]) || 2;
+  // Different jobs want different folders: puzzle pictures and slot symbols should not
+  // land in the same pile and then have to be told apart by eye.
+  const outName = args.includes('--out') ? args[args.indexOf('--out') + 1] : 'generated';
 
   if (!file || !fs.existsSync(file)) {
-    console.log('Usage: node tools/generate-pictures.js <prompts.txt> [--yes] [--each N]');
+    console.log('Usage: node tools/generate-pictures.js <prompts.txt> [--yes] [--each N] [--out folder]');
     console.log('       one prompt per line; # comments; a !line sets the negative prompt');
     process.exitCode = 1;
     return;
   }
 
   const prompts = readPrompts(file);
-  const out = path.join(path.resolve(__dirname, '..'), 'export', 'generated');
+  const out = path.join(path.resolve(__dirname, '..'), 'export', outName);
   console.log(`\n  ${prompts.length} prompt(s) x ${each} = ${prompts.length * each} picture(s)`);
   console.log(`  model     ${MODEL}`);
   console.log(`  comfyui   ${HOST}`);

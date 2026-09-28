@@ -615,9 +615,18 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
   transform:
     rotateX(calc(var(--i) * 24deg))
     translateZ(calc(var(--cell, 60px) * 2.3523));
-  background: linear-gradient(180deg, #1b1712 0%, #221d17 50%, #100d0b 100%);
-  border-top: 1px solid rgba(255, 255, 255, .05);
-  border-bottom: 1px solid rgba(0, 0, 0, .6);
+  /* Flat, not graded.
+   *
+   * A gradient per face was the thing stopping this reading as a drum: every panel ran
+   * light to dark on its own, so the eye saw a stack of tiles with repeating banding
+   * rather than one surface curving away. On a real reel the panels are printed the same
+   * and it is the cylinder that shades them — which is what --shade and the glass do
+   * here, both of which vary with where the face actually sits on the barrel.
+   *
+   * The seam stays. Printed drums have one between panels, and without it the symbols
+   * float on a blank band. */
+  background: #1d1913;
+  border-bottom: 1px solid rgba(0, 0, 0, .45);
 }
 .face svg { width: 68%; height: 68%; display: block; }
 /* Faces further round the barrel sit deeper in shadow, so the drum has a lit side. */
@@ -888,7 +897,7 @@ body.afterdark .slot-cabinet {
     inset 0 1px 0 rgba(255, 255, 255, .07);
 }
 body.afterdark .reels { background: linear-gradient(180deg, #0f0718, #070310); }
-body.afterdark .face { background: linear-gradient(180deg, #1d1229 0%, #120a1b 100%); border-bottom-color: rgba(51, 34, 74, .9); }
+body.afterdark .face { background: #1a1026; }
 body.afterdark .face.win {
   border-color: #ff4fa3;
   box-shadow: 0 0 22px rgba(255, 79, 163, .45), inset 0 0 18px rgba(255, 79, 163, .20);
@@ -965,7 +974,7 @@ body.russian .slot-cabinet {
   border-color: rgba(217, 160, 60, .34);
 }
 body.russian .reels { background: linear-gradient(180deg, #120604, #080202); }
-body.russian .face { background: linear-gradient(180deg, #23120c 0%, #150806 100%); border-bottom-color: rgba(74, 42, 22, .9); }
+body.russian .face { background: #1f1009; }
 body.russian .face.win {
   border-color: #e8a83c;
   box-shadow: 0 0 22px rgba(232, 168, 60, .45), inset 0 0 18px rgba(204, 36, 23, .22);
@@ -987,7 +996,7 @@ body.noir .slot-cabinet {
   border-color: rgba(158, 172, 188, .26);
 }
 body.noir .reels { background: linear-gradient(180deg, #0c0e12, #05070a); }
-body.noir .face { background: linear-gradient(180deg, #171b21 0%, #0d1014 100%); border-bottom-color: rgba(44, 51, 60, .9); }
+body.noir .face { background: #14181e; }
 body.noir .face.win {
   border-color: #cfd8e4;
   box-shadow: 0 0 22px rgba(207, 216, 228, .32), inset 0 0 18px rgba(255, 122, 60, .16);
@@ -1010,7 +1019,7 @@ body.couch .slot-cabinet {
   border-color: rgba(143, 166, 232, .3);
 }
 body.couch .reels { background: linear-gradient(180deg, #0a0e1c, #05070f); }
-body.couch .face { background: linear-gradient(180deg, #141a2e 0%, #0a0e1a 100%); border-bottom-color: rgba(44, 53, 86, .9); }
+body.couch .face { background: #121728; }
 body.couch .face.win {
   border-color: #8fa6e8;
   box-shadow: 0 0 22px rgba(143, 166, 232, .42), inset 0 0 18px rgba(255, 230, 166, .18);

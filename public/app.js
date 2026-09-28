@@ -81,7 +81,7 @@ const svgEl = (tag, attrs = {}) => {
 
 const state = {
   cfg: null, user: null, csrf: null,
-  game: 'dice', feed: 'recent',
+  game: 'slots', feed: 'recent',
   mines: null, crash: null, es: null,
   // 'real' or 'demo'. Practice money is a completely separate balance that cannot be
   // deposited to or withdrawn from; it exists so someone with nothing can still learn.
@@ -3267,7 +3267,9 @@ async function claimFlag(id) {
   } catch (e) { toast(e.message, 'bad'); }
 }
 
-const GAMES = ['dice', 'limbo', 'mines', 'crash', 'slots', 'puzzle', 'preferans', 'debertz', 'arcade', 'match'];
+// Slots first: it is the game the site is built around and the one a new arrival should
+// land on. The rest follow in the order they were built.
+const GAMES = ['slots', 'dice', 'limbo', 'mines', 'crash', 'puzzle', 'preferans', 'debertz', 'arcade', 'match'];
 
 function renderGame() {
   if (state.es && state.game !== 'crash') { state.es.close(); state.es = null; }
