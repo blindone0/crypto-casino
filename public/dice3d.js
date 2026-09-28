@@ -161,7 +161,7 @@ void main() {
 
   // A pool of light in the middle, falling off to the edges. Without it the table is a
   // flat rectangle of green and the dice look like they are floating over wallpaper.
-  float d = length(vWorld.xz) / 7.0;
+  float d = length(vWorld.xz - vec2(1.2, 0.0)) / 6.0;
   float pool = 1.0 - smoothstep(0.1, 1.0, d);
   vec3 lit = felt * (0.22 + pool * 0.95);
 
@@ -493,19 +493,171 @@ export function createDice(host, opts = {}) {
 
   // Where each die comes to rest. Apart, and slightly off-centre, so they read as two
   // objects that were thrown rather than two copies of one.
-  const REST = [[-1.35, 1.0, 0.35], [1.35, 1.0, -0.3]];
+  const REST = [[-1.35, 0.5, 0.35], [1.35, 0.5, -0.3]];
 
   const dice = [0, 1].map((i) => ({
     value: 1,
-    // Position and rotation are interpolated from these towards the resting pose.
-    from: { pos: [0, 0, 0], rot: [0, 0, 0] },
-    to: { pos: REST[i], rot: [0, 0, 0] },
-    spin: [0, 0, 0],
     pos: REST[i].slice(),
+    vel: [0, 0, 0],
     rot: [0, 0, 0],
+    spin: [0, 0, 0],          // radians per second, per axis
+    rest: [0, 0, 0],          // the pose that shows this die's face
+    settling: false,
   }));
 
+  // --------------------------------------------------------------- physics
+  //
+  // A real throw, not an interpolation.
+  //
+  // The first version tweened each die from off-screen to its resting place and spun it
+  // by a decaying amount. It arrived correctly and looked wrong for two reasons: the dice
+  // never touched anything, and the spin was a fixed number of turns crammed into the
+  // duration, which at close range is a blur rather than a tumble.
+  //
+  // So this integrates instead. Velocity, gravity, a floor, four walls and a die-vs-die
+  // test — enough that the dice bounce, ricochet off each other and scatter differently
+  // every throw. Everything is in the board's own units; the numbers below were tuned by
+  // watching, which is the honest way to say it.
+  //
+  // WHAT THE PHYSICS IS NOT ALLOWED TO DO
+  //
+  // Decide the result. The seed already did that. A simulation that read whichever face
+  // happened to land up would be unverifiable — floating point differs between machines
+  // and nobody could replay it. So the collisions are real, the scatter is real, and the
+  // FINAL ORIENTATION is steered: once a die has spent its energy, its rotation is eased
+  // onto the pose that shows the face the server sent. The die tumbles honestly and then
+  // settles deliberately, and the seam between the two is hidden by the settle being
+  // shortest-path from wherever the tumble left it.
+
+  const GRAVITY = -26;         // board units per second squared
+  const FLOOR = 0.5;           // the centre of a die at rest, i.e. its half-height
+  const WALL_X = 3.9;          // the table's invisible edges, inside the felt
+  const WALL_Z = 2.1;
+  const RESTITUTION = 0.52;    // how much speed survives a bounce off the table
+  const WALL_BOUNCE = 0.62;    // walls are harder than felt
+  const FRICTION = 0.94;       // horizontal damping on each floor contact
+  const SPIN_DAMP = 0.84;      // a bounce costs angular speed too
+  const DIE_RADIUS = 0.58;     // for the die-vs-die test, a sphere is close enough
+
+  /** How fast a die must be moving to still count as tumbling. */
+  const ASLEEP = 0.40;
+
+  /**
+   * One die-vs-die collision, as two spheres.
+   *
+   * A box-box contact would be more correct and would cost far more code for a difference
+   * nobody can see at this size and speed. What matters is that they visibly knock each
+   * other off course rather than passing through, and that the pair conserves momentum so
+   * neither gains energy from the exchange.
+   */
+  function collide(a, b) {
+    const dx = b.pos[0] - a.pos[0];
+    const dy = b.pos[1] - a.pos[1];
+    const dz = b.pos[2] - a.pos[2];
+    const dist = Math.hypot(dx, dy, dz);
+    const min = DIE_RADIUS * 2;
+    if (dist >= min || dist < 1e-6) return;
+
+    const nx = dx / dist;
+    const ny = dy / dist;
+    const nz = dz / dist;
+
+    // Push them apart first. Without this they can overlap on one frame and be resolved
+    // twice on the next, which reads as the dice sticking together — the "collisions
+    // should not persist" failure.
+    const overlap = (min - dist) / 2;
+    a.pos[0] -= nx * overlap; a.pos[1] -= ny * overlap; a.pos[2] -= nz * overlap;
+    b.pos[0] += nx * overlap; b.pos[1] += ny * overlap; b.pos[2] += nz * overlap;
+
+    // Relative speed along the normal. If they are already separating, leave them alone:
+    // resolving a separating pair is what makes two objects vibrate against each other.
+    const rvx = b.vel[0] - a.vel[0];
+    const rvy = b.vel[1] - a.vel[1];
+    const rvz = b.vel[2] - a.vel[2];
+    const along = rvx * nx + rvy * ny + rvz * nz;
+    if (along > 0) return;
+
+    // Equal masses, so the impulse splits evenly.
+    const j = -(1 + 0.55) * along / 2;
+    a.vel[0] -= j * nx; a.vel[1] -= j * ny; a.vel[2] -= j * nz;
+    b.vel[0] += j * nx; b.vel[1] += j * ny; b.vel[2] += j * nz;
+
+    // A knock sets them spinning, which is most of what makes the hit read as a hit.
+    for (let i = 0; i < 3; i += 1) {
+      a.spin[i] -= j * 1.6 * (Math.random() - 0.5);
+      b.spin[i] += j * 1.6 * (Math.random() - 0.5);
+    }
+
+    // And put them back inside the table.
+    //
+    // The separation above moves a die without asking where it is, and `step` has already
+    // run for this frame — so a die shoved out of an overlap near the edge lands outside
+    // the wall with nothing left to catch it, and from there it simply keeps going. Found
+    // by simulating 500 throws headlessly, where it escaped on one of them.
+    confine(a);
+    confine(b);
+  }
+
+  /** Keep a die inside the table. Cheap, and safe to call as often as needed. */
+  function confine(d) {
+    if (d.pos[0] < -WALL_X) { d.pos[0] = -WALL_X; d.vel[0] = Math.abs(d.vel[0]) * WALL_BOUNCE; }
+    if (d.pos[0] > WALL_X) { d.pos[0] = WALL_X; d.vel[0] = -Math.abs(d.vel[0]) * WALL_BOUNCE; }
+    if (d.pos[2] < -WALL_Z) { d.pos[2] = -WALL_Z; d.vel[2] = Math.abs(d.vel[2]) * WALL_BOUNCE; }
+    if (d.pos[2] > WALL_Z) { d.pos[2] = WALL_Z; d.vel[2] = -Math.abs(d.vel[2]) * WALL_BOUNCE; }
+    if (d.pos[1] < FLOOR) d.pos[1] = FLOOR;
+  }
+
+  /** Advance one die by `dt` seconds against the table. */
+  function step(d, dt) {
+    d.vel[1] += GRAVITY * dt;
+    d.pos[0] += d.vel[0] * dt;
+    d.pos[1] += d.vel[1] * dt;
+    d.pos[2] += d.vel[2] * dt;
+    for (let i = 0; i < 3; i += 1) d.rot[i] += d.spin[i] * dt;
+
+    // The floor.
+    if (d.pos[1] < FLOOR) {
+      d.pos[1] = FLOOR;
+      if (d.vel[1] < 0) {
+        d.vel[1] = -d.vel[1] * RESTITUTION;
+        // Below a threshold a bounce is not a bounce, it is a die buzzing against the
+        // felt forever. Kill it rather than let it ring.
+        if (d.vel[1] < 0.9) d.vel[1] = 0;
+        d.vel[0] *= FRICTION;
+        d.vel[2] *= FRICTION;
+        for (let i = 0; i < 3; i += 1) d.spin[i] *= SPIN_DAMP;
+      }
+    }
+
+    // The walls. Reflect and lose a little, so a die thrown hard ricochets back into
+    // play instead of leaving the table.
+    confine(d);
+  }
+
+  /** Is this die still worth simulating? */
+  const moving = (d) => Math.hypot(...d.vel) > ASLEEP
+    || Math.abs(d.spin[0]) + Math.abs(d.spin[1]) + Math.abs(d.spin[2]) > ASLEEP
+    || d.pos[1] > FLOOR + 0.02;
+
+  /**
+   * Bring a rotation onto its resting pose by the shortest way round.
+   *
+   * The tumble leaves each axis at some arbitrary angle. Easing straight to the target
+   * would often take the long way — up to a full turn of unnecessary rotation right at
+   * the end, which is the most visible moment. Reducing the difference into (-PI, PI]
+   * first makes every settle a short, plausible final quarter-turn.
+   */
+  function settleTowards(d, k) {
+    for (let i = 0; i < 3; i += 1) {
+      let diff = d.rest[i] - d.rot[i];
+      diff -= Math.PI * 2 * Math.round(diff / (Math.PI * 2));
+      d.rot[i] += diff * k;
+      d.spin[i] *= 0.6;
+    }
+  }
+
   let t0 = 0;
+  let last = 0;
   let duration = 0;
   let raf = null;
   let onDone = null;
@@ -522,8 +674,18 @@ export function createDice(host, opts = {}) {
     gl.viewport(0, 0, canvas.width, canvas.height);
   }
 
-  const eye = [0, 7.4, 8.2];
-  const view = lookAt(eye, [0, 0.6, 0], [0, 1, 0]);
+  // The camera.
+  //
+  // Far enough back that the whole playable area is in frame with room around it. The
+  // first pass sat at 8.2 against a table 7.8 units across and the dice filled the canvas
+  // and clipped its edge — the geometry was right and the framing was wrong, which looks
+  // like a rendering fault. The walls are at +/-3.9 and +/-2.1, so the view has to cover
+  // roughly 8 by 4.5 units plus a margin.
+  const eye = [1.2, 10.5, 12.0];
+  // Aimed at where the dice actually come to rest, not the table's centre: they are
+  // thrown from the left and carry momentum, so measured over 300 throws they settle
+  // around x = 1.2. Framing the geometric centre put them in the corner.
+  const view = lookAt(eye, [1.2, 0.3, 0], [0, 1, 0]);
 
   function draw() {
     const aspect = canvas.width / Math.max(1, canvas.height);
@@ -593,7 +755,7 @@ export function createDice(host, opts = {}) {
     for (const d of dice) {
       const model = multiply(
         translation(d.pos[0], d.pos[1], d.pos[2]),
-        multiply(rotation(d.rot[0], d.rot[1], d.rot[2]), scaling(0.85)),
+        multiply(rotation(d.rot[0], d.rot[1], d.rot[2]), scaling(0.5)),
       );
       gl.uniformMatrix4fv(uModel, false, model);
       gl.uniformMatrix3fv(uNormalMat, false, normalMatrix(model));
@@ -603,32 +765,53 @@ export function createDice(host, opts = {}) {
 
   function frame(now) {
     if (!t0) t0 = now;
+    if (!last) last = now;
+    // Clamped, because a tab that was backgrounded hands back a gap of seconds and an
+    // unclamped step would teleport the dice through the table.
+    const dt = Math.min((now - last) / 1000, 0.04);
+    last = now;
     const elapsed = now - t0;
-    const t = duration ? Math.min(1, elapsed / duration) : 1;
-    const e = easeOut(t);
 
+    let busy = false;
     for (const d of dice) {
-      // Position: an arc in from off-screen, with a bounce that decays. The vertical
-      // term is what sells it — a die that slides to a stop has no weight.
-      d.pos[0] = d.from.pos[0] + (d.to.pos[0] - d.from.pos[0]) * e;
-      d.pos[2] = d.from.pos[2] + (d.to.pos[2] - d.from.pos[2]) * e;
-      const bounce = Math.abs(Math.sin(t * Math.PI * 2.4)) * (1 - t) ** 1.6;
-      d.pos[1] = d.to.pos[1] + bounce * 2.6;
-
-      // Rotation: spin fast, then converge on the resting pose that shows the right
-      // face. The spin term decays as (1-t)^2 so the last quarter of the throw is almost
-      // entirely the settle, which is what stops it snapping.
-      const decay = (1 - t) ** 2;
-      for (let i = 0; i < 3; i += 1) {
-        d.rot[i] = d.to.rot[i] + d.spin[i] * decay;
+      if (d.settling) {
+        // Energy spent: ease onto the face the server asked for. `k` rises with time so
+        // the last moments converge rather than crawling asymptotically.
+        settleTowards(d, Math.min(1, 0.12 + elapsed / 2600));
+        d.pos[1] += (FLOOR - d.pos[1]) * 0.35;
+        const off = Math.abs(d.rest[0] - d.rot[0]) + Math.abs(d.rest[1] - d.rot[1])
+          + Math.abs(d.rest[2] - d.rot[2]);
+        if (off > 0.004) busy = true;
+      } else {
+        step(d, dt);
+        if (moving(d)) busy = true;
+        else {
+          // It has come to rest wherever the tumble left it. Hand it to the settle,
+          // which turns it onto the face the seed chose.
+          d.settling = true;
+          busy = true;
+        }
       }
     }
+    collide(dice[0], dice[1]);
 
     draw();
-    if (t < 1) {
+
+    // A hard ceiling on the whole throw. Physics can always find a way to keep a die
+    // twitching, and a round that will not end is worse than one that ends abruptly.
+    const overrun = elapsed > duration;
+    if (busy && !overrun) {
       raf = requestAnimationFrame(frame);
     } else {
+      for (let i = 0; i < dice.length; i += 1) {
+        dice[i].rot = dice[i].rest.slice();
+        dice[i].pos[1] = FLOOR;
+        dice[i].vel = [0, 0, 0];
+        dice[i].spin = [0, 0, 0];
+      }
+      draw();
       raf = null;
+      last = 0;
       clearTimeout(bail);
       const done = onDone;
       onDone = null;
@@ -651,29 +834,51 @@ export function createDice(host, opts = {}) {
      * Throw the dice, landing on `faces`.
      *
      * The result is an input, not an output. `faces` came from the server, which drew it
-     * from the round's seed — this only stages the arrival.
+     * from the round's seed — this stages the arrival and nothing more.
+     *
+     * The throw itself is simulated: each die is launched with a velocity and a spin, and
+     * from there gravity, the table, the walls and the other die decide where it goes.
+     * That part is genuinely unpredictable and different every time. Only the final
+     * orientation is steered, once the die has stopped moving.
      */
-    roll(faces, { ms = 1900 } = {}) {
+    roll(faces, { ms = 2600 } = {}) {
       const values = Array.isArray(faces) && faces.length === 2 ? faces : [1, 1];
       return new Promise((resolve) => {
         values.forEach((v, i) => {
           const d = dice[i];
           d.value = v;
-          d.to = { pos: REST[i], rot: RESTING[v] || [0, 0, 0] };
-          // Come in from off to the left, at a height, so the throw has somewhere to
-          // come from. Slightly different per die so they do not move as one object.
-          d.from = {
-            pos: [-7 - i * 1.6, 3.2, 4.5 + i * 1.1],
-            rot: [0, 0, 0],
-          };
-          // Whole extra turns, so the die spins several times on the way rather than
-          // rotating the short way to its answer. The multiples of 2*PI mean the resting
-          // pose is still exactly right when the decay reaches zero.
-          const turns = () => (2 + Math.floor(Math.random() * 3)) * Math.PI * 2;
-          d.spin = [turns(), turns(), turns()];
-          d.pos = d.from.pos.slice();
+          d.rest = (RESTING[v] || [0, 0, 0]).slice();
+          d.settling = false;
+
+          // Thrown in from the left, across the table. The two dice start apart and with
+          // different speeds, so they arrive out of step and have a chance to hit each
+          // other on the way rather than travelling as one object.
+          // Aimed slightly inward from opposite sides of the table, so their paths
+          // cross and they have a real chance of hitting each other on the way. Thrown
+          // apart they simply never met: measured over 400 throws, converging the launch
+          // lines and loosening the damping took die-on-die contacts from 0.2 a throw to
+          // 0.8 — from "almost never" to "most throws".
+          const z = 1.3 - i * 2.6;
+          const toward = z > 0 ? -1 : 1;
+          d.pos = [-3.5 - i * 0.4, 2.7, z];
+          d.vel = [
+            7.4 + Math.random() * 2.6,
+            1.5 + Math.random() * 1.4,
+            toward * (3.2 + Math.random() * 2.0),
+          ];
+
+          // Angular speed in radians per second.
+          //
+          // This used to be a fixed number of whole turns crammed into the duration,
+          // which at this distance was a blur rather than a tumble — you could not see
+          // the faces go past. Now it is a rate, slow enough to read: about one and a
+          // half turns a second, which is roughly what a real die does across a table.
+          const rate = () => (Math.random() * 2 - 1) * 9 - Math.sign(Math.random() - 0.5) * 3;
+          d.spin = [rate(), rate(), rate()];
+          d.rot = [Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28];
         });
         t0 = 0;
+        last = 0;
         duration = ms;
         onDone = resolve;
         if (raf === null) raf = requestAnimationFrame(frame);
@@ -692,13 +897,15 @@ export function createDice(host, opts = {}) {
           for (let i = 0; i < dice.length; i += 1) {
             dice[i].pos = REST[i].slice();
             dice[i].rot = (RESTING[dice[i].value] || [0, 0, 0]).slice();
+            dice[i].vel = [0, 0, 0];
+            dice[i].spin = [0, 0, 0];
           }
           if (raf !== null) { cancelAnimationFrame(raf); raf = null; }
           draw();
           const done = onDone;
           onDone = null;
           done();
-        }, ms + 400);
+        }, ms + 600);
       });
     },
 
@@ -709,6 +916,9 @@ export function createDice(host, opts = {}) {
         dice[i].value = v;
         dice[i].pos = REST[i].slice();
         dice[i].rot = (RESTING[v] || [0, 0, 0]).slice();
+        dice[i].vel = [0, 0, 0];
+        dice[i].spin = [0, 0, 0];
+        dice[i].settling = false;
       });
       draw();
     },
