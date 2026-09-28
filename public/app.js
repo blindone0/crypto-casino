@@ -299,7 +299,9 @@ async function newWalletStep() {
     // there so the box does not look like it missed the tap.
     const key = await tokenKeys.keyFromPhrase(phrase);
     const res = await api('/api/token/key', { method: 'POST', body: { pubkey: key.publicKey } });
-    await tokenKeys.remember(key);
+    // The phrase goes in with the key, so it can be read back later instead of existing
+    // only for as long as this dialog does.
+    await tokenKeys.remember(key, phrase);
     tokenKey = key;
     await refreshTokenBalance();
 
@@ -315,11 +317,67 @@ async function newWalletStep() {
             catch { toast(t('tok.phrase'), 'warn'); }
           },
         }, t('wallet.copy')),
-        el('button', { class: 'primary', onclick: closeModal }, t('tok.saved'))),
+        el('button', { class: 'primary', onclick: () => confirmPhraseStep(body, phrase) },
+          t('tok.saved'))),
       el('p', { class: 'hint' }, t('tok.phraseLater')));
   } catch (e) {
     setKids(body, el('div', { class: 'banner' }, e.message));
   }
+}
+
+/**
+ * Check two words before letting the phrase go.
+ *
+ * Not a gate — the wallet already exists and the tugriks are already granted, and the
+ * words can be read back from Wallet at any time. It is there because clicking "I have
+ * written it down" is free, and the only moment anyone finds out they did not is the
+ * moment it is too late. Asking for two specific words costs seconds and turns a claim
+ * into a fact.
+ *
+ * Two random positions rather than the whole phrase: enough that you cannot pass without
+ * the words in front of you, short enough that nobody retypes sixteen and gives up.
+ */
+function confirmPhraseStep(body, phrase) {
+  const words = phrase.split(' ');
+  // Two distinct positions, drawn with the same generator the phrase came from.
+  const pick = new Set();
+  while (pick.size < 2) pick.add(crypto.getRandomValues(new Uint32Array(1))[0] % words.length);
+  const [a, b] = [...pick].sort((x, y) => x - y);
+
+  const err = el('p', { class: 'hint neg' });
+  const fieldFor = (i) => el('label', { class: 'field' },
+    el('span', {}, t('tok.confirmWord', { n: i + 1 })),
+    el('input', { class: 'mono', autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false' }));
+  const fa = fieldFor(a);
+  const fb = fieldFor(b);
+  const inputs = [fa.querySelector('input'), fb.querySelector('input')];
+
+  const done = el('button', { class: 'primary big' }, t('tok.confirmGo'));
+  done.onclick = () => {
+    const want = [words[a], words[b]];
+    const got = inputs.map((i) => i.value.trim().toLowerCase());
+    if (got[0] === want[0] && got[1] === want[1]) { closeModal(); return; }
+    err.textContent = t('tok.confirmWrong');
+  };
+  inputs.forEach((i) => i.addEventListener('keydown', (e) => { if (e.key === 'Enter') done.click(); }));
+
+  setKids(body,
+    el('p', {}, t('tok.confirmIntro')),
+    fa, fb, err, done,
+    // Never trap anyone here. The phrase is stored and readable from Wallet, so a way
+    // back to it is honest rather than a loophole.
+    el('button', { class: 'ghost', onclick: () => newWalletPhraseAgain(body, phrase) },
+      t('tok.confirmBack')));
+  inputs[0].focus();
+}
+
+/** Show the words again, for someone who closed the box too early. */
+function newWalletPhraseAgain(body, phrase) {
+  setKids(body,
+    el('div', { class: 'banner' }, t('tok.phraseWarn')),
+    el('div', { class: 'phrase-box mono' }, phrase),
+    el('button', { class: 'primary big', onclick: () => confirmPhraseStep(body, phrase) },
+      t('tok.saved')));
 }
 
 function authModal(mode = 'login') {
@@ -2484,7 +2542,7 @@ async function ensureWallet() {
         // Deriving the key is PBKDF2 at 210k rounds and takes about a second on a phone,
         // which is why the button says so rather than appearing to have missed the tap.
         const key = await tokenKeys.keyFromPhrase(phrase.value);
-        await tokenKeys.remember(key);
+        await tokenKeys.remember(key, phrase.value);
         tokenKey = key;
         await refreshTokenBalance();
         closeModal();
@@ -2548,7 +2606,7 @@ function renderTokenSetup(body, info) {
       try {
         tokenKey = await tokenKeys.keyFromPhrase(phrase);
         await api('/api/token/key', { method: 'POST', body: { pubkey: tokenKey.publicKey } });
-        await tokenKeys.remember(tokenKey);
+        await tokenKeys.remember(tokenKey, phrase);
         tokenModal();
       } catch (e) { toast(e.message, 'bad'); confirm.disabled = false; }
     });
@@ -2580,7 +2638,7 @@ function renderTokenSetup(body, info) {
           try {
             tokenKey = await tokenKeys.keyFromPhrase(restore.value);
             await api('/api/token/key', { method: 'POST', body: { pubkey: tokenKey.publicKey } });
-            await tokenKeys.remember(tokenKey);
+            await tokenKeys.remember(tokenKey, restore.value);
             tokenModal();
           } catch (e) { toast(e.message, 'bad'); }
         },
@@ -2609,7 +2667,7 @@ function abandonWallet(info) {
       const key = await tokenKeys.keyFromPhrase(phrase);
       await api('/api/token/key', { method: 'POST', body: { pubkey: key.publicKey, replace: true } });
       tokenKey = key;
-      await tokenKeys.remember(tokenKey);
+      await tokenKeys.remember(tokenKey, phrase);
       // Shown once, and written down this time.
       const words = phrase.split(' ');
       setKids(body,
@@ -2655,6 +2713,40 @@ function renderTokenWallet(body, info) {
     el('h3', { style: 'margin-top:16px' }, t('tok.address')),
     el('div', { class: 'addr' }, info.pubkey),
   );
+
+  // The phrase, readable whenever you want it.
+  //
+  // It used to be shown exactly once, at creation, and then never again — so switching
+  // apps mid-copy destroyed it permanently even though the wallet on this device kept
+  // working. A backup you get one glance at is not a backup.
+  addKids(body, el('h3', { style: 'margin-top:16px' }, t('tok.phrase')));
+  const phraseSlot = el('div');
+  addKids(body, phraseSlot, el('p', { class: 'hint' }, t('tok.phraseLater')));
+  tokenKeys.recallPhrase().then((phrase) => {
+    if (!phrase) {
+      // A wallet restored on a device that never stored the words. It signs perfectly
+      // well; there is simply nothing here to read back, and saying so is better than
+      // an empty box.
+      setKids(phraseSlot, el('p', { class: 'hint' }, t('tok.phraseMissing')));
+      return;
+    }
+    const box = el('div', { class: 'phrase-box mono', hidden: true }, phrase);
+    const reveal = el('button', { class: 'tiny' }, t('tok.phraseShow'));
+    reveal.onclick = () => {
+      box.hidden = !box.hidden;
+      reveal.textContent = t(box.hidden ? 'tok.phraseShow' : 'tok.phraseHide');
+    };
+    setKids(phraseSlot,
+      el('div', { class: 'row wrap' }, reveal,
+        el('button', {
+          class: 'tiny',
+          onclick: async () => {
+            try { await navigator.clipboard.writeText(phrase); toast(t('wallet.copied')); }
+            catch { box.hidden = false; reveal.textContent = t('tok.phraseHide'); }
+          },
+        }, t('wallet.copy'))),
+      box);
+  });
 
   if (!unlocked) {
     addKids(body, el('p', { class: 'hint' },

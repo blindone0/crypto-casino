@@ -388,6 +388,27 @@ const STRINGS = {
     ru: 'Эту фразу можно посмотреть в любой момент в разделе «Кошелёк». Только по ней '
       + 'можно войти с другого устройства, и копии нет ни у кого — у нас тоже.',
   },
+  'tok.confirmIntro': {
+    en: 'Two words back, so we both know it is really written down. Anyone can click '
+      + '"saved" — this is the part that makes it true.',
+    ru: 'Назовите два слова — чтобы мы оба знали, что фраза действительно записана. '
+      + 'Нажать «записал» может каждый; вот это и делает запись настоящей.',
+  },
+  'tok.confirmWord': { en: 'Word {n}', ru: 'Слово {n}' },
+  'tok.confirmGo': { en: 'Confirm', ru: 'Подтвердить' },
+  'tok.confirmWrong': {
+    en: 'Those do not match. Check the phrase and try again.',
+    ru: 'Не совпадает. Проверьте фразу и попробуйте ещё раз.',
+  },
+  'tok.confirmBack': { en: 'Show me the phrase again', ru: 'Показать фразу ещё раз' },
+  'tok.phraseShow': { en: 'Show my phrase', ru: 'Показать фразу' },
+  'tok.phraseHide': { en: 'Hide', ru: 'Скрыть' },
+  'tok.phraseMissing': {
+    en: 'This device does not have the words. The wallet still works here, but to write '
+      + 'the phrase down you need the device you created it on.',
+    ru: 'На этом устройстве слов нет. Кошелёк здесь работает, но чтобы записать фразу, '
+      + 'нужно устройство, на котором вы её создавали.',
+  },
   'tok.phraseWarn': {
     en: 'Write these 16 words down now. They are the only way to reach this balance. Nobody can recover them for you, including us, and anyone who reads them owns the tokens.',
     ru: 'Запишите эти 16 слов прямо сейчас. Это единственный доступ к балансу. Восстановить их не может никто, включая нас, а любой, кто их увидит, получит ваши токены.',

@@ -1,6 +1,8 @@
 /* Luxury casino theme. No frameworks, no webfonts, no external requests (the CSP blocks
    them), so every material here is built from gradients, borders and shadows. */
 :root {
+  --card-w: 46px;
+  --card-h: 68px;
   /* Deep, warm-tinted blacks rather than blue-grey: warmth is what separates a casino
      floor from a dashboard. */
   --bg: #0a0908;
@@ -866,7 +868,7 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
 }
 .hand { display: flex; flex-wrap: wrap; gap: 7px; justify-content: center; margin: 14px 0 4px; }
 .card {
-  width: 58px; height: 82px; border-radius: 8px; padding: 0;
+  width: var(--card-w); height: var(--card-h); border-radius: 8px; padding: 0;
   background: linear-gradient(170deg, #fdfbf6 0%, #e8e2d5 100%);
   color: #16120c;
   border: 1px solid #b8ae99;
@@ -903,7 +905,7 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
 }
 .trick-slot.winner .card { box-shadow: 0 0 0 2px var(--gold), 0 0 22px var(--gold-glow); }
 .empty-slot {
-  width: 58px; height: 82px; border-radius: 8px;
+  width: var(--card-w); height: var(--card-h); border-radius: 8px;
   border: 1px dashed rgba(217, 180, 90, .25);
   background: rgba(0, 0, 0, .18);
 }
@@ -926,8 +928,7 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
   header.top { gap: 8px; padding: 5px 12px; }
   /* On a phone the brand word goes before the bar is allowed to take a second line. */
   .brand #siteName { display: none; }
-  .card { width: 48px; height: 68px; font-size: 16px; }
-  .empty-slot { width: 48px; height: 68px; }
+  .card { font-size: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
@@ -1198,13 +1199,13 @@ body.couch .bigwin .amount { color: #e8eeff; text-shadow: 0 0 44px rgba(143, 166
   display: flex;
   justify-content: space-between;
   align-items: center;
-  width: min(92vw, 520px);
+  width: min(100%, 520px);
   font-size: 13px;
   color: var(--text-dim);
 }
 .match-bar .mono { color: var(--text); letter-spacing: .04em; }
 
-.board-host { width: min(92vw, 520px); }
+.board-host { width: min(100%, 520px); }
 .chessboard {
   position: relative;
   display: grid;
@@ -1299,7 +1300,7 @@ body.couch .bigwin .amount { color: #e8eeff; text-shadow: 0 0 44px rgba(143, 166
   display: grid;
   grid-template-columns: 14px repeat(10, 1fr);
   gap: 1px;
-  width: min(88vw, 320px);
+  width: min(100%, 320px);
 }
 .sea-grid .coord {
   display: flex;
@@ -1345,7 +1346,7 @@ body.couch .bigwin .amount { color: #e8eeff; text-shadow: 0 0 44px rgba(143, 166
   display: grid;
   grid-template-columns: repeat(var(--n, 5), 1fr);
   gap: 4px;
-  width: min(88vw, 340px);
+  width: min(100%, 340px);
 }
 .balda-cell {
   aspect-ratio: 1;
@@ -1365,7 +1366,7 @@ body.couch .bigwin .amount { color: #e8eeff; text-shadow: 0 0 44px rgba(143, 166
 
 .balda-controls {
   display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;
-  max-width: min(88vw, 340px);
+  max-width: min(100%, 340px);
 }
 .balda-letter { width: 48px; flex: 0 0 auto; text-align: center; text-transform: uppercase; }
 .balda-word { flex: 1 1 140px; min-width: 0; }
@@ -1373,7 +1374,7 @@ body.couch .bigwin .amount { color: #e8eeff; text-shadow: 0 0 44px rgba(143, 166
 .balda-scores { display: flex; align-items: baseline; gap: 10px; font-size: 13px; }
 .balda-scores .v { font: 600 20px/1 ui-monospace, monospace; }
 
-.balda-usedwrap { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; justify-content: center; max-width: min(88vw, 340px); }
+.balda-usedwrap { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; justify-content: center; max-width: min(100%, 340px); }
 .balda-used { display: flex; flex-wrap: wrap; gap: 4px; }
 .balda-used .chip {
   font-size: 11px;
@@ -1399,18 +1400,18 @@ body.couch .bigwin .amount { color: #e8eeff; text-shadow: 0 0 44px rgba(143, 166
   display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
   min-height: 92px; align-items: center;
   padding: 10px; border: 1px dashed var(--line); border-radius: 10px;
-  width: min(92vw, 520px);
+  width: min(100%, 520px);
 }
 .durak-table .pair { position: relative; width: 46px; height: 68px; }
 .durak-table .pair .card { position: absolute; inset: 0; }
 .durak-table .pair .beat { transform: translate(9px, 11px) rotate(8deg); }
 
-.durak-hand { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; max-width: min(92vw, 560px); }
+.durak-hand { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; max-width: min(100%, 560px); }
 .durak-status { min-height: 16px; }
 .durak-actions { gap: 6px; }
 
 .card {
-  width: 46px; height: 68px; border-radius: 5px;
+  width: var(--card-w); height: var(--card-h); border-radius: 5px;
   background: #f3efe6; border: 1px solid #b9b0a0;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   font-family: ui-monospace, monospace; line-height: 1; user-select: none;
@@ -1445,7 +1446,7 @@ body.couch .bigwin .amount { color: #e8eeff; text-shadow: 0 0 44px rgba(143, 166
 .poker-hole { display: flex; gap: 6px; justify-content: center; }
 .poker-showdown { display: flex; flex-direction: column; gap: 4px; align-items: center; font-size: 12px; }
 .poker-showdown .row { align-items: center; gap: 6px; }
-.poker-actions { flex-wrap: wrap; gap: 6px; justify-content: center; max-width: min(92vw, 560px); }
+.poker-actions { flex-wrap: wrap; gap: 6px; justify-content: center; max-width: min(100%, 560px); }
 .poker-slider { width: 130px; }
 
 .card.back {
@@ -1455,3 +1456,79 @@ body.couch .bigwin .amount { color: #e8eeff; text-shadow: 0 0 44px rgba(143, 166
 .card.small { width: 32px; height: 46px; }
 .card.small .r { font-size: 12px; }
 .card.small .s { font-size: 11px; }
+
+/* ------------------------------------------------------- touch and phones */
+/*
+ * Hover on a touch screen is a state you get stuck in.
+ *
+ * Nothing on this site is hover-gated — every hover rule is decoration and the click
+ * underneath always works — but a tap on a phone leaves the hovered look painted on until
+ * something else is tapped, so a played card stays lifted and a tile stays lit. These are
+ * the rules whose effect is visible enough to matter, switched off where there is no
+ * pointer to hover with. `hover: none` rather than `pointer: coarse`: a laptop with a
+ * touchscreen has both, and it should keep its hover states.
+ */
+@media (hover: none) {
+  .tile:hover:not(.done):not(:disabled) { transform: none; }
+  .card:hover:not(:disabled) { transform: none; }
+  .card.playable:hover { transform: none; }
+  .cabinet:hover { transform: none; box-shadow: none; }
+  .slot-lever:hover .lever-arm { transform: none; }
+  .puzzle-pieces .piece:hover { fill: inherit; }
+  .sea-grid.live .sea-cell:not(.hit):not(.miss):hover { background: inherit; }
+  .balda-cell.open:hover { background: inherit; }
+  table.grid tbody tr:hover td { background: transparent; }
+  /* A crosshair means nothing without a cursor to shape. */
+  .sea-grid.live .sea-cell:not(.hit):not(.miss) { cursor: default; }
+}
+
+/*
+ * A fixed background attachment forces a repaint of the whole page on every scroll frame,
+ * and on iOS Safari it is one of the reliable ways to make a page feel slow. The look is
+ * worth nothing on a screen this size.
+ */
+@media (max-width: 900px) {
+  body { background-attachment: scroll; }
+}
+
+/*
+ * On a phone the games come first.
+ *
+ * `.layout` collapses to one column below 900px, and the bet panel is first in source
+ * order, so the thing you came to play was below the controls for it — you scrolled past
+ * the stake field to reach the game. Order is a visual concern, not a structural one, so
+ * the markup keeps its reading order and the grid reverses it.
+ */
+@media (max-width: 900px) {
+  .layout { display: flex; flex-direction: column; }
+  .layout > .stage-col { order: 1; }
+  .layout > .controls-col { order: 2; }
+}
+
+/*
+ * Tap targets. A sea-battle cell lands at about 29px on a 390px screen against a 44px
+ * minimum, which is why it is easy to fire at the wrong square. The grid keeps its shape
+ * and gets a floor instead, scrolling sideways in its own box if it has to rather than
+ * pushing the page wide.
+ */
+@media (max-width: 560px) {
+  .sea-pair { overflow-x: auto; }
+  .sea-grid { grid-template-columns: 16px repeat(10, minmax(30px, 1fr)); }
+  .sea-grid .coord { font-size: 10px; }
+}
+
+/*
+ * The notch. `viewport-fit=cover` lets the page use the full screen, which then needs the
+ * insets honoured by hand or the sticky header sits under the status bar.
+ */
+@supports (padding: env(safe-area-inset-top)) {
+  header.top {
+    padding-left: max(18px, env(safe-area-inset-left));
+    padding-right: max(18px, env(safe-area-inset-right));
+  }
+  .wrap {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+  }
+}

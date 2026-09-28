@@ -171,11 +171,28 @@ const wrap = (request) => new Promise((resolve, reject) => {
   request.onerror = () => reject(request.error);
 });
 
-/** Remember an unlocked wallet, so a reload does not ask for the phrase again. */
-async function remember(key) {
+/**
+ * Remember an unlocked wallet, so a reload does not ask for the phrase again.
+ *
+ * The phrase is stored next to the key when it is known, and that is a deliberate
+ * decision rather than an oversight. The private key already lives here; anyone who can
+ * read this store can already sign, so keeping the words beside it gives an attacker
+ * nothing they did not have. What it buys is the difference between a phrase you can
+ * read back whenever you like and one that existed for as long as a dialog was open —
+ * and a phrase shown exactly once, which vanishes if you switch apps while copying it,
+ * is not a backup. It is a trick.
+ *
+ * `phrase` is optional: unlocking from a phrase passes it, so it is captured on every
+ * device the wallet is opened on.
+ */
+async function remember(key, phrase = null) {
   try {
     const { store, db } = await openStore('readwrite');
-    await wrap(store.put({ privateKey: key.privateKey, publicKey: key.publicKey }, RECORD));
+    const record = { privateKey: key.privateKey, publicKey: key.publicKey };
+    // Never overwrite a stored phrase with nothing.
+    const prior = await wrap(store.get(RECORD));
+    record.phrase = phrase || (prior && prior.publicKey === key.publicKey ? prior.phrase : null);
+    await wrap(store.put(record, RECORD));
     db.close();
     return true;
   } catch {
@@ -193,6 +210,24 @@ async function recall() {
     db.close();
     if (!found || !found.privateKey || !found.publicKey) return null;
     return { privateKey: found.privateKey, publicKey: found.publicKey };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The stored phrase, or null if this device never saw it.
+ *
+ * Null is a real answer, not a failure: a wallet restored before phrases were kept, or
+ * one whose store was cleared, still signs perfectly well — there is simply nothing to
+ * read back, and the interface should say so rather than pretend.
+ */
+async function recallPhrase() {
+  try {
+    const { store, db } = await openStore('readonly');
+    const found = await wrap(store.get(RECORD));
+    db.close();
+    return found && found.phrase ? found.phrase : null;
   } catch {
     return null;
   }
@@ -287,7 +322,7 @@ async function sha256Hex(text) {
 }
 
 export {
-  remember, recall, forget,
+  remember, recall, recallPhrase, forget,
   WORDS, PHRASE_LENGTH, supported, generatePhrase, validatePhrase, normalise,
   seedFromPhrase, keyFromPhrase, signTransfer, signSpend, spendPayload,
   verifySignature, verifyOverString,
