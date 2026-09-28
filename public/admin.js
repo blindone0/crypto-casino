@@ -24,7 +24,35 @@ const L = {
   'a.withdrawals': { en: 'Withdrawals', ru: 'Выводы' },
   'a.players': { en: 'Players', ru: 'Игроки' },
   'a.affiliates': { en: 'Affiliates', ru: 'Партнёры' },
+  'a.token': { en: 'Token', ru: 'Токен' },
   'a.audit': { en: 'Audit log', ru: 'Журнал' },
+
+  // --- the token economy. Earned in tokens, not in casino currency, so it is counted
+  // here rather than folded into GGR where it would be adding up two different things.
+  'a.tokSupply': { en: 'Supply', ru: 'Эмиссия' },
+  'a.tokMinted': { en: 'Minted, ever', ru: 'Создано всего' },
+  'a.tokCirculating': { en: 'In circulation', ru: 'В обращении' },
+  'a.tokTreasury': { en: 'Left in the treasury', ru: 'Осталось в казне' },
+  'a.tokBurned': { en: 'Burned for good', ru: 'Сожжено навсегда' },
+  'a.tokHouse': { en: 'Held by the house', ru: 'У заведения' },
+  'a.tokBlocks': { en: 'Blocks', ru: 'Блоков' },
+  'a.tokVerifies': { en: 'Chain verifies', ru: 'Цепочка проверена' },
+  'a.tokWhy': {
+    en: 'Read by replaying the chain, not from a stored total. If this says the chain does not verify, treat every other figure on this page as a guess until you know why.',
+    ru: 'Читается повторным проигрыванием цепочки, а не из сохранённой суммы. Если цепочка не проверяется, считайте все остальные цифры на этой странице догадкой, пока не выясните причину.',
+  },
+  'a.yes': { en: 'yes', ru: 'да' },
+  'a.no': { en: 'NO', ru: 'НЕТ' },
+  'a.nothingYet': { en: 'Nothing yet.', ru: 'Пока ничего.' },
+  'a.arcade': { en: 'Arcade', ru: 'Зал автоматов' },
+  'a.arcadePlays': { en: 'Plays', ru: 'Игр' },
+  'a.arcadeBurned': { en: 'Tokens burned', ru: 'Сожжено токенов' },
+  'a.players2': { en: 'Players', ru: 'Игроков' },
+  'a.best': { en: 'Best score', ru: 'Рекорд' },
+  'a.matches': { en: 'Head to head', ru: 'Игры на двоих' },
+  'a.matchPlayed': { en: 'Settled', ru: 'Сыграно' },
+  'a.matchWagered': { en: 'Staked', ru: 'Поставлено' },
+  'a.matchRake': { en: 'Rake taken', ru: 'Комиссия' },
   'a.bankroll': { en: 'Bankroll', ru: 'Банкролл' },
   'a.liabilities': { en: 'Owed to players', ru: 'Долг игрокам' },
   'a.free': { en: 'Free capital', ru: 'Свободный капитал' },
@@ -505,6 +533,72 @@ async function viewAudit(root) {
 }
 
 // -------------------------------------------------------------------- shell
+
+// ------------------------------------------------------------------- token
+/**
+ * What the token economy is actually doing.
+ *
+ * Two revenue lines live here and neither is a bet against the bankroll, so neither
+ * appears in the overview: tokens burned to play an arcade cabinet, and the rake taken
+ * from matches played between two people. Both are earned in tokens rather than in the
+ * casino currency, which is why they are counted separately and not folded into GGR.
+ */
+async function viewToken(root) {
+  const [supply, arcade, matches] = await Promise.all([
+    api('/api/admin/token'),
+    api('/api/admin/arcade'),
+    api('/api/admin/matches'),
+  ]);
+
+  const stat = (label, value, cls) => el('div', { class: 'stat-row' },
+    el('span', { class: 'k' }, label),
+    el('span', { class: `v ${cls || ''}` }, value));
+
+  const n = (v) => Number(v || 0).toLocaleString();
+
+  root.replaceChildren(
+    el('div', { class: 'panel' },
+      el('h3', {}, tr('a.tokSupply')),
+      stat(tr('a.tokMinted'), n(supply.minted)),
+      stat(tr('a.tokCirculating'), n(supply.circulating)),
+      stat(tr('a.tokTreasury'), n(supply.treasury)),
+      stat(tr('a.tokBurned'), n(supply.burned), 'neg'),
+      stat(tr('a.tokHouse'), n(supply.house), 'pos'),
+      stat(tr('a.tokBlocks'), n(supply.blocks)),
+      stat(tr('a.tokVerifies'), supply.verifies ? tr('a.yes') : tr('a.no'),
+        supply.verifies ? 'pos' : 'neg'),
+      el('p', { class: 'hint' }, tr('a.tokWhy'))),
+
+    el('div', { class: 'panel' },
+      el('h3', {}, tr('a.arcade')),
+      stat(tr('a.arcadePlays'), n(arcade.totalPlays)),
+      stat(tr('a.arcadeBurned'), n(arcade.tokensBurned), 'pos'),
+      arcade.perGame.length
+        ? table(['game', tr('a.arcadePlays'), tr('a.players'), tr('a.arcadeBurned'), tr('a.best')],
+          arcade.perGame.map((g) => el('tr', {},
+            el('td', { class: 'name' }, g.game),
+            el('td', {}, n(g.plays)),
+            el('td', {}, n(g.players)),
+            el('td', {}, n(g.tokens)),
+            el('td', {}, n(g.best)))))
+        : el('p', { class: 'hint' }, tr('a.nothingYet'))),
+
+    el('div', { class: 'panel' },
+      el('h3', {}, tr('a.matches')),
+      stat(tr('a.matchPlayed'), n(matches.played)),
+      stat(tr('a.matchWagered'), n(matches.wagered)),
+      stat(tr('a.matchRake'), n(matches.rake), 'pos'),
+      matches.perGame.length
+        ? table(['game', tr('a.matchPlayed'), tr('a.matchWagered'), tr('a.matchRake')],
+          matches.perGame.map((g) => el('tr', {},
+            el('td', { class: 'name' }, g.game),
+            el('td', {}, n(g.played)),
+            el('td', {}, n(g.wagered)),
+            el('td', { class: 'pos' }, n(g.rake)))))
+        : el('p', { class: 'hint' }, tr('a.nothingYet'))),
+  );
+}
+
 const TABS = [
   { key: 'a.overview', view: viewOverview },
   { key: 'a.risk', view: viewRisk },
@@ -512,6 +606,7 @@ const TABS = [
   { key: 'a.withdrawals', view: viewWithdrawals },
   { key: 'a.players', view: viewPlayers },
   { key: 'a.affiliates', view: viewAffiliates },
+  { key: 'a.token', view: viewToken },
   { key: 'a.audit', view: viewAudit },
 ];
 let activeTab = 0;

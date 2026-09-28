@@ -52,9 +52,17 @@ function build(cfg) {
 
   // ---------------------------------------------------------------- routing
   const routes = [];
-  const add = (method, pattern, handler, opts = {}) => routes.push({
-    method, parts: pattern.split('/').filter(Boolean), handler, ...opts,
-  });
+  const add = (method, pattern, handler, opts = {}) => {
+    // Registering the same method and path twice is always a mistake, and a silent one:
+    // the first handler wins and the second is dead code that looks alive. It happened
+    // once with /api/admin/token, where the newer of the two was simply never reached.
+    if (routes.some((r) => r.method === method && r.parts.join('/') === pattern.replace(/^\/+/, ''))) {
+      throw new Error(`duplicate route: ${method} ${pattern}`);
+    }
+    return routes.push({
+      method, parts: pattern.split('/').filter(Boolean), handler, ...opts,
+    });
+  };
 
   function match(method, pathname) {
     const parts = pathname.split('/').filter(Boolean);
@@ -544,13 +552,22 @@ function build(cfg) {
     };
   });
 
+  // The token economy. Every figure is read by replaying the chain rather than from a
+  // stored total, including the verification flag, which is the only number here worth
+  // much: a ledger that does not verify makes all the others a guess.
   add('GET', '/api/admin/token', async (ctx, req) => {
     requireAdmin(req, ctx);
+    const check = tokenchain.verifyChain(db);
+    const tip = tokenchain.head(db);
     return {
-      ...tokenchain.verifyChain(db),
+      ...tokenchain.supply(db),
+      house: tokenchain.balanceOf(db, matches.houseKey(db).publicRaw),
       serverKey: tokenchain.serverKey(db).publicRaw,
       accounts: db.get('SELECT COUNT(*) AS n FROM token_balances').n,
-      supply: db.get('SELECT COALESCE(SUM(balance),0) AS n FROM token_balances').n,
+      blocks: tip ? tip.height + 1 : 0,
+      verifies: check.ok,
+      reason: check.ok ? null : check.reason,
+      symbol: cfg.token.symbol,
     };
   });
 
@@ -582,6 +599,7 @@ function build(cfg) {
     requireAdmin(req, ctx);
     return arcade.stats(db);
   });
+
 
   // --------------------------------------------------------------- matches
   // Head-to-head games for tokens. Every one of these goes through src/match.js, which
