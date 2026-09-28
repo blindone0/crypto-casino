@@ -737,6 +737,14 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
 }
 .slot-window.gl .reel { visibility: hidden; }
 
+/* A rendered symbol fills its face: it is a photograph with its own black ground, not
+   line art that needs a margin. */
+.face .sym-img {
+  width: 100%; height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
 /* The effects canvas. Above the drums and their glass, below nothing: it is the top of
    the machine and it never takes a click. */
 .slot-fx {

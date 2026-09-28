@@ -1,5 +1,7 @@
 import { LANGS, t, setLocale, getLocale, applyAll } from './i18n.js';
-import { ensureSymbolDefs, symbolSvg, symbolSvgStandalone, THEME_KEYS } from './symbols.js';
+import {
+  ensureSymbolDefs, symbolSvg, symbolSvgStandalone, symbolImage, THEME_KEYS,
+} from './symbols.js';
 import { pictureSvg } from './pictures.js';
 import { createCut } from './jigsaw.js';
 import * as audio from './audio.js';
@@ -1577,7 +1579,9 @@ function paintReel(reelNode, symbols, litRows, reelIndex = 0, stop = null) {
       style: `--i:${k};--shade:${shade.toFixed(3)}`,
     });
     if (visible) face.dataset.row = String(row);
-    face.innerHTML = symbolSvg(sym, slotTheme);
+    const rendered = symbolImage(sym, slotTheme);
+    if (rendered) face.innerHTML = `<img class="sym-img" src="${rendered}" alt="">`;
+    else face.innerHTML = symbolSvg(sym, slotTheme);
     drum.appendChild(face);
   }
 
@@ -1666,17 +1670,20 @@ function glDrawSymbol(ctx, sym, y, cell, width) {
   return new Promise((resolve) => {
     ctx.fillStyle = '#231d15';
     ctx.fillRect(0, y, width, cell);
-    // Standalone: an <img> is its own document and cannot see the page's shared defs.
-    const svg = symbolSvgStandalone(sym, slotTheme);
     const img = new Image();
-    const pad = cell * 0.12;
+    const rendered = symbolImage(sym, slotTheme);
+    // A render already fills its frame and carries its own black ground, so it goes on
+    // edge to edge; a drawing is line art that needs room to breathe.
+    const pad = rendered ? 0 : cell * 0.12;
     img.onload = () => {
       ctx.drawImage(img, pad, y + pad, width - pad * 2, cell - pad * 2);
       resolve();
     };
     // A symbol that will not load should not stall the whole strip.
     img.onerror = () => resolve();
-    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    img.src = rendered
+      // Standalone: an <img> is its own document and cannot see the page's shared defs.
+      || `data:image/svg+xml;charset=utf-8,${encodeURIComponent(symbolSvgStandalone(sym, slotTheme))}`;
   });
 }
 

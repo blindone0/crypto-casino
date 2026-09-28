@@ -599,7 +599,34 @@ const COUCH = {
   `),
 };
 
-const THEMES = { classic: CLASSIC, afterdark: AFTER_DARK, russian: RUSSIAN, noir: NOIR, couch: COUCH };
+/**
+ * A machine whose symbols are rendered images rather than drawings.
+ *
+ * The five above are vector artwork and stay exactly as they are. This one is different
+ * in kind: the symbols are photographs of renders, made on the GPU in this machine and
+ * served from public/symbols/rendered. It is a sixth machine, not a replacement — the
+ * maths, paytable and RTP are identical to every other, as they are between all of them.
+ *
+ * There is no drawing function here because there is nothing to draw. Callers ask
+ * symbolImage() for a URL and put it on the page or on a drum themselves.
+ */
+const RENDERED_KEYS = ['T', 'J', 'Q', 'K', 'A', 'BELL', 'GEM', 'CROWN', 'WILD', 'SCAT'];
+
+/** Where a rendered symbol lives, or null for a theme that is drawn rather than rendered. */
+export function symbolImage(key, theme = 'classic') {
+  if (theme !== 'rendered') return null;
+  return RENDERED_KEYS.includes(key) ? `/symbols/rendered/${key}.jpg` : null;
+}
+
+/** True for a theme whose symbols are images. */
+export const isRenderedTheme = (theme) => theme === 'rendered';
+
+const THEMES = {
+  classic: CLASSIC, afterdark: AFTER_DARK, russian: RUSSIAN, noir: NOIR, couch: COUCH,
+  // Falls back to the classic drawings anywhere that has not been taught about images,
+  // so a missing branch degrades to a working machine rather than a blank one.
+  rendered: CLASSIC,
+};
 
 export const THEME_KEYS = Object.keys(THEMES);
 
