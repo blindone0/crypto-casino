@@ -387,3 +387,29 @@ test('a bounce loses energy, so the dice cannot bounce forever', () => {
   assert.ok(Math.abs(d.pos[1] - P.FLOOR) < 0.05, 'resting on the table, not under it');
   assert.ok(rising || true);
 });
+
+test('no shader source is cut short by a stray backtick', () => {
+  // This cost two round trips, in two different sessions, and both times the symptom was
+  // baffling: once the whole app failed to boot with "Unexpected identifier", once the
+  // dice silently fell back to glyphs because the program would not link.
+  //
+  // The cause both times was a backtick inside a comment inside the GLSL. The shaders are
+  // template literals, so a backtick ends the string and turns the rest of the shader
+  // into JavaScript — and a shader that is cut short still looks perfectly reasonable in
+  // the editor. Nothing else in the file has this hazard, which is exactly why it is easy
+  // to walk back into.
+  const TICK = String.fromCharCode(96);
+  for (const name of ['VERT', 'FRAG', 'TABLE_VERT', 'TABLE_FRAG']) {
+    const open = `const ${name} = ${TICK}`;
+    const at = DICE_SRC.indexOf(open);
+    assert.ok(at >= 0, `${name} is not declared as a template literal`);
+    const rest = DICE_SRC.slice(at + open.length);
+    const body = rest.slice(0, rest.indexOf(TICK));
+    // A GLSL shader that reaches its closing backtick has a main(). One that was cut
+    // short by a stray backtick, in practice, never does.
+    assert.ok(body.includes('void main()'),
+      `${name} is truncated before main() — look for a ${TICK} inside its source`);
+    assert.ok(body.trimEnd().endsWith('}'),
+      `${name} does not end with a closing brace`);
+  }
+});

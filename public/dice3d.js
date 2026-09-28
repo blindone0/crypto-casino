@@ -32,6 +32,20 @@
 //   - Pips that are drilled, not printed. The atlas has a soft dark rim around each pip
 //     so it reads as a hole with depth rather than a dot stuck on the surface.
 
+/**
+ * Where the key light is, as a unit vector pointing towards it.
+ *
+ * Declared once and handed to BOTH shaders. The dice are lit by it and the table casts
+ * its shadows along it, and two shaders disagreeing about where the light is produces
+ * wrongness nobody can name but everybody can see: highlights on one side of a die and
+ * its shadow on the same side.
+ */
+const KEY_DIR = (() => {
+  const v = [-0.45, 1.0, 0.55];
+  const l = Math.hypot(v[0], v[1], v[2]);
+  return [v[0] / l, v[1] / l, v[2] / l];
+})();
+
 const VERT = `
 attribute vec3 aPos;
 attribute vec3 aNormal;
@@ -79,6 +93,9 @@ uniform sampler2D uRough;     // roughness, derived from the material's own cont
 uniform sampler2D uPips;      // six faces in a row, transparent
 uniform vec3 uEye;
 uniform vec3 uTint;
+uniform vec3 uKey;          // the key light, shared with the table so they agree
+uniform float uWear;        // how used this particular die is, 0 new .. 1 old
+uniform vec2 uGrain;        // this die's own offset into the material
 
 void main() {
   // The pip atlas is six faces across, and vFace is already the slot to sample.
@@ -93,8 +110,21 @@ void main() {
   vec2 pipUV = vec2((vUV.x + vFace) / 6.0, vUV.y);
   vec4 pip = texture2D(uPips, pipUV);
 
-  vec3 body = texture2D(uBody, vUV).rgb * uTint;
-  float rough = texture2D(uRough, vUV).r;
+  // Each die reads a different part of the material.
+  //
+  // Two dice sharing one texture at one offset are the same object twice, and it shows:
+  // the same scratch in the same corner of both. Offsetting the sample gives each its own
+  // grain from the one map, at no cost.
+  vec2 bodyUV = vUV * 0.82 + uGrain;
+  vec3 body = texture2D(uBody, bodyUV).rgb * uTint;
+  float rough = texture2D(uRough, bodyUV).r;
+
+  // And an older die is duller and slightly darker at its edges, where a real one has
+  // been handled most. vUV is per face, so the distance from the face centre is the
+  // distance towards its edges.
+  float edge = max(abs(vUV.x - 0.5), abs(vUV.y - 0.5)) * 2.0;
+  body *= 1.0 - uWear * 0.16 * smoothstep(0.55, 1.0, edge);
+  rough = min(1.0, rough + uWear * 0.22);
 
   // The pip is a hole: darken the body towards the pip's own colour by its alpha, rather
   // than pasting the pip over the top. A pasted pip sits on the surface; a darkened one
@@ -107,7 +137,7 @@ void main() {
   vec3 n = normalize(vNormal);
   vec3 v = normalize(uEye - vWorld);
 
-  vec3 keyDir = normalize(vec3(-0.45, 1.0, 0.55));
+  vec3 keyDir = normalize(uKey);
   vec3 fillDir = normalize(vec3(0.6, 0.25, -0.5));
 
   float key = max(dot(n, keyDir), 0.0);
@@ -155,21 +185,82 @@ precision highp float;
 varying vec2 vUV;
 varying vec3 vWorld;
 uniform sampler2D uFelt;
-uniform vec2 uDiceXZ[2];
-void main() {
-  vec3 felt = texture2D(uFelt, vUV * 3.0).rgb;
+uniform sampler2D uFeltRough;
+uniform vec3 uEye;
+uniform vec3 uDice[2];      // xyz of each die, so height and offset are both available
+uniform vec3 uKey;          // the key light direction, shared with the dice shader
 
-  // A pool of light in the middle, falling off to the edges. Without it the table is a
-  // flat rectangle of green and the dice look like they are floating over wallpaper.
+// The felt.
+//
+// The first pass was one texture multiplied by a brightness, and it read as green paper:
+// a woven cloth is not a colour, it is a surface with a direction and a sheen, and a flat
+// multiply throws both away. Three things are added here and each is doing a specific job.
+void main() {
+  // 1. Two samples at different scales. One tileable photo repeated across a big surface
+  //    shows its period as a visible plaid; a second, larger, rotated sample breaks it up.
+  //    The rotation matters — sampling the same texture twice on the same axes just makes
+  //    the plaid darker.
+  vec2 uvA = vWorld.xz * 0.42;
+  vec2 uvB = vec2(vWorld.x * 0.11 - vWorld.z * 0.07, vWorld.x * 0.07 + vWorld.z * 0.11);
+  vec3 fine = texture2D(uFelt, uvA).rgb;
+  vec3 broad = texture2D(uFelt, uvB).rgb;
+  vec3 felt = mix(fine, broad, 0.35);
+
+  // 2. The nap. Real billiard cloth has a lie to it, and light coming across the weave
+  //    catches differently from light going with it. The roughness map already encodes
+  //    where the fibres are, so it drives a grazing sheen rather than a mirror highlight.
+  float rough = texture2D(uFeltRough, uvA).r;
+  vec3 v = normalize(uEye - vWorld);
+  // The table is flat, so its normal is known and constant: straight up.
+  float graze = pow(1.0 - max(v.y, 0.0), 3.0);
+  // Kept small and tinted towards the cloth's own colour. A strong white sheen washes the
+  // green straight out — measured at the table centre it turned a (30, 68, 50) felt into
+  // a grey (48, 46, 43), which is the "does not look real" that a flat multiply also
+  // gives, arrived at from the opposite direction.
+  float sheen = graze * (1.0 - rough) * 0.16;
+
+  // 3. The light pool, as before: without it the table is a flat rectangle and the dice
+  //    look like they are floating over wallpaper.
   float d = length(vWorld.xz - vec2(1.2, 0.0)) / 6.0;
   float pool = 1.0 - smoothstep(0.1, 1.0, d);
-  vec3 lit = felt * (0.22 + pool * 0.95);
 
-  // Contact shadows. Each die darkens the felt under it, which is the single cue that
-  // says the dice are ON the table rather than hovering above it.
+  vec3 lit = felt * (0.30 + pool * 1.45);
+  lit += sheen * vec3(0.16, 0.30, 0.22) * (0.3 + pool);
+
+  // --- the shadows.
+  //
+  // Projected, not painted. The previous version put a round blob at each die's x/z
+  // whatever the die was doing: it did not move with the light, did not fade as the die
+  // rose, and was circular under an object that is a cube. All three are visible, and
+  // together they are why it read as a sticker rather than a shadow.
+  //
+  // This traces from the surface point back along the key light to the die's height and
+  // asks how far the hit lands from the die's centre. That gives a shadow offset in the
+  // direction the light actually comes from, softening and weakening with height exactly
+  // as a real contact shadow does.
   for (int i = 0; i < 2; i++) {
-    float s = length(vWorld.xz - uDiceXZ[i]);
-    lit *= 1.0 - 0.55 * (1.0 - smoothstep(0.0, 1.45, s));
+    vec3 p = uDice[i];
+    float h = max(p.y, 0.0);
+
+    // Where this point would be if pushed up to the die's height along the light.
+    // uKey points TOWARDS the light, so walking up it by h/uKey.y lands at that plane.
+    vec2 lift = uKey.xz * (h / max(uKey.y, 0.15));
+    vec2 rel = vWorld.xz + lift - p.xz;
+
+    // A cube's shadow is closer to a rounded square than to a circle. Chebyshev distance
+    // gives the square; blending a little Euclidean back in rounds its corners, which is
+    // what a radiused die actually casts.
+    float square = max(abs(rel.x), abs(rel.y));
+    float round_ = length(rel);
+    float dist = mix(square, round_, 0.35);
+
+    // A shadow spreads and fades as its caster rises. Both are what tells you a die is in
+    // the air rather than resting, and neither existed before.
+    float size = 0.52 + h * 0.42;
+    float soft = 0.12 + h * 0.30;
+    float strength = 0.62 / (1.0 + h * 1.5);
+
+    lit *= 1.0 - strength * (1.0 - smoothstep(size - soft, size + soft, dist));
   }
 
   lit = (lit * (2.51 * lit + 0.03)) / (lit * (2.43 * lit + 0.59) + 0.14);
@@ -401,7 +492,7 @@ const RESTING = {
   4: [0, 0, -Math.PI / 2],             // -X up
 };
 
-function loadTexture(gl, url, { repeat = true } = {}) {
+function loadTexture(gl, url, { repeat = true, onReady = null } = {}) {
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
   // One grey pixel until the real image arrives, so the first frames are not black.
@@ -429,6 +520,11 @@ function loadTexture(gl, url, { repeat = true } = {}) {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     }
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    // Repaint, or a still frame drawn before this arrived keeps the grey placeholder for
+    // good. `show()` draws exactly once, so a table opened and left alone would stay grey
+    // until something else happened to trigger a frame — which, on a game that only
+    // animates when you throw, could be never.
+    if (onReady) onReady();
   };
   img.src = url;
   return tex;
@@ -469,10 +565,18 @@ export function createDice(host, opts = {}) {
   const box = roundedBox(gl);
   const base = opts.textures || '/textures/';
   const material = opts.material === 'resin' ? 'dice-resin' : 'dice-bone';
-  const texBody = loadTexture(gl, `${base}${material}.jpg`);
-  const texRough = loadTexture(gl, `${base}${material}-rough.jpg`);
-  const texPips = loadTexture(gl, `${base}dice-pips.png`, { repeat: false });
-  const texFelt = loadTexture(gl, `${base}felt-table.jpg`);
+  // A repaint when each texture lands. Cheap, and it is the difference between a table
+  // that turns green a moment after opening and one that never does.
+  // Guarded, because a cached image can fire `onload` synchronously — before `raf` is
+  // even declared, which is a temporal-dead-zone throw rather than a quiet no-op.
+  const repaint = () => {
+    try { if (raf === null) draw(); } catch { /* not built yet; the next frame covers it */ }
+  };
+  const texBody = loadTexture(gl, `${base}${material}.jpg`, { onReady: repaint });
+  const texRough = loadTexture(gl, `${base}${material}-rough.jpg`, { onReady: repaint });
+  const texPips = loadTexture(gl, `${base}dice-pips.png`, { repeat: false, onReady: repaint });
+  const texFelt = loadTexture(gl, `${base}felt-table.jpg`, { onReady: repaint });
+  const texFeltRough = loadTexture(gl, `${base}felt-table-rough.jpg`, { onReady: repaint });
 
   // The table quad, big enough that its edges are never in frame.
   const tableBuf = (() => {
@@ -487,15 +591,33 @@ export function createDice(host, opts = {}) {
     return b;
   })();
 
-  const tint = opts.material === 'resin'
+  const baseTint = opts.material === 'resin'
     ? [1.0, 0.62, 0.58]
     : [1.0, 0.97, 0.92];
+
+  /**
+   * Give each die its own character.
+   *
+   * Two dice drawn from one mesh with one material are the same object twice, and the eye
+   * catches it even when it cannot say why — the same scratch sits in the same corner of
+   * both. None of this is randomised per throw: a die is a physical thing a player sees
+   * repeatedly, so its character is fixed when the table is built and stays put.
+   */
+  const character = (i) => ({
+    // A different corner of the same material, so each die has its own grain and wear.
+    grain: [0.09 + i * 0.37, 0.23 + i * 0.29],
+    // One a shade warmer than the other, the way two pieces of bone never match.
+    tint: baseTint.map((c, k) => c * (1 + (i === 0 ? 0.015 : -0.02) * (k === 2 ? 2 : 1))),
+    // And one more played-with than the other.
+    wear: i === 0 ? 0.28 : 0.55,
+  });
 
   // Where each die comes to rest. Apart, and slightly off-centre, so they read as two
   // objects that were thrown rather than two copies of one.
   const REST = [[-1.35, 0.5, 0.35], [1.35, 0.5, -0.3]];
 
   const dice = [0, 1].map((i) => ({
+    ...character(i),
     value: 1,
     pos: REST[i].slice(),
     vel: [0, 0, 0],
@@ -709,8 +831,17 @@ export function createDice(host, opts = {}) {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, texFelt);
     gl.uniform1i(gl.getUniformLocation(progTable, 'uFelt'), 0);
-    gl.uniform2fv(gl.getUniformLocation(progTable, 'uDiceXZ'), new Float32Array([
-      dice[0].pos[0], dice[0].pos[2], dice[1].pos[0], dice[1].pos[2],
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, texFeltRough);
+    gl.uniform1i(gl.getUniformLocation(progTable, 'uFeltRough'), 1);
+    gl.uniform3fv(gl.getUniformLocation(progTable, 'uEye'), new Float32Array(eye));
+    // The same key direction the dice are lit by, so the shadows fall the way the
+    // highlights say they should. Two shaders disagreeing about where the light is is
+    // the sort of thing nobody can name but everybody can see.
+    gl.uniform3fv(gl.getUniformLocation(progTable, 'uKey'), new Float32Array(KEY_DIR));
+    gl.uniform3fv(gl.getUniformLocation(progTable, 'uDice'), new Float32Array([
+      dice[0].pos[0], dice[0].pos[1] - FLOOR, dice[0].pos[2],
+      dice[1].pos[0], dice[1].pos[1] - FLOOR, dice[1].pos[2],
     ]));
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
@@ -738,7 +869,7 @@ export function createDice(host, opts = {}) {
     gl.uniformMatrix4fv(gl.getUniformLocation(progDice, 'uProj'), false, proj);
     gl.uniformMatrix4fv(gl.getUniformLocation(progDice, 'uView'), false, view);
     gl.uniform3fv(gl.getUniformLocation(progDice, 'uEye'), new Float32Array(eye));
-    gl.uniform3fv(gl.getUniformLocation(progDice, 'uTint'), new Float32Array(tint));
+    gl.uniform3fv(gl.getUniformLocation(progDice, 'uKey'), new Float32Array(KEY_DIR));
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, texBody);
     gl.uniform1i(gl.getUniformLocation(progDice, 'uBody'), 0);
@@ -752,7 +883,21 @@ export function createDice(host, opts = {}) {
     const uModel = gl.getUniformLocation(progDice, 'uModel');
     const uNormalMat = gl.getUniformLocation(progDice, 'uNormalMat');
 
+    const uTint = gl.getUniformLocation(progDice, 'uTint');
+    const uWear = gl.getUniformLocation(progDice, 'uWear');
+    const uGrain = gl.getUniformLocation(progDice, 'uGrain');
+
     for (const d of dice) {
+      // Each die is its own object, not two copies of one.
+      //
+      // A matched pair is what a factory ships; a pair that has been played with is not.
+      // One reads a different corner of the material, one is slightly warmer, and one is
+      // more worn — small enough that nobody would name any of it, large enough that the
+      // two stop looking like the same mesh drawn twice.
+      gl.uniform3fv(uTint, new Float32Array(d.tint));
+      gl.uniform1f(uWear, d.wear);
+      gl.uniform2fv(uGrain, new Float32Array(d.grain));
+
       const model = multiply(
         translation(d.pos[0], d.pos[1], d.pos[2]),
         multiply(rotation(d.rot[0], d.rot[1], d.rot[2]), scaling(0.5)),
