@@ -80,7 +80,9 @@ function seats(db, cfg, users, id) {
   const view = match.detail(db, cfg, users.alice, id);
   return { toMove: view.toMove, white: view.view.white, fen: view.view.fen };
 }
-const userInSeat = (users, seat) => (seat === 'host' ? users.alice : users.bob);
+// Alice opens every table in these tests, so she is always seat 0.
+const userInSeat = (users, seat) => (seat === 0 ? users.alice : users.bob);
+const otherSeat = (seat) => (seat === 0 ? 1 : 0);
 
 /** Total tokens in existence, replayed from the chain rather than read from balances. */
 function chainTotals(db) {
@@ -111,7 +113,7 @@ test('a challenge escrows the stake and shows up in the lobby', (t) => {
   assert.strictEqual(lobby.open[0].id, made.id);
   assert.strictEqual(lobby.open[0].stake, 250 * TUG);
   assert.strictEqual(lobby.open[0].host, 'alice');
-  assert.strictEqual(lobby.open[0].guest, null);
+  assert.strictEqual(lobby.open[0].players.length, 1, 'only the host is seated');
 });
 
 test('a stake signed by somebody else is refused', (t) => {
@@ -205,11 +207,11 @@ test('the board is dealt with one player as White and the clocks start', (t) => 
 
   const view = match.detail(db, cfg, users.alice, made.id);
   assert.strictEqual(view.status, 'playing');
-  assert.strictEqual(view.seat, 'host');
-  assert.ok(['host', 'guest'].includes(view.view.white));
+  assert.strictEqual(view.seat, 0);
+  assert.ok([0, 1].includes(view.view.white));
   assert.strictEqual(view.view.fen, chess.START_FEN);
   assert.strictEqual(view.toMove, view.view.white, 'White moves first');
-  assert.ok(view.clock.host > 0 && view.clock.guest > 0);
+  assert.ok(view.clock[0] > 0 && view.clock[1] > 0);
   assert.strictEqual(view.view.legal.length, 20);
 });
 
@@ -220,7 +222,7 @@ test('you cannot move out of turn, for the other side, or from outside the match
   take(db, cfg, users, keys, 'bob', made.id);
   const { toMove } = seats(db, cfg, users, made.id);
   const mover = userInSeat(users, toMove);
-  const waiter = userInSeat(users, match.otherSeat(toMove));
+  const waiter = userInSeat(users, otherSeat(toMove));
 
   assert.throws(() => match.act(db, cfg, waiter, { id: made.id, move: 'e2e4' }), /not your turn/);
   assert.throws(() => match.act(db, cfg, users.carol, { id: made.id, move: 'e2e4' }), /not in that match/);
@@ -271,9 +273,10 @@ test('checkmate ends the match and pays the winner the pot less the rake', (t) =
   const rake = Math.floor(pot * cfg.match.rake);
   const prize = pot - rake;
   // Black mated, so whoever was Black takes the prize.
-  const winnerIsHost = view.view.white === 'guest';
+  const winnerIsHost = view.view.white === 1;
   const winner = winnerIsHost ? 'alice' : 'bob';
   const loser = winnerIsHost ? 'bob' : 'alice';
+  assert.deepStrictEqual(last.winners, [winnerIsHost ? 0 : 1]);
   assert.strictEqual(tc.balanceOf(db, keys[winner].pub), start[winner] - stake + prize);
   assert.strictEqual(tc.balanceOf(db, keys[loser].pub), start[loser] - stake);
   assert.strictEqual(tc.balanceOf(db, match.houseKey(db).publicRaw), rake);
@@ -288,7 +291,7 @@ test('resignation hands the pot to the other side', (t) => {
 
   const out = match.resign(db, cfg, users.alice, made.id);
   assert.strictEqual(out.reason, 'resignation');
-  assert.strictEqual(out.result, 'guest');
+  assert.deepStrictEqual(out.winners, [1]);
 
   const prize = (400 * TUG) - Math.floor(400 * TUG * cfg.match.rake);
   assert.strictEqual(tc.balanceOf(db, keys.bob.pub), before + prize);
@@ -318,7 +321,7 @@ test('a draw splits the pot and the odd unit stays with the house', (t) => {
     bob: tc.balanceOf(db, keys.bob.pub),
   };
   const row = db.get('SELECT * FROM matches WHERE id=?', made.id);
-  match.settle(db, cfg, row, 'draw', 'agreed');
+  match.settle(db, cfg, row, [0, 1], 'agreed');
 
   assert.strictEqual(tc.balanceOf(db, keys.alice.pub), before.alice + 101 * TUG);
   assert.strictEqual(tc.balanceOf(db, keys.bob.pub), before.bob + 101 * TUG);
@@ -346,7 +349,7 @@ test('a flagged clock loses the match to the other side', (t) => {
 
   const out = match.claimTimeout(db, cfg, users.alice, made.id);
   assert.strictEqual(out.reason, 'timeout');
-  assert.strictEqual(out.result, match.otherSeat(toMove));
+  assert.deepStrictEqual(out.winners, [otherSeat(toMove)]);
 });
 
 test('moving after your flag has fallen does not save you', (t) => {
@@ -359,7 +362,7 @@ test('moving after your flag has fallen does not save you', (t) => {
 
   const out = match.act(db, cfg, userInSeat(users, toMove), { id: made.id, move: 'e2e4' });
   assert.strictEqual(out.reason, 'timeout');
-  assert.strictEqual(out.result, match.otherSeat(toMove));
+  assert.deepStrictEqual(out.winners, [otherSeat(toMove)]);
 });
 
 test('flagging against a bare king is a draw, not a win', (t) => {
@@ -373,12 +376,13 @@ test('flagging against a bare king is a draw, not a win', (t) => {
   const row = db.get('SELECT * FROM matches WHERE id=?', made.id);
   const state = JSON.parse(row.state);
   state.fen = '4k3/8/8/8/8/8/5ppp/4K3 b - - 0 1';
-  state.white = 'host';
+  state.white = 0;
   db.run('UPDATE matches SET state=?, moved_at_ms=? WHERE id=?',
     JSON.stringify(state), Date.now() - 60 * 60 * 1000, made.id);
 
   const out = match.claimTimeout(db, cfg, users.alice, made.id);
-  assert.strictEqual(out.result, 'draw', 'a player who cannot mate cannot win on time');
+  assert.deepStrictEqual(out.winners.sort(), [0, 1],
+    'a player who cannot mate cannot win on time, so it is a draw');
 });
 
 test('tokens are conserved across a run of matches', (t) => {

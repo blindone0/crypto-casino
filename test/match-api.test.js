@@ -121,12 +121,12 @@ test('every match route answers, and a full game settles over HTTP', async (t) =
   const aView = await alice.client.call(`/api/match/one?id=${id}`);
   const bView = await bob.client.call(`/api/match/one?id=${id}`);
   assert.strictEqual(aView.status, 200);
-  assert.strictEqual(aView.data.seat, 'host');
-  assert.strictEqual(bView.data.seat, 'guest');
+  assert.strictEqual(aView.data.seat, 0);
+  assert.strictEqual(bView.data.seat, 1);
   assert.strictEqual(aView.data.view.fen, bView.data.view.fen);
   assert.strictEqual(aView.data.view.legal.length, 20);
 
-  const players = { host: alice, guest: bob };
+  const players = [alice, bob];
 
   // --- an illegal move is refused by the server, not merely discouraged by the client
   const mover = players[aView.data.toMove];
@@ -137,7 +137,7 @@ test('every match route answers, and a full game settles over HTTP', async (t) =
   assert.match(bad.data.error, /illegal move/);
 
   // --- a move by the player whose turn it is not
-  const waiting = players[aView.data.toMove === 'host' ? 'guest' : 'host'];
+  const waiting = players[1 - aView.data.toMove];
   const wrongTurn = await waiting.client.call('/api/match/move', {
     method: 'POST', body: { id, move: 'e7e5' },
   });
@@ -229,7 +229,7 @@ test('resigning over HTTP settles the match', async (t) => {
     method: 'POST', body: { id: made.data.id },
   });
   assert.strictEqual(out.status, 200);
-  assert.strictEqual(out.data.result, 'guest');
+  assert.deepStrictEqual(out.data.winners, [1]);
 
   const prize = (400 * TUG) - Math.floor(400 * TUG * cfg.match.rake);
   const bobLobby = await bob.client.call('/api/match');

@@ -308,30 +308,44 @@ CREATE TABLE IF NOT EXISTS matches (
   game        TEXT NOT NULL,
   status      TEXT NOT NULL CHECK (status IN ('open','playing','done','cancelled')),
   stake       INTEGER NOT NULL,
+  -- What the house actually kept: the rake plus any share too small to divide.
   rake        INTEGER NOT NULL DEFAULT 0,
+  -- How many players this table is for. Two for chess, up to six for poker.
+  seats       INTEGER NOT NULL DEFAULT 2,
   host_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  host_key    TEXT NOT NULL,
-  guest_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
-  guest_key   TEXT,
   state       TEXT NOT NULL,
+  -- A JSON list of the winning seats. One of them is a win, all of them a draw, and
+  -- anything between is what a table game produces.
   result      TEXT,
   reason      TEXT,
   created_at  INTEGER NOT NULL,
   started_at  INTEGER,
   ended_at    INTEGER,
   -- Milliseconds, and read only from here. A clock the client can edit is not a clock.
-  moved_at_ms INTEGER NOT NULL DEFAULT 0,
-  host_ms     INTEGER NOT NULL DEFAULT 0,
-  guest_ms    INTEGER NOT NULL DEFAULT 0
+  moved_at_ms INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS ix_matches_open ON matches(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS ix_matches_host ON matches(host_id, status);
-CREATE INDEX IF NOT EXISTS ix_matches_guest ON matches(guest_id, status);
+
+-- Who is sitting where. Separate from matches because the number of players is a property
+-- of the game, not of the schema: two columns cannot hold six people.
+CREATE TABLE IF NOT EXISTS match_seats (
+  match_id  INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  seat      INTEGER NOT NULL,
+  user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  pubkey    TEXT NOT NULL,
+  ms        INTEGER NOT NULL DEFAULT 0,
+  joined_at INTEGER NOT NULL,
+  PRIMARY KEY (match_id, seat),
+  UNIQUE (match_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS ix_match_seats_user ON match_seats(user_id);
 
 CREATE TABLE IF NOT EXISTS match_moves (
   id         INTEGER PRIMARY KEY,
   match_id   INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
-  seat       TEXT NOT NULL CHECK (seat IN ('host','guest')),
+  -- A seat index, not a name. Two names cannot describe a table of six.
+  seat       INTEGER NOT NULL,
   ply        INTEGER NOT NULL,
   move       TEXT NOT NULL,
   note       TEXT,

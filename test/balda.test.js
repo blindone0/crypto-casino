@@ -37,7 +37,7 @@ const cell = (x, y) => y * balda.SIZE + x;
 const start = () => ({
   grid: balda.startGrid('полка'),
   used: ['полка'],
-  scores: { host: 0, guest: 0 },
+  scores: [0, 0],
 });
 
 // ------------------------------------------------------------- the dictionary
@@ -270,7 +270,7 @@ function started(db, cfg, users, keys, stake = 100 * TUG) {
   return made.id;
 }
 
-const players = (users) => ({ host: users.alice, guest: users.bob });
+const players = (users) => [users.alice, users.bob];
 
 test('a game opens with a five-letter word and somebody to move', (t) => {
   const { cfg, db, users, keys } = setup();
@@ -280,8 +280,8 @@ test('a game opens with a five-letter word and somebody to move', (t) => {
 
   assert.strictEqual(view.view.opening, 'полка');
   assert.strictEqual(view.view.grid.filter((c) => c !== null).length, 5);
-  assert.deepStrictEqual(view.view.scores, { host: 0, guest: 0 });
-  assert.ok(['host', 'guest'].includes(view.toMove));
+  assert.deepStrictEqual(view.view.scores, [0, 0]);
+  assert.ok([0, 1].includes(view.toMove));
   assert.ok(view.view.playable.length > 0);
 });
 
@@ -296,8 +296,8 @@ test('a move scores, passes the turn, and spends the word', (t) => {
 
   const after = match.detail(db, cfg, users.alice, id);
   assert.strictEqual(after.view.scores[mover], 3);
-  assert.strictEqual(after.view.scores[match.otherSeat(mover)], 0);
-  assert.strictEqual(after.toMove, match.otherSeat(mover), 'the turn changes hands');
+  assert.strictEqual(after.view.scores[(1 - mover)], 0);
+  assert.strictEqual(after.toMove, (1 - mover), 'the turn changes hands');
   assert.ok(after.view.used.includes('пол'));
   assert.strictEqual(after.view.grid[16], 'п');
 });
@@ -307,7 +307,7 @@ test('you cannot move out of turn or from outside the game', (t) => {
   t.after(() => cleanup(cfg, db));
   const id = started(db, cfg, users, keys);
   const view = match.detail(db, cfg, users.alice, id);
-  const waiting = players(users)[match.otherSeat(view.toMove)];
+  const waiting = players(users)[(1 - view.toMove)];
 
   assert.throws(
     () => match.act(db, cfg, waiting, { id, cell: 16, letter: 'п', word: 'пол' }),
@@ -322,16 +322,16 @@ test('two passes in a row end the game on the higher score', (t) => {
   const id = started(db, cfg, users, keys, stake);
   const first = match.detail(db, cfg, users.alice, id);
   const mover = first.toMove;
-  const winnerKey = mover === 'host' ? keys.alice : keys.bob;
+  const winnerKey = mover === 0 ? keys.alice : keys.bob;
   const before = tc.balanceOf(db, winnerKey.pub);
 
   // One player scores, then both pass.
   match.act(db, cfg, players(users)[mover], { id, cell: 16, letter: 'п', word: 'пол' });
-  match.act(db, cfg, players(users)[match.otherSeat(mover)], { id, pass: true });
+  match.act(db, cfg, players(users)[(1 - mover)], { id, pass: true });
   const out = match.act(db, cfg, players(users)[mover], { id, pass: true });
 
   assert.strictEqual(out.reason, 'higher-score');
-  assert.strictEqual(out.result, mover);
+  assert.deepStrictEqual(out.winners, [mover]);
   const prize = (stake * 2) - Math.floor(stake * 2 * cfg.match.rake);
   assert.strictEqual(tc.balanceOf(db, winnerKey.pub), before + prize);
 });
@@ -346,7 +346,7 @@ test('a single pass does not end anything, and scoring resets the count', (t) =>
   assert.strictEqual(match.detail(db, cfg, users.alice, id).status, 'playing');
 
   // A real move clears the passes, so the next pass is the first one again.
-  match.act(db, cfg, players(users)[match.otherSeat(mover)],
+  match.act(db, cfg, players(users)[(1 - mover)],
     { id, cell: 16, letter: 'п', word: 'пол' });
   match.act(db, cfg, players(users)[mover], { id, pass: true });
   assert.strictEqual(match.detail(db, cfg, users.alice, id).status, 'playing',
@@ -365,9 +365,9 @@ test('a tied game is a draw and both stakes come back', (t) => {
 
   // Nobody scores, so it is nil-nil.
   match.act(db, cfg, players(users)[mover], { id, pass: true });
-  const out = match.act(db, cfg, players(users)[match.otherSeat(mover)], { id, pass: true });
+  const out = match.act(db, cfg, players(users)[(1 - mover)], { id, pass: true });
 
-  assert.strictEqual(out.result, 'draw');
+  assert.deepStrictEqual(out.winners.slice().sort(), [0, 1]);
   assert.strictEqual(out.reason, 'tied');
   assert.strictEqual(tc.balanceOf(db, keys.alice.pub), before.alice + 120 * TUG);
   assert.strictEqual(tc.balanceOf(db, keys.bob.pub), before.bob + 120 * TUG);
@@ -390,7 +390,7 @@ test('an illegal move over the match layer is a client error, not a crash', (t) 
   // And the game is untouched.
   const view = match.detail(db, cfg, users.alice, id);
   assert.strictEqual(view.status, 'playing');
-  assert.deepStrictEqual(view.view.scores, { host: 0, guest: 0 });
+  assert.deepStrictEqual(view.view.scores, [0, 0]);
   assert.strictEqual(view.view.grid.filter((c) => c !== null).length, 5);
 });
 

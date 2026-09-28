@@ -1,34 +1,34 @@
 'use strict';
-// Head-to-head matches played for tokens.
+// Games played at a table for tokens.
 //
 // This is the part the arcade deliberately does not have. An arcade score arrives from the
-// player's own machine and can never be worth money; a match between two people is
-// different, because the server holds the board and each side's move is checked against
-// the rules here before it is allowed to change anything. Neither player can move for the
-// other, neither can move out of turn, and neither can play a move the rules forbid.
+// player's own machine and can never be worth money; a game between people is different,
+// because the server holds the board and each move is checked against the rules before it
+// is allowed to change anything. Nobody can move for anybody else, nobody can move out of
+// turn, and nobody can play a move the rules forbid.
 //
-// Stakes are escrowed on the token chain rather than in a column somewhere. Joining a
-// match means signing a transfer of your stake to the house key, which is a signature only
-// the player can produce; settling means the house signing the pot to the winner. Both
-// appear as ordinary blocks, so the escrow is as auditable as every other token movement
-// and an operator who quietly pays the wrong person leaves the evidence on the chain.
+// Seats are an ordered list from 0 upward, not a host and a guest. Chess wants two and
+// poker wants up to six, and a framework that knows about exactly two players cannot be
+// talked into a third. A two-player game is simply one whose plugin asks for two seats.
 //
-// Games plug in through a small interface (see GAMES below) so that chess, Морской бой and
-// Балда share the lobby, the escrow, the clock and the settlement, and differ only in the
-// rules of the game itself.
+// Stakes are escrowed on the token chain rather than in a column somewhere. Joining means
+// signing a transfer of your stake to the house key, a signature only the player can
+// produce; settling means the house signing the pot back out. Both are ordinary blocks, so
+// the escrow is as auditable as every other token movement, and an operator who quietly
+// pays the wrong person leaves the evidence on the chain.
+//
+// The rules themselves live in matchgames.js. Nothing in this file knows what a chess
+// board is.
 
 const crypto = require('node:crypto');
 const U = require('./util');
 const tokenchain = require('./tokenchain');
-const chess = require('./chess');
-const seabattle = require('./seabattle');
-const balda = require('./balda');
-const wordsRu = require('./words-ru');
+const { GAMES } = require('./matchgames');
 
 const now = () => Math.floor(Date.now() / 1000);
 const nowMs = () => Date.now();
 
-const otherSeat = (seat) => (seat === 'host' ? 'guest' : 'host');
+const gameFor = (key) => GAMES[String(key || '')] || null;
 
 // ----------------------------------------------------------------- the house
 /**
@@ -106,340 +106,90 @@ function escrow(db, spend, amount) {
   return tokenchain.appendBlock(db, [tx]);
 }
 
-// -------------------------------------------------------------- the games
-/**
- * A game plugin.
- *
- * create()      the opening state, as a plain object that survives JSON.
- * toMove()      which seat may act now, or null while nobody may.
- * act()         apply one action for one seat. Throws BadRequest if it is not allowed.
- *               Returns { state, note, result?, reason? }; a result ends the match.
- * view()        what one seat is allowed to see. Battleship needs this to be less than
- *               the whole state, which is why it exists at all.
- * canAct()      optional: who may act now, when that is not simply whose turn it is.
- *               Both players place their fleets at once, in any order.
- * clockRuns()   optional: whether the game clock is ticking. It does not tick while the
- *               players are still setting up.
- * resultOnTimeout()      who wins when a clock runs out.
- * resultOnSetupTimeout() optional: who wins when somebody never sets up at all. Without
- *               it, a player who walks away before the first move holds both stakes.
- */
-const GAMES = {
-  chess: {
-    key: 'chess',
-    name: 'Chess',
-    clockMs: 10 * 60 * 1000,
-    incrementMs: 5 * 1000,
+// ------------------------------------------------------------------- seats
+/** Everyone at the table, in seat order. */
+const seatsOf = (db, matchId) => db.all(
+  'SELECT * FROM match_seats WHERE match_id=? ORDER BY seat', matchId,
+);
 
-    create() {
-      // Who gets White is decided here and never revisited. Doing it at the first move
-      // would let a player learn their colour before committing their stake.
-      const hostIsWhite = crypto.randomInt(2) === 0;
-      const fen = chess.START_FEN;
-      return {
-        fen,
-        white: hostIsWhite ? 'host' : 'guest',
-        history: [chess.repetitionKey(chess.parseFen(fen))],
-        san: [],
-      };
-    },
-
-    toMove(state) {
-      const pos = chess.parseFen(state.fen);
-      return pos.turn === 'w' ? state.white : otherSeat(state.white);
-    },
-
-    act(state, seat, payload) {
-      let played;
-      try {
-        played = chess.move(state.fen, String(payload.move || ''), state.history);
-      } catch (e) {
-        // A move the rules forbid is the player's mistake, not the server's. Anything else
-        // is rethrown untouched, so a genuine fault still surfaces as a fault.
-        if (e.illegalMove) throw new U.BadRequest(e.message);
-        throw e;
-      }
-      const next = {
-        ...state,
-        fen: played.fen,
-        history: [...state.history, played.key],
-        san: [...state.san, played.san],
-      };
-      if (!played.status.over) return { state: next, note: played.san };
-      const result = played.status.result === '1/2-1/2'
-        ? 'draw'
-        : (played.status.result === '1-0' ? next.white : otherSeat(next.white));
-      return { state: next, note: played.san, result, reason: played.status.reason };
-    },
-
-    view(state) {
-      // Chess is a game of perfect information: both players may see everything, and the
-      // legal move list is a convenience, not a secret.
-      return {
-        fen: state.fen,
-        white: state.white,
-        san: state.san,
-        legal: chess.legalUci(state.fen),
-        check: chess.inCheck(chess.parseFen(state.fen)),
-      };
-    },
-
-    resultOnTimeout(state, seat) {
-      // A player who flags loses, unless the other side could not mate with what is left,
-      // in which case the game is drawn. That is the actual rule, and it matters here
-      // because a stake rides on it.
-      const board = chess.parseFen(state.fen).board;
-      const winnerWhite = otherSeat(seat) === state.white;
-      const kept = board.filter((p) => p !== null && (winnerWhite ? p === p.toUpperCase() : p === p.toLowerCase()));
-      const onlyKing = kept.length === 1;
-      const kingAndMinor = kept.length === 2 && kept.some((p) => 'nbNB'.includes(p));
-      return (onlyKing || kingAndMinor) ? 'draw' : otherSeat(seat);
-    },
-  },
-
-  balda: {
-    key: 'balda',
-    name: 'Balda',
-    clockMs: 10 * 60 * 1000,
-    incrementMs: 10 * 1000,
-
-    create(cfg) {
-      // The opening word is drawn from the dictionary, so every game starts differently
-      // and neither player can have prepared for this particular board.
-      const dictionary = wordsRu.loadWords(cfg && cfg.dataDir);
-      const five = wordsRu.wordsOfLength(dictionary, balda.SIZE);
-      if (!five.length) throw new Error('the dictionary has no five-letter word to open with');
-      const opening = five[crypto.randomInt(five.length)];
-      return {
-        grid: balda.startGrid(opening),
-        opening,
-        scores: { host: 0, guest: 0 },
-        used: [opening],
-        turn: crypto.randomInt(2) === 0 ? 'host' : 'guest',
-        passes: 0,
-        log: [],
-      };
-    },
-
-    toMove(state) {
-      return state.turn;
-    },
-
-    act(state, seat, payload, cfg) {
-      const dictionary = wordsRu.loadWords(cfg && cfg.dataDir);
-
-      // Passing is a move. Two in a row ends the game, which is what stops a player who
-      // has run out of ideas from simply sitting on a lead until the clock does it.
-      if (payload.pass) {
-        const passes = state.passes + 1;
-        const next = {
-          ...state,
-          passes,
-          turn: otherSeat(seat),
-          log: [...state.log, { seat, pass: true }],
-        };
-        if (passes >= 2) return { state: next, note: 'pass', ...finish(next) };
-        return { state: next, note: 'pass' };
-      }
-
-      const move = balda.play(state, dictionary, payload);
-      const scores = { ...state.scores, [seat]: state.scores[seat] + move.score };
-      const next = {
-        ...state,
-        grid: move.grid,
-        scores,
-        used: [...state.used, move.word],
-        turn: otherSeat(seat),
-        passes: 0,
-        log: [...state.log, { seat, word: move.word, score: move.score, path: move.path }],
-      };
-      if (balda.gridFull(next.grid)) return { state: next, note: move.word, ...finish(next) };
-      return { state: next, note: move.word };
-    },
-
-    view(state) {
-      // Nothing here is secret. Both players look at the same board, and the list of words
-      // already spent is part of it.
-      return {
-        size: balda.SIZE,
-        grid: state.grid,
-        scores: state.scores,
-        used: state.used,
-        opening: state.opening,
-        turn: state.turn,
-        playable: balda.playable(state.grid),
-        log: state.log.slice(-12),
-      };
-    },
-
-    resultOnTimeout(state, seat) {
-      return otherSeat(seat);
-    },
-  },
-
-  seabattle: {
-    key: 'seabattle',
-    name: 'Sea Battle',
-    clockMs: 8 * 60 * 1000,
-    incrementMs: 3 * 1000,
-
-    create() {
-      return {
-        phase: 'setup',
-        boards: { host: null, guest: null },
-        turn: crypto.randomInt(2) === 0 ? 'host' : 'guest',
-        log: [],
-      };
-    },
-
-    toMove(state) {
-      return state.phase === 'play' ? state.turn : null;
-    },
-
-    // During setup both players act, in either order, and neither waits for the other.
-    canAct(state, seat) {
-      if (state.phase === 'setup') return !state.boards[seat];
-      return state.turn === seat;
-    },
-
-    // Nobody should lose time they are not being given the chance to use. The clock
-    // starts when the shooting does.
-    clockRuns(state) {
-      return state.phase === 'play';
-    },
-
-    act(state, seat, payload) {
-      if (state.phase === 'setup') {
-        // Shooting is not an option yet, and saying so beats complaining about a fleet
-        // the player was not trying to send.
-        if (payload.fleet === undefined) {
-          throw new U.BadRequest('place your fleet before you shoot');
-        }
-        const fleet = seabattle.parseFleet(payload.fleet);
-        const boards = { ...state.boards, [seat]: seabattle.emptyBoard(fleet) };
-        const ready = !!boards.host && !!boards.guest;
-        return {
-          state: { ...state, boards, phase: ready ? 'play' : 'setup' },
-          note: 'fleet',
-        };
-      }
-
-      const target = otherSeat(seat);
-      const shot = seabattle.fire(state.boards[target], Number(payload.cell));
-      const boards = { ...state.boards, [target]: shot.board };
-      // A hit shoots again. That is the Russian rule, and it is what gives the game its
-      // shape: a good run can take a whole fleet apart without the other side moving.
-      const turn = shot.outcome === 'miss' ? target : seat;
-      const next = {
-        ...state,
-        boards,
-        turn,
-        log: [...state.log, { seat, cell: Number(payload.cell), outcome: shot.outcome }],
-      };
-      if (seabattle.afloat(shot.board) === 0) {
-        return { state: next, note: shot.outcome, result: seat, reason: 'fleet-sunk' };
-      }
-      return { state: next, note: shot.outcome };
-    },
-
-    view(state, seat) {
-      const mine = seat ? state.boards[seat] : null;
-      const theirSeat = seat ? otherSeat(seat) : null;
-      const theirs = theirSeat ? state.boards[theirSeat] : null;
-      return {
-        phase: state.phase,
-        turn: state.turn,
-        size: seabattle.SIZE,
-        fleet: seabattle.FLEET,
-        placed: { host: !!state.boards.host, guest: !!state.boards.guest },
-        // Own board in full; the opponent's only as far as it has been shot at. Ships
-        // nobody has found are not in this response at all, so there is nothing for a
-        // modified client to read ahead.
-        own: mine ? seabattle.boardView(mine, true) : null,
-        theirs: theirs ? seabattle.boardView(theirs, false) : null,
-        log: state.log.slice(-12),
-      };
-    },
-
-    resultOnTimeout(state, seat) {
-      return otherSeat(seat);
-    },
-
-    // Whoever did set up wins. If neither did, nobody has won anything and the stakes go
-    // back untouched.
-    resultOnSetupTimeout(state) {
-      const host = !!state.boards.host;
-      const guest = !!state.boards.guest;
-      if (host === guest) return null;
-      return host ? 'host' : 'guest';
-    },
-  },
-};
-
-/** Who won a finished Балда game. Written once and used by both endings. */
-function finish(state) {
-  const { host, guest } = state.scores;
-  if (host === guest) return { result: 'draw', reason: 'tied' };
-  return { result: host > guest ? 'host' : 'guest', reason: 'higher-score' };
+/** Which seat a user occupies, or null. */
+function seatOf(db, matchId, user) {
+  if (!user) return null;
+  const row = db.get('SELECT seat FROM match_seats WHERE match_id=? AND user_id=?',
+    matchId, user.id);
+  return row ? row.seat : null;
 }
-
-const gameFor = (key) => GAMES[String(key || '')] || null;
 
 // ------------------------------------------------------------------ clocks
 /**
- * Charge the mover for the time they took, and say whether they have run out.
+ * Charge a seat for the time it took, and say whether it has run out.
  * The clock is read from the database rather than from anything the client sends, because
  * a clock a player can edit is not a clock.
  */
-function chargeClock(match, seat) {
+function chargeClock(db, match, seat) {
+  const row = db.get('SELECT ms FROM match_seats WHERE match_id=? AND seat=?', match.id, seat);
   const elapsed = match.moved_at_ms ? nowMs() - match.moved_at_ms : 0;
-  const column = seat === 'host' ? 'host_ms' : 'guest_ms';
-  const left = match[column] - elapsed;
-  return { column, left, flagged: left <= 0 };
+  const left = (row ? row.ms : 0) - elapsed;
+  return { left, flagged: left <= 0 };
+}
+
+function clockNow(db, match, seat, state) {
+  const row = db.get('SELECT ms FROM match_seats WHERE match_id=? AND seat=?', match.id, seat);
+  const raw = row ? row.ms : 0;
+  if (match.status !== 'playing' || !state) return raw;
+  const plugin = gameFor(match.game);
+  const ticking = plugin.clockRuns ? plugin.clockRuns(state) : true;
+  if (!ticking || plugin.toMove(state) !== seat) return raw;
+  return Math.max(0, raw - (nowMs() - match.moved_at_ms));
 }
 
 // -------------------------------------------------------------- settlement
 /**
  * Pay out and close the match.
  *
- * The rake comes off the pot once. On a decisive result the winner takes what is left; on
- * a draw it is split, and a single indivisible unit stays with the house rather than being
- * invented out of nothing to make the halves even.
+ * `winners` is a list of seats. One of them is a win, all of them is a draw, and anything
+ * between is what a table game produces: in Дурак everyone except the fool has won.
+ *
+ * The rake comes off the pot once. What is left is split between the winners, and any
+ * indivisible remainder stays with the house rather than being invented out of nothing to
+ * make the shares even.
  */
-function settle(db, cfg, match, result, reason) {
-  const pot = match.stake * 2;
+function settle(db, cfg, match, winners, reason) {
+  const seats = seatsOf(db, match.id);
+  const pot = match.stake * seats.length;
   const rake = Math.floor(pot * cfg.match.rake);
   const prize = pot - rake;
 
+  const list = [...new Set(winners || [])].filter((s) => seats.some((x) => x.seat === s));
+  const each = list.length ? Math.floor(prize / list.length) : 0;
+
   const txs = [];
-  if (result === 'draw') {
-    const each = Math.floor(prize / 2);
-    if (each > 0) {
-      txs.push(houseTransfer(db, match.host_key, each));
-      txs.push(houseTransfer(db, match.guest_key, each));
+  if (each > 0) {
+    for (const seat of list) {
+      txs.push(houseTransfer(db, seats.find((x) => x.seat === seat).pubkey, each));
     }
-  } else {
-    const winner = result === 'host' ? match.host_key : match.guest_key;
-    if (prize > 0) txs.push(houseTransfer(db, winner, prize));
   }
   if (txs.length) tokenchain.appendBlock(db, txs);
 
+  // Whatever the winners did not take is what the house kept, which is the rake plus any
+  // indivisible remainder. Recording the real figure beats recording the intended one.
+  const kept = pot - each * list.length;
   db.run(
-    `UPDATE matches SET status='done', result=?, reason=?, rake=?, ended_at=? WHERE id=?`,
-    result, reason, rake, now(), match.id,
+    "UPDATE matches SET status='done', result=?, reason=?, rake=?, ended_at=? WHERE id=?",
+    JSON.stringify(list), reason, kept, now(), match.id,
   );
   db.audit('system', 'match.settled', {
-    match: match.id, game: match.game, result, reason, pot, rake,
+    match: match.id, game: match.game, winners: list, reason, pot, rake: kept,
   });
-  return { result, reason, pot, rake, prize };
+  return { winners: list, reason, pot, rake: kept, each };
 }
 
-/** Give both stakes back untouched. Used when a match is abandoned before it starts. */
+/** Give every stake back untouched. Used when a match is abandoned before it matters. */
 function refund(db, match, reason) {
-  const txs = [houseTransfer(db, match.host_key, match.stake)];
-  if (match.guest_key) txs.push(houseTransfer(db, match.guest_key, match.stake));
-  tokenchain.appendBlock(db, txs);
-  db.run(`UPDATE matches SET status='cancelled', reason=?, ended_at=? WHERE id=?`,
+  const seats = seatsOf(db, match.id);
+  const txs = seats.map((s) => houseTransfer(db, s.pubkey, match.stake));
+  if (txs.length) tokenchain.appendBlock(db, txs);
+  db.run("UPDATE matches SET status='cancelled', reason=?, ended_at=? WHERE id=?",
     reason, now(), match.id);
   return { cancelled: true, reason };
 }
@@ -457,17 +207,40 @@ function checkStake(cfg, stake) {
   const value = Number(stake);
   if (!Number.isSafeInteger(value)) throw new U.BadRequest('bad stake');
   if (value < cfg.match.minStake || value > cfg.match.maxStake) {
-    throw new U.BadRequest(`stake must be between ${cfg.match.minStake} and ${cfg.match.maxStake}`);
+    throw new U.BadRequest(
+      `stake must be between ${U.formatAmount(cfg.match.minStake)}`
+      + ` and ${U.formatAmount(cfg.match.maxStake)}`,
+    );
   }
   return value;
 }
 
-/** Open a challenge. The host's stake goes into escrow immediately. */
-function create(db, cfg, user, { game, stake, spend }) {
+/** How many seats this table wants, within what the game allows. */
+function checkSeats(plugin, wanted) {
+  const n = Number(wanted ?? plugin.seats.default);
+  if (!Number.isSafeInteger(n) || n < plugin.seats.min || n > plugin.seats.max) {
+    throw new U.BadRequest(
+      `${plugin.name} is for ${plugin.seats.min} to ${plugin.seats.max} players`,
+    );
+  }
+  return n;
+}
+
+function sit(db, matchId, seat, user, pubkey, ms) {
+  db.run(
+    `INSERT INTO match_seats(match_id, seat, user_id, pubkey, ms, joined_at)
+     VALUES(?,?,?,?,?,?)`,
+    matchId, seat, user.id, pubkey, ms, now(),
+  );
+}
+
+/** Open a table. The host's stake goes into escrow immediately. */
+function create(db, cfg, user, { game, stake, spend, seats }) {
   const plugin = gameFor(game);
   if (!plugin) throw new U.BadRequest('no such game');
   const key = requireToken(db, cfg, user);
   const amount = checkStake(cfg, stake);
+  const wanted = checkSeats(plugin, seats);
   if (String(spend.from || '').toLowerCase() !== key.pubkey) {
     throw new U.Forbidden('that key is not registered to this account');
   }
@@ -481,15 +254,17 @@ function create(db, cfg, user, { game, stake, spend }) {
     }
     escrow(db, spend, amount);
     const info = db.run(
-      `INSERT INTO matches(game, status, stake, rake, host_id, host_key, state, created_at)
+      `INSERT INTO matches(game, status, stake, rake, seats, host_id, state, created_at)
        VALUES(?,'open',?,0,?,?,?,?)`,
-      plugin.key, amount, user.id, key.pubkey, JSON.stringify(null), now(),
+      plugin.key, amount, wanted, user.id, JSON.stringify(null), now(),
     );
-    return { id: Number(info.lastInsertRowid), game: plugin.key, stake: amount };
+    const id = Number(info.lastInsertRowid);
+    sit(db, id, 0, user, key.pubkey, plugin.clockMs);
+    return { id, game: plugin.key, stake: amount, seats: wanted };
   });
 }
 
-/** Take up a challenge. Both stakes are now held, and the clocks start. */
+/** Take a seat. The table starts when the last one is filled. */
 function join(db, cfg, user, { id, spend }) {
   const key = requireToken(db, cfg, user);
   return db.tx(() => {
@@ -497,24 +272,35 @@ function join(db, cfg, user, { id, spend }) {
     if (!match) throw new U.NotFound('no such match');
     if (match.status !== 'open') throw new U.BadRequest('that match is no longer open');
     if (match.host_id === user.id) throw new U.BadRequest('you cannot join your own challenge');
+    if (seatOf(db, match.id, user) !== null) {
+      throw new U.BadRequest('you are already at that table');
+    }
     if (String(spend.from || '').toLowerCase() !== key.pubkey) {
       throw new U.Forbidden('that key is not registered to this account');
     }
-    escrow(db, spend, match.stake);
 
     const plugin = gameFor(match.game);
-    const state = plugin.create(cfg);
+    const taken = seatsOf(db, match.id);
+    if (taken.length >= match.seats) throw new U.BadRequest('that table is full');
+
+    escrow(db, spend, match.stake);
+    sit(db, match.id, taken.length, user, key.pubkey, plugin.clockMs);
+
+    const filled = taken.length + 1;
+    if (filled < match.seats) {
+      return { id: match.id, game: match.game, seated: filled, of: match.seats };
+    }
+
+    const state = plugin.create(cfg, match.seats);
     db.run(
-      `UPDATE matches SET status='playing', guest_id=?, guest_key=?, state=?,
-              started_at=?, moved_at_ms=?, host_ms=?, guest_ms=? WHERE id=?`,
-      user.id, key.pubkey, JSON.stringify(state), now(), nowMs(),
-      plugin.clockMs, plugin.clockMs, match.id,
+      "UPDATE matches SET status='playing', state=?, started_at=?, moved_at_ms=? WHERE id=?",
+      JSON.stringify(state), now(), nowMs(), match.id,
     );
-    return { id: match.id, game: match.game };
+    return { id: match.id, game: match.game, seated: filled, of: match.seats, started: true };
   });
 }
 
-/** Withdraw an unanswered challenge and take the stake back. */
+/** Withdraw a table that has not started. Everyone seated gets their stake back. */
 function cancel(db, user, id) {
   return db.tx(() => {
     const match = db.get('SELECT * FROM matches WHERE id=?', Number(id));
@@ -525,20 +311,14 @@ function cancel(db, user, id) {
   });
 }
 
-const seatOf = (match, user) => {
-  if (match.host_id === user.id) return 'host';
-  if (match.guest_id === user.id) return 'guest';
-  return null;
-};
-
 /** Play one move. */
 function act(db, cfg, user, { id, ...payload }) {
   return db.tx(() => {
     const match = db.get('SELECT * FROM matches WHERE id=?', Number(id));
     if (!match) throw new U.NotFound('no such match');
     if (match.status !== 'playing') throw new U.BadRequest('that match is not in play');
-    const seat = seatOf(match, user);
-    if (!seat) throw new U.Forbidden('you are not in that match');
+    const seat = seatOf(db, match.id, user);
+    if (seat === null) throw new U.Forbidden('you are not in that match');
 
     const plugin = gameFor(match.game);
     const state = JSON.parse(match.state);
@@ -548,10 +328,10 @@ function act(db, cfg, user, { id, ...payload }) {
     // The clock is charged before the move is applied, so a move sent after the flag has
     // fallen cannot save the player who sent it. It does not run during setup.
     const ticking = plugin.clockRuns ? plugin.clockRuns(state) : true;
-    const clock = ticking ? chargeClock(match, seat) : null;
+    const clock = ticking ? chargeClock(db, match, seat) : null;
     if (clock && clock.flagged) {
-      const result = plugin.resultOnTimeout(state, seat);
-      return { ...settle(db, cfg, match, result, 'timeout'), flagged: seat };
+      const winners = plugin.resultOnTimeout(state, seat, match.seats);
+      return { ...settle(db, cfg, match, winners, 'timeout'), flagged: seat };
     }
 
     const outcome = plugin.act(state, seat, payload, cfg);
@@ -562,41 +342,58 @@ function act(db, cfg, user, { id, ...payload }) {
       match.id, seat, ply, JSON.stringify(payload), outcome.note || null, now(),
     );
     if (clock) {
-      db.run(
-        `UPDATE matches SET state=?, ${clock.column}=?, moved_at_ms=? WHERE id=?`,
-        JSON.stringify(outcome.state), clock.left + plugin.incrementMs, nowMs(), match.id,
-      );
-    } else {
-      // Setup spends nobody's clock, but the clock must start from the moment play does,
-      // or the first mover is charged for however long the other side took to set up.
-      db.run('UPDATE matches SET state=?, moved_at_ms=? WHERE id=?',
-        JSON.stringify(outcome.state), nowMs(), match.id);
+      db.run('UPDATE match_seats SET ms=? WHERE match_id=? AND seat=?',
+        clock.left + plugin.incrementMs, match.id, seat);
     }
+    // The clock always restarts here. During setup nobody is charged, but play must not
+    // begin with one seat already owing however long the setting-up took.
+    db.run('UPDATE matches SET state=?, moved_at_ms=? WHERE id=?',
+      JSON.stringify(outcome.state), nowMs(), match.id);
 
-    if (outcome.result) {
+    if (outcome.winners) {
       const fresh = db.get('SELECT * FROM matches WHERE id=?', match.id);
-      return settle(db, cfg, fresh, outcome.result, outcome.reason || 'result');
+      return settle(db, cfg, fresh, outcome.winners, outcome.reason || 'result');
     }
     return { ok: true, note: outcome.note };
   });
 }
 
-/** Give up. */
+/**
+ * Give up.
+ *
+ * At a table of more than two this folds you rather than handing the pot to one opponent,
+ * when the game knows how to carry on without you. Otherwise everyone else has won.
+ */
 function resign(db, cfg, user, id) {
   return db.tx(() => {
     const match = db.get('SELECT * FROM matches WHERE id=?', Number(id));
     if (!match) throw new U.NotFound('no such match');
     if (match.status !== 'playing') throw new U.BadRequest('that match is not in play');
-    const seat = seatOf(match, user);
-    if (!seat) throw new U.Forbidden('you are not in that match');
-    return settle(db, cfg, match, otherSeat(seat), 'resignation');
+    const seat = seatOf(db, match.id, user);
+    if (seat === null) throw new U.Forbidden('you are not in that match');
+
+    const plugin = gameFor(match.game);
+    if (plugin.onQuit) {
+      const state = JSON.parse(match.state);
+      const outcome = plugin.onQuit(state, seat, match.seats);
+      if (!outcome.winners) {
+        db.run('UPDATE matches SET state=?, moved_at_ms=? WHERE id=?',
+          JSON.stringify(outcome.state), nowMs(), match.id);
+        return { ok: true, folded: seat };
+      }
+      return settle(db, cfg, match, outcome.winners, outcome.reason || 'resignation');
+    }
+
+    const everyoneElse = [];
+    for (let s = 0; s < match.seats; s += 1) if (s !== seat) everyoneElse.push(s);
+    return settle(db, cfg, match, everyoneElse, 'resignation');
   });
 }
 
 /**
- * Claim the win when the other side's clock has run out.
+ * Claim the win when somebody's clock has run out.
  *
- * Anyone in the match may call it, and it is checked against the stored clock rather than
+ * Anyone at the table may call it, and it is checked against the stored clock rather than
  * taken on trust, so calling it early simply fails.
  */
 function claimTimeout(db, cfg, user, id) {
@@ -604,7 +401,7 @@ function claimTimeout(db, cfg, user, id) {
     const match = db.get('SELECT * FROM matches WHERE id=?', Number(id));
     if (!match) throw new U.NotFound('no such match');
     if (match.status !== 'playing') throw new U.BadRequest('that match is not in play');
-    if (!seatOf(match, user)) throw new U.Forbidden('you are not in that match');
+    if (seatOf(db, match.id, user) === null) throw new U.Forbidden('you are not in that match');
     const plugin = gameFor(match.game);
     const state = JSON.parse(match.state);
 
@@ -613,42 +410,37 @@ function claimTimeout(db, cfg, user, id) {
       if (now() - match.started_at < cfg.match.setupSeconds) {
         throw new U.BadRequest('they still have time to set up');
       }
-      const result = plugin.resultOnSetupTimeout ? plugin.resultOnSetupTimeout(state) : null;
-      // Neither of them turned up. Nobody won anything, so nobody is charged for it.
-      if (!result) return refund(db, match, 'abandoned');
-      return settle(db, cfg, match, result, 'no-setup');
+      const winners = plugin.resultOnSetupTimeout
+        ? plugin.resultOnSetupTimeout(state, match.seats) : null;
+      // Nobody turned up. Nobody won anything, so nobody is charged for it.
+      if (!winners || !winners.length) return refund(db, match, 'abandoned');
+      return settle(db, cfg, match, winners, 'no-setup');
     }
 
     const waiting = plugin.toMove(state);
-    const clock = chargeClock(match, waiting);
+    if (waiting === null) throw new U.BadRequest('nobody is on the clock');
+    const clock = chargeClock(db, match, waiting);
     if (!clock.flagged) throw new U.BadRequest('their clock has not run out');
-    return settle(db, cfg, match, plugin.resultOnTimeout(state, waiting), 'timeout');
+    return settle(db, cfg, match, plugin.resultOnTimeout(state, waiting, match.seats), 'timeout');
   });
 }
 
 // -------------------------------------------------------------------- views
-const clockNow = (match, seat) => {
-  if (match.status !== 'playing') return match[seat === 'host' ? 'host_ms' : 'guest_ms'];
-  const plugin = gameFor(match.game);
-  const state = JSON.parse(match.state);
-  const raw = match[seat === 'host' ? 'host_ms' : 'guest_ms'];
-  const ticking = plugin.clockRuns ? plugin.clockRuns(state) : true;
-  if (!ticking || plugin.toMove(state) !== seat) return raw;
-  return Math.max(0, raw - (nowMs() - match.moved_at_ms));
-};
-
 function summary(db, match) {
-  const host = db.get('SELECT username FROM users WHERE id=?', match.host_id);
-  const guest = match.guest_id
-    ? db.get('SELECT username FROM users WHERE id=?', match.guest_id) : null;
+  const seats = seatsOf(db, match.id);
+  const players = seats.map((s) => {
+    const u = db.get('SELECT username FROM users WHERE id=?', s.user_id);
+    return { seat: s.seat, name: u ? u.username : '?' };
+  });
   return {
     id: match.id,
     game: match.game,
     status: match.status,
     stake: match.stake,
-    host: host ? host.username : '?',
-    guest: guest ? guest.username : null,
-    result: match.result,
+    seats: match.seats,
+    players,
+    host: players.length ? players[0].name : '?',
+    winners: match.result ? JSON.parse(match.result) : null,
     reason: match.reason,
     createdAt: match.created_at,
   };
@@ -659,29 +451,32 @@ function detail(db, cfg, user, id) {
   const match = db.get('SELECT * FROM matches WHERE id=?', Number(id));
   if (!match) throw new U.NotFound('no such match');
   const plugin = gameFor(match.game);
-  const seat = user ? seatOf(match, user) : null;
-  const state = match.state ? JSON.parse(match.state) : null;
+  const seat = seatOf(db, match.id, user);
+  const state = match.state && match.state !== 'null' ? JSON.parse(match.state) : null;
+  const seats = seatsOf(db, match.id);
   return {
     ...summary(db, match),
     seat,
     toMove: state ? plugin.toMove(state) : null,
-    view: state ? plugin.view(state, seat) : null,
-    clock: { host: clockNow(match, 'host'), guest: clockNow(match, 'guest') },
+    view: state ? plugin.view(state, seat, match.seats) : null,
+    clock: seats.map((s) => clockNow(db, match, s.seat, state)),
     moves: db.all(
-      'SELECT seat, ply, note, created_at FROM match_moves WHERE match_id=? ORDER BY ply', match.id,
+      'SELECT seat, ply, note, created_at FROM match_moves WHERE match_id=? ORDER BY ply',
+      match.id,
     ),
   };
 }
 
-/** The lobby: open challenges, plus whatever the caller is already playing. */
+/** The lobby: open tables, plus whatever the caller is already playing. */
 function lobby(db, cfg, user) {
   const open = db.all(
-    `SELECT * FROM matches WHERE status='open' ORDER BY created_at DESC LIMIT 50`,
+    "SELECT * FROM matches WHERE status='open' ORDER BY created_at DESC LIMIT 50",
   );
   const mine = user
     ? db.all(
-      `SELECT * FROM matches WHERE (host_id=? OR guest_id=?) AND status IN ('open','playing')
-       ORDER BY created_at DESC LIMIT 50`, user.id, user.id,
+      `SELECT m.* FROM matches m JOIN match_seats s ON s.match_id = m.id
+        WHERE s.user_id = ? AND m.status IN ('open','playing')
+        ORDER BY m.created_at DESC LIMIT 50`, user.id,
     )
     : [];
   const key = user ? tokenchain.keyFor(db, user.id) : null;
@@ -695,17 +490,19 @@ function lobby(db, cfg, user) {
     pubkey: key ? key.pubkey : null,
     balance: key ? tokenchain.balanceOf(db, key.pubkey) : 0,
     nextNonce: key ? tokenchain.nextNonce(db, key.pubkey) : 0,
-    games: Object.values(GAMES).map((g) => ({ key: g.key, name: g.name, clockMs: g.clockMs })),
+    games: Object.values(GAMES).map((g) => ({
+      key: g.key, name: g.name, clockMs: g.clockMs, seats: g.seats,
+    })),
     open: open.map((m) => summary(db, m)),
     mine: mine.map((m) => summary(db, m)),
   };
 }
 
-/** Operator view: what the matches are actually earning. */
+/** Operator view: what the tables are actually earning. */
 function stats(db) {
   const rows = db.all(
     `SELECT game, COUNT(*) AS played, COALESCE(SUM(rake),0) AS rake,
-            COALESCE(SUM(stake*2),0) AS wagered
+            COALESCE(SUM(stake * seats),0) AS wagered
        FROM matches WHERE status='done' GROUP BY game ORDER BY played DESC`,
   );
   return {
@@ -719,5 +516,5 @@ function stats(db) {
 module.exports = {
   GAMES, gameFor, houseKey, houseTransfer, escrow,
   create, join, cancel, act, resign, claimTimeout,
-  lobby, detail, summary, settle, refund, stats, seatOf, otherSeat,
+  lobby, detail, summary, settle, refund, stats, seatOf, seatsOf,
 };

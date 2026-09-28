@@ -2614,42 +2614,64 @@ async function renderMatch() {
 function paintLobby() {
   const info = state.matchLobby;
   const stake = el('input', {
-    class: 'mono', inputmode: 'numeric', value: String(info.minStake),
+    class: 'mono', inputmode: 'decimal', value: fmt(info.minStake, 2),
   });
   const game = el('select', {}, ...info.games.map((g) => el('option', { value: g.key }, g.name)));
+  const seatCount = el('select', {});
+  const paintSeats = () => {
+    const chosen = info.games.find((g) => g.key === game.value) || info.games[0];
+    const options = [];
+    for (let n = chosen.seats.min; n <= chosen.seats.max; n += 1) {
+      options.push(el('option', { value: String(n) }, t('match.nPlayers', { n })));
+    }
+    setKids(seatCount, ...options);
+    seatCount.value = String(chosen.seats.default);
+    // A game that takes exactly two has nothing to choose, so the control goes away.
+    seatCount.parentElement?.classList.toggle('hide', chosen.seats.min === chosen.seats.max);
+  };
+  game.addEventListener('change', paintSeats);
 
   setKids($('#betPanel'),
     el('div', { class: 'stat-card' },
       el('div', { class: 'k' }, t('arc.balance')),
-      el('div', { class: 'v pos' }, `${info.balance} ${info.symbol}`)),
+      el('div', { class: 'v pos' }, `${fmt(info.balance)} ${info.symbol}`)),
     el('label', { class: 'field' }, el('span', {}, t('match.game')), game),
+    el('label', { class: 'field' }, el('span', {}, t('match.players')), seatCount),
     el('label', { class: 'field' }, el('span', {}, t('match.stake')), stake),
     el('div', { class: 'stat-row' },
       el('span', { class: 'k' }, t('match.rake')),
       el('span', { class: 'v' }, `${(info.rake * 100).toFixed(1)}%`)),
     el('div', { class: 'stat-row' },
       el('span', { class: 'k' }, t('match.youWin')),
-      el('span', { class: 'v pos' }, String(winnings(Number(stake.value) || 0, info.rake)))),
+      el('span', { class: 'v pos' }, fmt(winnings(stake.value, info.rake)))),
     el('button', {
       class: 'primary big', style: 'margin-top:10px',
-      onclick: () => createChallenge(game.value, Number(stake.value)),
+      onclick: () => createChallenge(game.value, stake.value, Number(seatCount.value)),
     }, t('match.challenge')),
     el('p', { class: 'hint' }, t('match.intro')),
     !info.pubkey
       ? el('button', { class: 'big', style: 'margin-top:8px', onclick: tokenModal }, t('tok.nav'))
       : null);
 
-  stake.oninput = () => {
+  const repaintPrize = () => {
     const out = $('#betPanel').querySelectorAll('.stat-row .v')[1];
-    if (out) out.textContent = String(winnings(Number(stake.value) || 0, info.rake));
+    if (out) {
+      out.textContent = fmt(winnings(stake.value, info.rake, Number(seatCount.value) || 2));
+    }
   };
+  stake.oninput = repaintPrize;
+  seatCount.addEventListener('change', repaintPrize);
+  paintSeats();
+  repaintPrize();
   applyAll($('#betPanel'));
 
   const row = (m, mine) => el('div', { class: 'challenge' },
     el('div', {},
       el('strong', {}, t(`match.g.${m.game}`)),
-      el('span', { class: 'hint' }, ` ${m.host}${m.guest ? ` vs ${m.guest}` : ''}`)),
-    el('div', { class: 'v' }, `${m.stake} ${state.matchLobby.symbol}`),
+      el('span', { class: 'hint' },
+        ` ${m.players.map((p) => p.name).join(', ')}`
+        + `${m.seats > m.players.length ? `  ${m.players.length}/${m.seats}` : ''}`)),
+    el('div', { class: 'v' }, `${fmt(m.stake)} ${state.matchLobby.symbol}`),
     mine && m.status === 'open'
       ? el('button', { class: 'tiny', onclick: () => cancelChallenge(m.id) }, t('match.cancel'))
       : null,
@@ -2676,9 +2698,13 @@ function paintLobby() {
   infoPanel();
 }
 
-/** What the winner actually takes home, after the house cut. */
-const winnings = (stake, rake) => {
-  const pot = stake * 2;
+/**
+ * What a single winner takes home, after the house cut.
+ * The pot is the stake times the number of seats, not times two: a six-handed table is
+ * six stakes.
+ */
+const winnings = (stake, rake, seats = 2) => {
+  const pot = Math.round(Number(stake || 0) * UNIT) * seats;
   return pot - Math.floor(pot * rake);
 };
 
@@ -2706,12 +2732,16 @@ async function signStake(amount) {
   return { from: tx.from, nonce: tx.nonce, sig };
 }
 
-async function createChallenge(game, stake) {
+async function createChallenge(game, stakeText, seats) {
   if (!requireLogin()) return;
   try {
-    const spend = await signStake(stake);
+    const units = Math.round(Number(stakeText) * UNIT);
+    if (!Number.isSafeInteger(units) || units <= 0) throw new Error(t('err.amount'));
+    const spend = await signStake(units);
     if (!spend) return;
-    await api('/api/match/create', { method: 'POST', body: { game, stake, spend } });
+    await api('/api/match/create', {
+      method: 'POST', body: { game, stake: units, seats, spend },
+    });
     audio.sfx('click');
     renderMatch();
   } catch (e) { toast(e.message, 'bad'); }
@@ -2722,9 +2752,12 @@ async function joinChallenge(m) {
   try {
     const spend = await signStake(m.stake);
     if (!spend) return;
-    await api('/api/match/join', { method: 'POST', body: { id: m.id, spend } });
+    const out = await api('/api/match/join', { method: 'POST', body: { id: m.id, spend } });
     audio.sfx('click');
-    openMatch(m.id);
+    // A table that still has empty seats stays in the lobby rather than opening a board
+    // nobody can play on yet.
+    if (out.started) openMatch(m.id);
+    else { toast(t('match.seated', { n: out.seated, of: out.of })); renderMatch(); }
   } catch (e) { toast(e.message, 'bad'); }
 }
 
@@ -2772,6 +2805,7 @@ async function buildMatchScreen(view) {
   state.board = mod.board(host, {
     view: view.view,
     seat: view.seat,
+    seats: view.seats,
     myTurn: view.status === 'playing' && !!view.seat && view.toMove === view.seat,
     lang: getLocale(),
     onAct: (action) => sendAction(action),
@@ -2786,40 +2820,45 @@ const clockText = (ms) => {
 
 function paintMatch(view) {
   state.matchView = view;
-  const mine = view.seat;
-  const top = mine === 'guest' ? 'host' : 'guest';
-  const bottom = mine === 'guest' ? 'guest' : 'host';
-  const nameOf = (seat) => (seat === 'host' ? view.host : view.guest) || '?';
+  // Your own seat at the bottom, everyone else above, in seat order from your left.
+  const mine = view.seat ?? 0;
+  const order = [];
+  for (let i = 1; i < view.seats; i += 1) order.push((mine + i) % view.seats);
+  const nameOf = (seat) => view.players.find((p) => p.seat === seat)?.name || '?';
+  const live = (seat) => (view.toMove === seat && view.status === 'playing' ? ' •' : '');
 
-  const label = (seat) => `${nameOf(seat)}${view.toMove === seat && view.status === 'playing' ? ' •' : ''}`;
-  $('#mTop').textContent = label(top);
-  $('#mBottom').textContent = label(bottom);
-  $('#mTopClock').textContent = clockText(view.clock[top]);
-  $('#mBottomClock').textContent = clockText(view.clock[bottom]);
+  $('#mTop').textContent = order.map((s) => `${nameOf(s)}${live(s)}`).join('   ');
+  $('#mBottom').textContent = `${nameOf(mine)}${live(mine)}`;
+  $('#mTopClock').textContent = order.map((s) => clockText(view.clock[s])).join('   ');
+  $('#mBottomClock').textContent = clockText(view.clock[mine]);
 
   // Setting up is not "your turn", but it is something you may do, so the board is told
   // to accept input for it too. Морской бой needs this; chess never hits the second case.
-  const canAct = view.status === 'playing' && !!mine
-    && (view.toMove === mine || (view.view.phase === 'setup' && !view.view.placed?.[mine]));
-  if (state.board) state.board.update({ view: view.view, seat: mine, myTurn: canAct });
+  const seated = view.seat !== null && view.seat !== undefined;
+  const canAct = view.status === 'playing' && seated
+    && (view.toMove === view.seat
+      || (view.view.phase === 'setup' && !view.view.placed?.[view.seat]));
+  if (state.board) {
+    state.board.update({ view: view.view, seat: view.seat, seats: view.seats, myTurn: canAct });
+  }
 
   setKids($('#betPanel'),
     el('div', { class: 'stat-card' },
       el('div', { class: 'k' }, t('match.stake')),
-      el('div', { class: 'v' }, `${view.stake} ${state.matchLobby?.symbol || ''}`)),
+      el('div', { class: 'v' }, `${fmt(view.stake)} ${state.matchLobby?.symbol || ''}`)),
     el('div', { class: 'stat-row' },
       el('span', { class: 'k' }, t('match.status')),
       el('span', { class: 'v' }, matchStatusText(view))),
     view.game === 'chess'
       ? el('div', { class: 'movelist' }, ...pairMoves(view.view.san || []))
       : el('div', { class: 'movelist' }, ...eventLog(view)),
-    view.status === 'playing' && mine
+    view.status === 'playing' && seated
       ? el('button', {
         class: 'big', style: 'margin-top:10px',
         onclick: () => confirmResign(view.id),
       }, t('match.resign'))
       : null,
-    view.status === 'playing' && mine
+    view.status === 'playing' && seated
       ? el('button', {
         class: 'tiny', style: 'margin-top:6px',
         onclick: () => claimFlag(view.id),
@@ -2852,8 +2891,12 @@ function matchStatusText(view) {
   if (view.status === 'playing') {
     return view.toMove === view.seat ? t('match.yourMove') : t('match.theirMove');
   }
-  const mine = view.seat;
-  const outcome = view.result === 'draw' ? 'draw' : (view.result === mine ? 'won' : 'lost');
+  const winners = view.winners || [];
+  // Everyone winning is a draw. Some of them winning is what a table game produces, and
+  // from your own seat the only question is whether you are on the list.
+  const outcome = winners.length >= view.seats
+    ? 'draw'
+    : (winners.includes(view.seat) ? 'won' : 'lost');
   return `${t(`match.${outcome}`)} — ${t(`match.why.${view.reason}`, {}) || view.reason}`;
 }
 

@@ -234,7 +234,7 @@ test('both sides place their fleets before anyone shoots', (t) => {
   const before = match.detail(db, cfg, users.alice, id);
   assert.strictEqual(before.view.phase, 'setup');
   assert.strictEqual(before.toMove, null, 'nobody has the move during setup');
-  assert.deepStrictEqual(before.view.placed, { host: false, guest: false });
+  assert.deepStrictEqual(before.view.placed, [false, false]);
 
   // Shooting before the fleets are down is not a move anyone may make.
   assert.throws(() => match.act(db, cfg, users.alice, { id, cell: 0 }), /place your fleet/);
@@ -242,14 +242,14 @@ test('both sides place their fleets before anyone shoots', (t) => {
   match.act(db, cfg, users.alice, { id, fleet: GOOD_FLEET });
   const half = match.detail(db, cfg, users.alice, id);
   assert.strictEqual(half.view.phase, 'setup');
-  assert.deepStrictEqual(half.view.placed, { host: true, guest: false });
+  assert.deepStrictEqual(half.view.placed, [true, false]);
   // And you cannot place twice to overwrite what you already committed to.
   assert.throws(() => match.act(db, cfg, users.alice, { id, fleet: OTHER_FLEET }), /not your turn/);
 
   match.act(db, cfg, users.bob, { id, fleet: OTHER_FLEET });
   const ready = match.detail(db, cfg, users.alice, id);
   assert.strictEqual(ready.view.phase, 'play');
-  assert.ok(['host', 'guest'].includes(ready.toMove));
+  assert.ok([0, 1].includes(ready.toMove));
 });
 
 test('an illegal fleet is refused by the server, and the phase does not advance', (t) => {
@@ -261,7 +261,7 @@ test('an illegal fleet is refused by the server, and the phase does not advance'
   assert.throws(() => match.act(db, cfg, users.alice, { id, fleet: touching }), /may not touch/);
   assert.throws(() => match.act(db, cfg, users.alice, { id, fleet: [] }), /is 10 ships/);
   assert.deepStrictEqual(
-    match.detail(db, cfg, users.alice, id).view.placed, { host: false, guest: false },
+    match.detail(db, cfg, users.alice, id).view.placed, [false, false],
   );
 });
 
@@ -272,10 +272,10 @@ test('a hit keeps the turn and a miss gives it away', (t) => {
   match.act(db, cfg, users.alice, { id, fleet: GOOD_FLEET });
   match.act(db, cfg, users.bob, { id, fleet: OTHER_FLEET });
 
-  const players = { host: users.alice, guest: users.bob };
+  const players = [users.alice, users.bob];
   const view = match.detail(db, cfg, users.alice, id);
   const shooter = players[view.toMove];
-  const targetFleet = view.toMove === 'host' ? OTHER_FLEET : GOOD_FLEET;
+  const targetFleet = view.toMove === 0 ? OTHER_FLEET : GOOD_FLEET;
 
   // Fire at a cell that is certainly empty for both layouts: the middle column is clear.
   const empty = cell(9, 0) === undefined ? 0 : cell(3, 9);
@@ -294,7 +294,7 @@ test('a hit keeps the turn and a miss gives it away', (t) => {
   const back = match.detail(db, cfg, users.alice, id);
   const other = players[back.toMove];
   // Give the turn back by having the other side miss too, then land a hit.
-  const theirTarget = back.toMove === 'host' ? OTHER_FLEET : GOOD_FLEET;
+  const theirTarget = back.toMove === 0 ? OTHER_FLEET : GOOD_FLEET;
   const theirOccupied = new Set();
   for (const ship of theirTarget) for (const c of sb.shipCells(ship)) theirOccupied.add(c);
   let theirBlank = 0;
@@ -315,12 +315,12 @@ test('sinking the last ship wins the match and pays out', (t) => {
   match.act(db, cfg, users.alice, { id, fleet: GOOD_FLEET });
   match.act(db, cfg, users.bob, { id, fleet: OTHER_FLEET });
 
-  const players = { host: users.alice, guest: users.bob };
+  const players = [users.alice, users.bob];
   const view = match.detail(db, cfg, users.alice, id);
   const shooter = players[view.toMove];
-  const winnerKey = view.toMove === 'host' ? keys.alice : keys.bob;
+  const winnerKey = view.toMove === 0 ? keys.alice : keys.bob;
   const before = tc.balanceOf(db, winnerKey.pub);
-  const targetFleet = view.toMove === 'host' ? OTHER_FLEET : GOOD_FLEET;
+  const targetFleet = view.toMove === 0 ? OTHER_FLEET : GOOD_FLEET;
 
   // Every hit keeps the turn, so a perfect game never gives the other side a shot.
   let last = null;
@@ -345,8 +345,8 @@ test('the clock does not run while the fleets are still being placed', (t) => {
   // somebody; during setup it must not, because nobody has been given a chance to act.
   db.run('UPDATE matches SET moved_at_ms=? WHERE id=?', Date.now() - 60 * 60 * 1000, id);
   const view = match.detail(db, cfg, users.alice, id);
-  assert.strictEqual(view.clock.host, match.GAMES.seabattle.clockMs);
-  assert.strictEqual(view.clock.guest, match.GAMES.seabattle.clockMs);
+  assert.strictEqual(view.clock[0], match.GAMES.seabattle.clockMs);
+  assert.strictEqual(view.clock[1], match.GAMES.seabattle.clockMs);
 
   assert.doesNotThrow(() => match.act(db, cfg, users.alice, { id, fleet: GOOD_FLEET }));
 });
@@ -365,7 +365,7 @@ test('a player who never sets up loses to the one who did', (t) => {
   const out = match.claimTimeout(db, cfg, users.alice, id);
 
   assert.strictEqual(out.reason, 'no-setup');
-  assert.strictEqual(out.result, 'host');
+  assert.deepStrictEqual(out.winners, [0]);
   const prize = (200 * TUG) - Math.floor(200 * TUG * cfg.match.rake);
   assert.strictEqual(tc.balanceOf(db, keys.alice.pub), before + prize);
 });
