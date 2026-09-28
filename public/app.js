@@ -1999,16 +1999,15 @@ function paintJigsaw() {
   const g = state.jigsaw;
   const panel = $('#betPanel');
   const amount = amountControl();
-  const boardSel = el('select', {},
-    ...['easy', 'medium', 'hard', 'expert'].map((k) => el('option', { value: k }, t(`jig.${k}`))));
-
+  // There is one board, so there is no board control. A select with a single option is a
+  // step that cannot go wrong and therefore should not be a step.
   const go = el('button', { class: 'primary big' }, t('jig.start'));
   go.onclick = async () => {
     if (!requireLogin()) return;
     go.disabled = true;
     try {
       state.jigsaw = await api('/api/bet/jigsaw/start', {
-        method: 'POST', body: { amount: amount.get(), board: boardSel.value },
+        method: 'POST', body: { amount: amount.get() },
       });
       paintJigsaw();
     } catch (e) { toast(e.message, 'bad'); go.disabled = false; }
@@ -2017,12 +2016,20 @@ function paintJigsaw() {
   if (!g || g.state !== 'active') {
     setKids(panel,
       amount.node,
-      el('label', { class: 'field' }, el('span', {}, t('jig.board')), boardSel),
       go,
       el('p', { class: 'hint' }, t('jig.intro')));
     applyAll(panel);
-    setKids($('#stage'), el('p', { class: 'hint' }, t('jig.idle')));
-    if (g && g.state === 'done') showJigResult(g);
+    // A finished round keeps its solved board on the stage — clearing it to "pick a board"
+    // the instant you win takes the picture away at the one moment you want to look at it.
+    // Only an idle stage gets the prompt.
+    if (g && g.state === 'done') {
+      if (!$('#stage').querySelector('.jig-wrap')) {
+        setKids($('#stage'), el('p', { class: 'hint' }, t('jig.idle')));
+      }
+      showJigResult(g);
+    } else {
+      setKids($('#stage'), el('p', { class: 'hint' }, t('jig.idle')));
+    }
     return;
   }
 
@@ -2043,8 +2050,18 @@ function paintJigsaw() {
   stopJigClock();
   jigClock = setInterval(tick, 1000);
 
+  // How many pieces are still in the tray. With an empty starting board this is the
+  // progress bar — the clock says how long you have taken, this says how far you are.
+  const left = el('span', { class: 'jig-left' }, '');
+  const showLeft = (remaining) => {
+    left.textContent = remaining > 0 ? t('jig.tray', { n: remaining }) : t('jig.trayEmpty');
+    left.classList.toggle('done', remaining === 0);
+  };
+  showLeft(g.pieces);
+
   setKids(panel,
     el('div', { class: 'jig-bar' }, clock, pace),
+    el('div', { class: 'jig-bar' }, left),
     el('div', { class: 'stat-row' },
       el('span', { class: 'k' }, t('jig.entry')),
       el('span', { class: 'v' }, `${fmt(g.wager)} ${state.cfg?.token?.symbol || 'TUG'}`)),
@@ -2064,6 +2081,7 @@ function paintJigsaw() {
     cutSeed: g.cutSeed,
     picture: state.puzzlePictures?.[g.picture] || null,
     onSolve: (arrangement) => submitJigsaw(arrangement),
+    onMove: (_arrangement, placed, total) => showLeft(total - placed),
   });
 }
 
@@ -2076,7 +2094,10 @@ async function submitJigsaw(arrangement) {
     audio.sfx(out.payout > 0 ? 'win' : 'lose');
     await refreshTokenBalance();
     setBalance(state.tokenBalance);
-    showJigResult(out);
+    // Repaint, or the panel keeps the running clock and a "give up" button for a round
+    // that is already settled — and the player has no way to start another one. The
+    // finished board stays on the stage; `paintJigsaw` puts the result under it.
+    paintJigsaw();
   } catch (e) { toast(e.message, 'bad'); }
 }
 

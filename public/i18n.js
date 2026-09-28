@@ -41,15 +41,6 @@ const STRINGS = {
   'pick.kind.resin':  { en: 'Roll', ru: 'Бросок' },
   'pick.kind.cotton': { en: 'Table', ru: 'Стол' },
   'game.jigsaw': { en: 'Jigsaw', ru: 'Мозаика' },
-  'jig.board':  { en: 'Board', ru: 'Поле' },
-  'jig.easy':   { en: 'Easy — 36 pieces', ru: 'Лёгкая — 36 кусочков' },
-  'jig.medium': { en: 'Medium — 100 pieces', ru: 'Средняя — 100 кусочков' },
-  'jig.hard':   { en: 'Hard — 196 pieces', ru: 'Сложная — 196 кусочков' },
-  'jig.expert': { en: 'Expert — 400 pieces', ru: 'Эксперт — 400 кусочков' },
-  'jig.tiny': {
-    en: 'Pieces this small are hard to drag with a finger — better on a big screen.',
-    ru: 'Такие мелкие кусочки трудно таскать пальцем — лучше на большом экране.',
-  },
   'jig.start':  { en: 'Start the jigsaw', ru: 'Начать мозаику' },
   'jig.entry':  { en: 'Entry', ru: 'Взнос' },
   'jig.give':   { en: 'Give up', ru: 'Бросить' },
@@ -57,13 +48,22 @@ const STRINGS = {
   'jig.left':   { en: '{n} left at full rate', ru: 'ещё {n} по полной ставке' },
   'jig.over':   { en: '{n} over', ru: 'превышение {n}' },
   'jig.intro': {
-    en: 'Drag the pieces into place. The entry is staked and the faster you finish the '
-      + 'more it pays — the clock is the server, not your browser, so it is the same '
-      + 'clock for everyone.',
-    ru: 'Перетащите кусочки на свои места. Взнос ставится, и чем быстрее вы соберёте, '
-      + 'тем больше выплата — время считает сервер, одинаково для всех.',
+    en: 'Drag the pieces out of the tray, or tap one to send it straight home. The '
+      + 'entry is staked and the faster you finish the more it pays — the clock is the '
+      + 'server, not your browser, so it is the same clock for everyone.',
+    ru: 'Перетащите кусочки из лотка или нажмите на кусочек, чтобы он встал на своё '
+      + 'место сам. Взнос ставится, и чем быстрее вы соберёте, тем больше выплата — '
+      + 'время считает сервер, одинаково для всех.',
   },
-  'jig.idle':   { en: 'Pick a board and start.', ru: 'Выберите поле и начните.' },
+  'jig.tray': {
+    en: '{n} {pieces} left',
+    ru: 'осталось {n} {pieces}',
+  },
+  'jig.trayEmpty': { en: 'Every piece is down', ru: 'Все кусочки на месте' },
+  'jig.idle': {
+    en: 'Set your entry and start. 100 pieces.',
+    ru: 'Укажите взнос и начните. 100 кусочков.',
+  },
   'jig.won': {
     en: 'Finished in {n} — paid {m}x.',
     ru: 'Собрано за {n} — выплата {m}x.',
@@ -638,6 +638,10 @@ const PLURALS = {
   tricksTaken: { en: ['trick', 'tricks'], ru: ['взятку', 'взятки', 'взяток'] },
   freeSpins: { en: ['free spin', 'free spins'], ru: ['фриспин', 'фриспина', 'фриспинов'] },
   days: { en: ['day', 'days'], ru: ['день', 'дня', 'дней'] },
+  pieces: {
+    en: ['piece', 'pieces'],
+    ru: ['кусочек', 'кусочка', 'кусочков'],
+  },
   confirmations: {
     en: ['confirmation', 'confirmations'],
     ru: ['подтверждения', 'подтверждений', 'подтверждений'],

@@ -387,15 +387,83 @@ header.top nav#navGames button.on::after { opacity: 1; }
 /* ------------------------------------------------------------- the jigsaw ---
    A dragged piece has to feel like an object you picked up, which is mostly
    shadow and scale: it lifts, it casts, and it settles. */
+/* Board and tray are one gesture surface: a drag that starts in the tray and ends on the
+   board is a single sequence of pointer events, so they share a wrapper. */
+.jig-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  /* Without this the browser claims a drag as a scroll and the piece never moves. */
+  touch-action: none;
+  user-select: none;
+}
 .jig-board {
   width: 100%;
   max-width: min(100%, 560px);
   aspect-ratio: auto;
   display: block;
   margin: 0 auto;
-  /* Without this the browser claims a drag as a scroll and the piece never moves. */
   touch-action: none;
   user-select: none;
+}
+
+/* ---------------------------------------------------------------- the tray ---
+   Where a piece lives before it is placed.
+
+   It is ONE SVG holding every piece, not one SVG per piece. That is a memory decision,
+   not a styling one: a root per piece carried its own copy of the picture's data URI and
+   a 400-piece board came to 65MB of markup. So the grid is laid out in SVG coordinates by
+   the module, and this only has to frame and scroll it. */
+.jig-tray {
+  max-height: 34vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px;
+  border-radius: 10px;
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, .05), transparent 70%),
+    linear-gradient(180deg, rgba(0, 0, 0, .28), rgba(0, 0, 0, .40));
+  border: 1px solid rgba(255, 255, 255, .07);
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, .45);
+  /* Scrolling has to work even though the wrapper takes the drag: the vertical axis is
+     given back, so a flick scrolls and a pull off a piece still starts a drag. */
+  touch-action: pan-y;
+}
+.jig-tray-art { display: block; margin: 0 auto; }
+
+.jig-tray-piece {
+  cursor: grab;
+  transition: opacity .12s ease;
+}
+/* The piece stays in the tray while its ghost is being dragged, so it is dimmed rather
+   than removed — a hole opening in the grid mid-drag re-lays everything under the
+   finger. */
+.jig-tray-piece.jig-lifted { opacity: .25; }
+@media (hover: hover) {
+  .jig-tray-piece:not(.jig-lifted):hover .jig-edge { stroke: var(--gold); stroke-width: 3; }
+}
+
+/* The floating copy that follows the pointer out of the tray. Fixed, so it is not trapped
+   by the tray's own overflow. */
+.jig-ghost {
+  position: fixed;
+  z-index: 60;
+  pointer-events: none;
+  filter: drop-shadow(0 12px 16px rgba(0, 0, 0, .65));
+}
+
+/* The tray is beside the board once there is width for it, which is the arrangement a
+   real table has: picture in front of you, pieces to the side. */
+@media (min-width: 900px) {
+  .jig-wrap {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+  .jig-board { flex: 1 1 auto; min-width: 0; }
+  .jig-tray {
+    flex: 0 0 240px;
+    max-height: min(74vh, 600px);
+  }
 }
 /* The empty bed a piece has been lifted from.
  *
@@ -453,3 +521,7 @@ header.top nav#navGames button.on::after { opacity: 1; }
 }
 .jig-pace { font-size: 12px; color: var(--text-dim); }
 .jig-pace.over { color: var(--warn); }
+/* How many pieces are still in the tray: the progress reading, since an empty board tells
+   you nothing about how far along you are. */
+.jig-left { font-size: 13px; color: var(--text-dim); }
+.jig-left.done { color: var(--gold); }

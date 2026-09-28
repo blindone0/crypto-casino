@@ -115,16 +115,24 @@ function createCut({ cols, rows, width, height, seed = 1, jitter = true }) {
     }
     // --- bottom edge, traced right to left: the same curve the piece below uses for its
     //     top, reversed, so the two agree to the pixel.
+    //
+    // The origin is the LEFT corner and `a` points right, even though the edge is traced
+    // right to left. That looks backwards and is the whole point: `reverseSegments` has
+    // already flipped the curve, so its local `t` still runs 0 to 1 while walking the
+    // curve backwards. Flipping `a` as well reversed it twice, which put the start of the
+    // edge in the middle of the cell and left the path cutting a diagonal across the
+    // piece — the "half of every piece is black" that this shipped with.
     {
       const dir = row === rows - 1 ? 0 : h[row + 1][col];
       const segs = reverseSegments(edgeSegments(dir, hw[row + 1][col]));
-      parts.push(emit(segs, place(x + cw, y + ch, -cw, 0, 0, ch)));
+      parts.push(emit(segs, place(x, y + ch, cw, 0, 0, ch)));
     }
-    // --- left edge, traced bottom to top, likewise shared with the piece to the left
+    // --- left edge, traced bottom to top, likewise shared with the piece to the left.
+    //     Same rule: origin at the TOP corner, `a` pointing down.
     {
       const dir = col === 0 ? 0 : v[row][col];
       const segs = reverseSegments(edgeSegments(dir, vw[row][col]));
-      parts.push(emit(segs, place(x, y + ch, 0, -ch, -cw, 0)));
+      parts.push(emit(segs, place(x, y, 0, ch, -cw, 0)));
     }
     parts.push('Z');
     return parts.join(' ');

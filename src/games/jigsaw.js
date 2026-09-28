@@ -38,29 +38,25 @@ const pictures = require('../pictures');
 const now = () => Math.floor(Date.now() / 1000);
 
 /**
- * Board sizes. Only big ones — a nine-piece jigsaw is not a jigsaw.
+ * The board. There is one, and it is 10x10.
  *
- * `par` is seconds *per piece*, not per board, so a 400-piece jigsaw is not simply
- * twenty-five times harder than a 36-piece one for the same money.
+ * This started as four rungs — 36, 100, 196 and 400 pieces — and was cut twice: first to
+ * two, then to this. 400 was too much to sit through and 36 is not a jigsaw, so the ladder
+ * was mostly rungs nobody would choose. One board also means one honest pay table rather
+ * than four that have to be kept in step with each other.
  *
- * It falls as boards grow, which is deliberate and not a discount: a big picture gives far
- * more context per piece than a small one — more edges to match, more obvious neighbours —
- * so people genuinely place them faster once they are going. A flat rate per piece would
- * make the big boards trivially winnable.
+ * The structure stays a table rather than four constants because the size is a product
+ * decision that has now changed three times, and `boardOf` already refuses an unknown
+ * name. Adding a rung back is one line.
+ *
+ * `par` is seconds *per piece*, not per board, so the target scales with the work.
  */
 const BOARDS = {
-  easy: { cols: 6, rows: 6, par: 3.4, label: 'Easy' },
   medium: { cols: 10, rows: 10, par: 2.6, label: 'Medium' },
-  hard: { cols: 14, rows: 14, par: 2.1, label: 'Hard' },
-  expert: { cols: 20, rows: 20, par: 1.7, label: 'Expert' },
 };
 
-/**
- * Below this many pixels a piece is not draggable with a finger, so the boards that would
- * land under it are offered but marked. 400 pieces across a 390px phone is 16px, which is
- * a desktop board whatever the interface claims.
- */
-const TOUCH_FLOOR_PX = 24;
+/** The par a round gets when it was played on a board that no longer exists. */
+const DEFAULT_PAR = BOARDS.medium.par;
 
 /** The fastest believable seconds per piece. Below this, nobody is dragging anything. */
 const HUMAN_FLOOR_PER_PIECE = 0.45;
@@ -74,6 +70,46 @@ function boardOf(name) {
     throw new U.BadRequest(`unknown board; pick one of ${Object.keys(BOARDS).join(', ')}`);
   }
   return { ...b, pieces: b.cols * b.rows };
+}
+
+/**
+ * The board a round in progress was played on, which is not necessarily a board still on
+ * offer.
+ *
+ * This is the difference between choosing and remembering, and conflating the two stranded
+ * a real player. The board table has been retuned three times; each time, every round open
+ * at that moment named a board that had just stopped existing. `boardOf` threw, `current`
+ * threw with it, the client saw no round and drew the start panel — and starting was then
+ * refused with "finish your current jigsaw first", a round the interface would not show.
+ * A dead end of exactly the kind this project is supposed not to have.
+ *
+ * So a round carries its own geometry. `cols`, `rows` and `par` are all it needs, and a
+ * round played on a since-retired board finishes on the terms it was sold under, which is
+ * also the honest answer.
+ */
+function boardOfRound(g) {
+  const b = BOARDS[g.board];
+  if (b) return { ...b, pieces: b.cols * b.rows };
+
+  // A retired board. The row does not store `cols` and `rows`, but it stores the scramble,
+  // and the scramble is the board that was actually played — one entry per piece. Every
+  // board here has been square, so the side is its square root; a non-square one would
+  // need the columns stored, and this returns a square that at least has the right piece
+  // count rather than guessing a size.
+  const pieces = Array.isArray(g.scramble)
+    ? g.scramble.length
+    : (JSON.parse(g.scramble || '[]').length || 100);
+  const side = Math.round(Math.sqrt(pieces)) || 10;
+  return {
+    cols: side,
+    rows: Math.ceil(pieces / side),
+    pieces,
+    // The par the round was sold under is not recoverable, so it takes the current one.
+    // It is the only guess here, and it moves a finished time by seconds, not tiers.
+    par: DEFAULT_PAR,
+    label: g.board,
+    retired: true,
+  };
 }
 
 /**
@@ -117,7 +153,11 @@ function payoutMultiplier(seconds, board, edge) {
 
 /** The ladder a player is shown before they pay, so the offer is legible up front. */
 function payTable(name, edge) {
-  const board = boardOf(name);
+  return payTableFor(boardOf(name), edge);
+}
+
+/** The same ladder, for a board already in hand — including a retired one. */
+function payTableFor(board, edge) {
   const par = board.par * board.pieces;
   return [
     { within: Math.round(par), multiplier: payoutMultiplier(par, board, edge) },
@@ -133,7 +173,7 @@ const activeGame = (db, userId) => db.get(
 
 /** What the player may see. Never the solution: they are meant to work that out. */
 function view(db, cfg, g) {
-  const board = boardOf(g.board);
+  const board = boardOfRound(g);
   const elapsed = now() - g.started_at;
   return {
     id: g.id,
@@ -152,7 +192,7 @@ function view(db, cfg, g) {
     par: Math.round(board.par * board.pieces),
     cols: board.cols,
     rows: board.rows,
-    payTable: payTable(g.board, cfg.houseEdge.jigsaw),
+    payTable: payTableFor(board, cfg.houseEdge.jigsaw),
     multiplier: g.multiplier ?? null,
     payout: g.payout ?? null,
     seconds: g.seconds ?? null,
@@ -202,12 +242,19 @@ function solve({ db, cfg, user, bankFor }, body) {
     const g = activeGame(db, user.id);
     if (!g) throw new U.BadRequest('no jigsaw in progress');
 
-    const board = boardOf(g.board);
+    const board = boardOfRound(g);
     const arrangement = Array.isArray(body.arrangement) ? body.arrangement : null;
     if (!arrangement || arrangement.length !== board.pieces) {
       throw new U.BadRequest('that is not a finished board');
     }
-    const solved = arrangement.every((piece, slot) => Number(piece) === slot);
+    // Every entry must be a piece. The client's board now starts empty and an unplaced
+    // slot holds `null`, and `Number(null)` is 0 — which matches slot 0. On its own that
+    // is harmless, because a board where every other slot is also null fails immediately;
+    // but it is a coincidence rather than a rule, and a check that happens to be safe is
+    // one refactor away from not being. So nulls are refused outright.
+    const complete = arrangement.every((piece) => Number.isInteger(Number(piece))
+      && piece !== null && piece !== '' && Number(piece) >= 0 && Number(piece) < board.pieces);
+    const solved = complete && arrangement.every((piece, slot) => Number(piece) === slot);
     if (!solved) throw new U.BadRequest('the picture is not complete');
 
     const seconds = now() - g.started_at;
@@ -269,6 +316,6 @@ function current({ db, cfg, user }) {
 
 module.exports = {
   BOARDS, MAX_MULTIPLIER, HUMAN_FLOOR_PER_PIECE,
-  boardOf, scrambleFor, payoutMultiplier, payTable,
+  boardOf, boardOfRound, scrambleFor, payoutMultiplier, payTable, payTableFor,
   start, solve, give, current,
 };
