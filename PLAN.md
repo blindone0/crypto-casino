@@ -3,6 +3,10 @@
 Written 2026-09-28, after poker went in and a дурак bug turned up that would have left
 stakes locked in escrow for ever.
 
+**Phases 1 to 4 are done** — see the commits from 2026-09-28. Phase 5 is what is left,
+and the reasoning in the finished phases is kept below because it is why the code looks
+the way it does.
+
 The site plays well. Every game works, 409 tests pass, and the books balance. What is
 missing is the difference between something that works and something you can take real
 money on and then change afterwards. This is that list, worst risk first.
@@ -12,7 +16,7 @@ wrong, which is the point: none of them announce themselves until the day they c
 
 ---
 
-## Phase 1 — Money that cannot get stuck
+## Phase 1 — Money that cannot get stuck  ✔ done
 
 **The problem.** A stake goes into escrow the moment a match is created, and only comes
 out when the match reaches a result. There are two ways it never does:
@@ -47,7 +51,7 @@ and `reconcileEscrow` holds after every test in the match suite.
 
 ---
 
-## Phase 2 — A schema that can change
+## Phase 2 — A schema that can change  ✔ done
 
 **The problem.** `src/db.js` builds the database with `CREATE TABLE IF NOT EXISTS` and
 nothing else. There is no `user_version`, no migration table, no ordered steps.
@@ -79,7 +83,7 @@ it, and there is a test proving it.
 
 ---
 
-## Phase 3 — One command that says whether the site is sound
+## Phase 3 — One command that says whether the site is sound  ✔ done
 
 **The problem.** The pieces exist and nothing puts them together. `ledger.auditBalances`
 is reachable only through the admin panel. `tokenchain.verifyChain` is called by tests.
@@ -103,7 +107,7 @@ corrupts one balance makes it fail with a message naming the problem.
 
 ---
 
-## Phase 4 — Keep the documents true
+## Phase 4 — Keep the documents true  ✔ done
 
 DEPLOY.md tells you all 88 tests must pass. There are 409. A document that is wrong about
 something checkable is worse than no document, because it teaches you not to trust the
@@ -112,7 +116,7 @@ reasons a player can now see, and the fact that дурак can end in a draw.
 
 ---
 
-## Phase 5 — What is left after that
+## Phase 5 — What is left  ← next
 
 Smaller, and worth doing only once the above is true:
 
@@ -120,7 +124,9 @@ Smaller, and worth doing only once the above is true:
   mid-game burns whoever was on the clock. Storing the pause would be fairer.
 - **Spectating.** `match.detail` already refuses to send a hand to somebody not at the
   table, so the hard part is done.
-- **An admin action log.** The panel can move money. Nothing records who did.
+- **An admin action log that can be read.** `db.audit` is already called all over the
+  place, including on every settled match, so the rows exist — there is just no screen
+  or command that shows them. That is a smaller job than it looked.
 - **Tugrik sums in the header.** The balance shows eight decimal places everywhere,
   which is correct and unreadable at a glance.
 
