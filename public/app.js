@@ -9,6 +9,7 @@ import * as tokenKeys from './tokenkeys.js';
 import { verifyChain, compareHeads } from './chainverify.js';
 import { createSparks } from './slotfx.js';
 import { createReels as createGlReels } from './slot3d.js';
+import { startParallax } from './parallax.js';
 
 // ---------------------------------------------------------------- plumbing
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -85,7 +86,7 @@ const svgEl = (tag, attrs = {}) => {
 const state = {
   cfg: null, user: null, csrf: null,
   game: 'slots', feed: 'recent',
-  mines: null, crash: null, es: null,
+  mines: null, crash: null, es: null, parallax: null,
   // Head-to-head matches: the lobby, the one being watched, its board and its poll.
   matchLobby: null, matchId: null, matchView: null, board: null, matchTimer: null,
   // Pictures the operator imported for the puzzle, keyed the same way the drawn ones are.
@@ -93,7 +94,7 @@ const state = {
   // The tugrik wallet. There is no other kind: `balance` below is the only balance the
   // site has. `nonce` is the next one this key may sign with, `house` is who a stake is
   // signed to.
-  tokenBalance: 0, tokenNonce: 0, tokenHouse: null,
+  tokenBalance: 0, tokenNonce: 0, tokenHouse: null, tokenMaxWin: 0,
 };
 
 const UNIT = 1e8;
@@ -510,6 +511,7 @@ async function refreshTokenBalance() {
     state.tokenNonce = info.nextNonce || 0;
     state.tokenPubkey = info.pubkey || null;
     state.tokenHouse = info.houseKey || null;
+    state.tokenMaxWin = info.maxWin ?? 0;
   } catch { /* keep the last figure rather than blanking it */ }
 }
 
@@ -647,7 +649,10 @@ function infoPanel(extra = []) {
       el('span', { class: 'v' }, `${(state.cfg.houseEdge[state.game] * 100).toFixed(2)}%`)),
     el('div', { class: 'stat-row' },
       el('span', { class: 'k', 'data-i18n': 'bet.maxWin' }),
-      el('span', { class: 'v' }, fmtShort(state.cfg.risk.maxProfitPerBet))),
+      // What the house holds, because that is the most it can pay. This used to read
+      // `cfg.risk.maxProfitPerBet`, a slice of the credit bankroll — a number that stopped
+      // existing with credits and printed NaN.
+      el('span', { class: 'v' }, fmtShort(state.tokenMaxWin ?? 0))),
     ...extra,
   );
   applyAll(p);
@@ -1382,6 +1387,12 @@ async function renderSlots() {
         el('div', { class: 'slot-tray' })))),
   );
 
+  // The viewer's position, published onto the stage. Every layer that wants to move —
+  // the cabinet, the glass, the light on the wall, the shadow on the floor — reads the
+  // same two properties and takes its own fraction of them.
+  if (state.parallax) state.parallax.stop();
+  state.parallax = startParallax($('.slot-stage'));
+
   if (!slotInfo) {
     try { slotInfo = await api('/api/bet/slots/info'); } catch { /* offline */ }
   }
@@ -1684,11 +1695,11 @@ function glDrawSymbol(ctx, sym, y, cell, width) {
     // as an empty tube. A real reel band is a material — this one is brushed brass, lit
     // down its length, with a darker lip at each seam.
     const band = ctx.createLinearGradient(0, y, width, y + cell);
-    band.addColorStop(0, '#1d1708');
-    band.addColorStop(0.3, '#332912');
-    band.addColorStop(0.5, '#413418');
-    band.addColorStop(0.7, '#2b2210');
-    band.addColorStop(1, '#161105');
+    band.addColorStop(0, '#241b09');
+    band.addColorStop(0.3, '#46371a');
+    band.addColorStop(0.5, '#5d4a22');
+    band.addColorStop(0.7, '#3c2f15');
+    band.addColorStop(1, '#1b1406');
     ctx.fillStyle = band;
     ctx.fillRect(0, y, width, cell);
 
@@ -1697,11 +1708,17 @@ function glDrawSymbol(ctx, sym, y, cell, width) {
     const pad = rendered ? 0 : cell * 0.12;
     img.onload = () => {
       if (rendered) {
-        // Screened onto the band rather than pasted over it. The renders sit on pure
-        // black, and black contributes nothing under 'lighter', so the object lifts off
-        // the brass instead of arriving inside its own dark square.
+        // 'screen', not 'lighter'.
+        //
+        // Both drop the pure black the renders sit on, so the object lifts off the brass
+        // either way. The difference is what happens at the bright end: 'lighter' simply
+        // adds, so a gold highlight plus a lit brass band goes past 1.0 and clips to white
+        // **inside the texture** — before a single line of the shader has run. Every
+        // symbol was losing its detail to that, and no amount of lighting could bring it
+        // back, because the pixels were already gone. 'screen' approaches 1.0 without ever
+        // reaching it, so the highlight survives as a highlight.
         ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalCompositeOperation = 'screen';
         ctx.drawImage(img, 0, y, width, cell);
         ctx.restore();
       } else {
@@ -3511,6 +3528,9 @@ const GAMES = ['slots', 'dice', 'limbo', 'mines', 'crash', 'puzzle', 'preferans'
 function renderGame() {
   if (state.es && state.game !== 'crash') { state.es.close(); state.es = null; }
   if (state.cabinet && state.game !== 'arcade') { state.cabinet.stop(); state.cabinet = null; }
+  // The stage it was publishing onto is about to be replaced, so the loop has nothing
+  // left to drive.
+  if (state.parallax && state.game !== 'slots') { state.parallax.stop(); state.parallax = null; }
   if (state.game !== 'match') { stopMatchPoll(); state.matchId = null; state.board = null; }
   const nav = $('#navGames');
   setKids(nav, ...GAMES.map((g) => el('button', {

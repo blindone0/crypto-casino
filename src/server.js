@@ -484,6 +484,11 @@ function build(cfg) {
       head: tip ? tip.hash : null,
       // Where a stake is signed to. The wallet needs it to bet, not only to enter a match.
       houseKey: matches.houseKey(db).publicRaw,
+      // The largest win the house could actually pay, which is simply what it holds. Not
+      // a policy and not a configured number: the supply is fixed, so a bigger promise is
+      // one the chain would refuse. It moves as the house wins and loses, which is why it
+      // rides on this endpoint rather than on the boot-time config.
+      maxWin: tokenchain.balanceOf(db, matches.houseKey(db).publicRaw),
       betLimits: cfg.token.bet,
       // Read off the chain, not off the config, so what a player is shown is what the
       // ledger actually says. The cap is checkable: every token was minted in block zero

@@ -461,14 +461,57 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
  * The tilt is deliberately small. Past about eight degrees the symbols start to shear and
  * the paylines stop reading, and a slot you cannot read is worse than a flat one.
  */
+/* The room.
+ *
+ * This is the answer to "the background doesn't sell the 3D", and the cause was simple:
+ * there was no background. The stage set a perspective and nothing else, so a carefully
+ * lit cabinet sat on flat page colour with nothing behind it, nothing under it, and no
+ * shadow where it met the ground. An object with no room around it reads as a sticker no
+ * matter how good its own shading is — the eye judges depth from context before it judges
+ * it from shading.
+ *
+ * Three layers, all painted here rather than in extra elements: a pool of light on the
+ * back wall behind the machine, a floor that meets the wall on a horizon just below the
+ * cabinet's base, and a vignette that closes the corners down.
+ *
+ * `--tilt-x` / `--tilt-y` come from the parallax module and are zero until it starts, so
+ * every offset below reads as 0 on its own.
+ */
 .slot-stage {
   position: relative;
   /* A near eye point. This is the single number that decides how three-dimensional the
      whole thing looks: far away and a box is a rectangle, close up and you can see round
      it. 820px against a 660px cabinet is close enough to see the sides. */
   perspective: 820px;
-  perspective-origin: 50% 28%;
-  padding: 14px 0 34px;
+  perspective-origin: calc(50% + var(--tilt-y, 0) * 0.6%) 28%;
+  padding: 34px 0 54px;
+  isolation: isolate;
+  background:
+    /* the vignette, closing the corners */
+    radial-gradient(130% 100% at 50% 34%,
+      rgba(0,0,0,0) 44%, rgba(0,0,0,.34) 76%, rgba(0,0,0,.62) 100%),
+    /* the pool of light thrown on the wall behind the machine */
+    radial-gradient(64% 46% at calc(50% + var(--tilt-y, 0) * 1.4%) 30%,
+      rgba(112, 86, 38, .40) 0%, rgba(58, 44, 20, .20) 45%, rgba(0,0,0,0) 72%),
+    /* the floor, and the horizon where it meets the wall */
+    linear-gradient(180deg,
+      #0b0908 0%, #100d0b 52%, #171210 62%, #241b16 64%, #14100d 100%);
+  border-radius: 14px;
+}
+
+/* The contact shadow: the one thing that says the cabinet is standing on the floor rather
+   than hovering over a picture of one. It sits under the machine, in front of the floor
+   gradient and behind the cabinet. */
+.slot-stage::after {
+  content: '';
+  position: absolute;
+  left: 50%; bottom: 30px;
+  width: min(74%, 520px); height: 42px;
+  transform: translateX(-50%) translateX(calc(var(--tilt-y, 0) * -0.9px));
+  background: radial-gradient(closest-side, rgba(0,0,0,.78), rgba(0,0,0,0));
+  filter: blur(6px);
+  pointer-events: none;
+  z-index: 0;
 }
 .slot-cabinet {
   position: relative;
@@ -476,7 +519,13 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
   padding: 0 0 10px;
   border-radius: 18px 18px 12px 12px;
   transform-style: preserve-3d;
-  transform: rotateX(9deg);
+  /* The fixed 9-degree lean, plus wherever the viewer is. Each layer takes its own
+     fraction of the same two properties, and that difference in rate between layers is
+     what parallax is — the cabinet swings furthest, the glass a shade more, the wall
+     behind it least. All of it reads as zero until the parallax module starts. */
+  transform:
+    rotateX(calc(9deg + var(--tilt-x, 0) * 1deg))
+    rotateY(calc(var(--tilt-y, 0) * 1deg));
   background:
     repeating-linear-gradient(90deg,
       #241a14 0 14px, #1b120d 14px 28px),
@@ -708,6 +757,9 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
   position: absolute; inset: 0;
   pointer-events: none;
   z-index: 5;
+  /* In front of the drum, so it slides across it: a highlight that moved with the barrel
+     would not read as a pane of glass over one. */
+  transform: translateX(calc(var(--tilt-y, 0) * 0.55px));
   border-radius: 8px;
   background:
     linear-gradient(90deg, rgba(0,0,0,.55) 0%, rgba(0,0,0,0) 14%,
@@ -787,7 +839,16 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
   pointer-events: none;
   display: block;
 }
+/* In WebGL mode the CSS drum is replaced by the canvas — but `visibility` inherits, so
+ * hiding the whole reel took the glass, the dividers and the hubs down with it. Every
+ * specular-glass, side-vignette and axle rule above was therefore only ever visible on the
+ * fallback path nobody sees, which is why the barrels read as bare tubes with black voids
+ * between them. Only the drum itself is hidden; the parts that sit *in front* of it, which
+ * is what the canvas cannot draw, stay.
+ */
 .slot-window.gl .reel { visibility: hidden; }
+.slot-window.gl .reel > .reel-glass,
+.slot-window.gl .reel > .reel-cap { visibility: visible; }
 
 /* A rendered symbol fills its face: it is a photograph with its own black ground, not
    line art that needs a margin. */

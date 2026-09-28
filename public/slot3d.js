@@ -31,26 +31,83 @@ void main() {
   gl_Position = uProj * uView * uModel * vec4(aPos, 1.0);
 }`;
 
-// One key light from up and in front, a dim fill from below so the underside of the barrel
-// is dark but not black, and a tight specular band that slides across as the drum turns.
-// That moving highlight is most of what makes it read as a polished cylinder.
+// The lighting.
+//
+// The previous version had one bug worth recording, because the picture and the numbers
+// disagreed for a long time before it was found. The specular term was
+// `pow(dot(n, normalize(vec3(0, 0.35, 1))), 40) * 0.75`. The surface normal of a drum is
+// `(0, cos a, sin a)`, so that dot product reaches exactly 1.0 at a = 70.7 degrees —
+// which falls between the top row (60) and the payline (90). Every drum therefore had
+// **+0.75 white added to all three channels** in a broad stripe across its upper third,
+// on a band already lit to about 1.14x. A gold symbol there came out at (1.34, 1.17, 0.71)
+// and clipped flat to white. That wash, not the geometry, was what made the reels look
+// cheap: it destroyed the top row of every drum.
+//
+// Three things stop it happening again rather than one:
+//   - the highlight now peaks at the payline, where a real machine's glass reflects;
+//   - it is a quarter of the strength it was;
+//   - and nothing reaches the screen without passing through a tonemap, so a highlight
+//     that is too strong rolls off instead of clipping. That last one is the guarantee.
 const FRAG = `
 precision mediump float;
 uniform sampler2D uTex;
 uniform float uDim;
 uniform float uWinV;     // v at the centre of a winning symbol, or -1 for none
 uniform float uRowHalf;  // half a symbol, in v
+uniform float uBlur;     // vertical smear while the drum is turning, in v
+
 varying vec3 vNormal;
 varying vec2 vUV;
+
+// A filmic curve (the ACES approximation). Highlights compress towards white instead of
+// slamming into it, which is the difference between a lit gold surface and a white hole.
+vec3 tonemap(vec3 x) {
+  return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+}
+
+// A spinning reel is a smear, not a strobe. Five taps along v, spaced by how fast the
+// drum is actually turning, which is what stops the symbols flickering past as a slideshow
+// and is most of what makes the spin read as motion rather than as frames.
+vec4 strip(vec2 uv) {
+  if (uBlur < 0.0005) return texture2D(uTex, uv);
+  vec4 c = texture2D(uTex, uv);
+  c += texture2D(uTex, vec2(uv.x, uv.y + uBlur));
+  c += texture2D(uTex, vec2(uv.x, uv.y - uBlur));
+  c += texture2D(uTex, vec2(uv.x, uv.y + uBlur * 0.5));
+  c += texture2D(uTex, vec2(uv.x, uv.y - uBlur * 0.5));
+  return c * 0.2;
+}
+
 void main() {
   vec3 n = normalize(vNormal);
   vec3 key = normalize(vec3(-0.25, 0.75, 0.62));
   float d = max(dot(n, key), 0.0);
   float fill = max(dot(n, vec3(0.0, -1.0, 0.2)), 0.0) * 0.16;
   float sheen = pow(max(dot(n, normalize(vec3(0.0, 0.45, 1.0))), 0.0), 8.0) * 0.10;
-  float spec = pow(max(dot(n, normalize(vec3(0.0, 0.35, 1.0))), 0.0), 40.0) * 0.75;
-  vec4 tex = texture2D(uTex, vUV);
+
+  // Straight at the viewer, so the highlight sits on the payline where the glass would
+  // catch it, and 0.18 rather than 0.75.
+  float spec = pow(max(n.z, 0.0), 48.0) * 0.18;
+
+  vec4 tex = strip(vUV);
   vec3 lit = tex.rgb * (0.34 + 0.78 * d + fill + sheen) + spec;
+
+  // How square-on this part of the barrel is. The payline faces the viewer and the rows
+  // above and below fall away from it, so letting brightness follow that gives the drum
+  // depth and puts the eye where the win is read.
+  float facing = max(n.z, 0.0);
+  lit *= mix(0.68, 1.0, facing);
+
+  // Along the axis, which vUV.x measures and nothing used before. Darkening towards each
+  // end seats the drum between its neighbours instead of leaving five flat panels butted
+  // together, and is where the gap between barrels comes from.
+  float ends = smoothstep(0.0, 0.16, vUV.x) * smoothstep(1.0, 0.84, vUV.x);
+  lit *= mix(0.52, 1.0, ends);
+
+  // A cool edge where the barrel turns away, so it reads as round at the top and bottom
+  // of the window rather than stopping dead.
+  lit += vec3(0.16, 0.19, 0.26) * pow(1.0 - facing, 4.0) * 0.5;
+
   // A winning symbol lights up on the drum itself. Wrapped distance, because the band
   // can straddle the seam where v rolls over.
   if (uWinV >= 0.0) {
@@ -58,7 +115,7 @@ void main() {
     float band = smoothstep(uRowHalf, uRowHalf * 0.35, dv);
     lit += tex.rgb * band * 1.25 + vec3(0.30, 0.24, 0.10) * band;
   }
-  gl_FragColor = vec4(lit * uDim, tex.a);
+  gl_FragColor = vec4(tonemap(lit * uDim), tex.a);
 }`;
 
 /** Compile one shader and say plainly what was wrong if it will not. */
@@ -256,6 +313,7 @@ export function createReels(host, opts = {}) {
     dim: gl.getUniformLocation(prog, 'uDim'),
     winV: gl.getUniformLocation(prog, 'uWinV'),
     rowHalf: gl.getUniformLocation(prog, 'uRowHalf'),
+    blur: gl.getUniformLocation(prog, 'uBlur'),
   };
 
   // A drum wide enough that five sit side by side across the window with a small gap, and
@@ -291,7 +349,9 @@ export function createReels(host, opts = {}) {
     seat: i,
     x: 0,
     angle: 0,
-    spin: 0,
+    spin: 0,      // the speed this drum is winding towards, 0 when it should coast down
+    vel: 0,       // what it is actually doing right now; also what drives the blur
+    rampMs: 0,    // how long this particular drum takes to reach speed
     tex: null,
     dim: 1,
     ease: null,
@@ -377,30 +437,63 @@ export function createReels(host, opts = {}) {
       gl.uniform1f(loc.dim, d.dim);
       gl.uniform1f(loc.winV, d.winRow >= 0 ? (d.winRow + 0.5) / perDrum : -1);
       gl.uniform1f(loc.rowHalf, 0.5 / perDrum);
+      // Smear proportional to how far this drum actually turns in a frame, converted from
+      // radians into v. Capped: past about a third of a symbol the taps stop reading as
+      // motion and start reading as fog.
+      const perFrame = Math.abs(d.vel) * 16 / (Math.PI * 2);
+      gl.uniform1f(loc.blur, Math.min(perFrame * 0.6, 0.35 / perDrum));
       gl.uniformMatrix4fv(loc.model, false, modelMatrix(d.x, d.angle, halfW));
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, mesh.count);
     }
   }
 
   let last = 0;
+
+  /**
+   * One frame.
+   *
+   * Three things were wrong with the motion here, and they are worth naming because none
+   * of them is a matter of taste:
+   *
+   *   - `start()` assigned every drum its full speed in a single frame, so the reels went
+   *     from a dead stop to flat out between one frame and the next. Real ones wind up,
+   *     and the wind-up is half of what makes a machine feel mechanical.
+   *   - every drum was given the same speed at the same instant, so five barrels moved as
+   *     one object rather than as five.
+   *   - the settle was `sin(k * PI)`, a hump across the *middle* of the deceleration. A
+   *     reel does not bulge halfway through stopping. It overruns its mark at the very end
+   *     and rocks back into it.
+   *
+   * `d.vel` is the live angular velocity in radians per millisecond, and it is also what
+   * drives the motion blur, so the smear cannot disagree with the movement.
+   */
   function frame(now) {
     const dt = Math.min(now - (last || now), 50);
     last = now;
     let moving = false;
     for (const d of drums) {
       if (d.ease) {
-        // Slowing into the stop, with a little overrun and settle at the end. A reel that
-        // simply assigns its final angle looks broken however good the rest of it is —
-        // the deceleration is most of what sells the machine as mechanical.
         const k = Math.min(1, (now - d.ease.t0) / d.ease.dur);
-        const eased = 1 - (1 - k) ** 3;
-        const bounce = Math.sin(k * Math.PI) * STEP * 0.16;
-        d.angle = d.ease.from + (d.ease.to - d.ease.from) * eased - bounce;
-        if (k >= 1) { d.angle = d.ease.to; d.ease = null; }
+        // Quintic ease-out: it carries speed much further into the stop than a cubic,
+        // which is what a heavy barrel with a brake on it does.
+        const eased = 1 - (1 - k) ** 5;
+        // The overrun lives in the last fifth and settles back over it, so the reel goes
+        // slightly past its symbol and rocks home.
+        const late = Math.max(0, (k - 0.8) / 0.2);
+        const settle = Math.sin(late * Math.PI) * STEP * 0.22 * (1 - late * 0.35);
+        const was = d.angle;
+        d.angle = d.ease.from + (d.ease.to - d.ease.from) * eased - settle;
+        d.vel = dt > 0 ? (d.angle - was) / dt : 0;
+        if (k >= 1) { d.angle = d.ease.to; d.ease = null; d.vel = 0; }
         moving = true;
       } else if (d.spin !== 0) {
-        d.angle += d.spin * dt;
+        // Wind up towards the target speed rather than arriving at it. The reels also
+        // reach it at slightly different rates, which is what stops them moving as a slab.
+        d.vel += (d.spin - d.vel) * Math.min(1, dt / d.rampMs);
+        d.angle += d.vel * dt;
         moving = true;
+      } else if (Math.abs(d.vel) > 1e-6) {
+        d.vel = 0;
       }
     }
     draw();
@@ -440,6 +533,8 @@ export function createReels(host, opts = {}) {
       const d = drums[index];
       if (!d) return;
       d.spin = 0;
+      // A parked drum is not moving, so it must not be smeared: `vel` drives the blur.
+      d.vel = 0;
       d.ease = null;
       d.angle = angleFor(stop + 1);
       draw();
@@ -485,8 +580,16 @@ export function createReels(host, opts = {}) {
 
     start() {
       running = true;
-      for (const d of drums) d.spin = -0.011;
-      wake();
+      drums.forEach((d, i) => {
+        // Each drum is its own object: a slightly different top speed and a slightly
+        // different time to reach it. Nothing here is random per spin — a reel that
+        // behaved differently every time would read as broken rather than as mechanical —
+        // but five identical ones read as a single sheet of symbols, which is what they
+        // looked like.
+        d.spin = -0.0105 - i * 0.00035;
+        d.rampMs = 150 + i * 55;
+        wake();
+      });
     },
 
     /** Bring a drum down to its stop, still turning the way it was going. */
@@ -498,13 +601,14 @@ export function createReels(host, opts = {}) {
       // last of the travel is in the same direction rather than a jerk backwards.
       while (to > d.angle - Math.PI * 0.75) to -= Math.PI * 2;
       d.spin = 0;
-      d.ease = { from: d.angle, to, t0: performance.now(), dur: 620 };
+      // Longer for the later reels, so the row lands left to right instead of all at once.
+      d.ease = { from: d.angle, to, t0: performance.now(), dur: 620 + index * 40 };
       wake();
     },
 
     stop() {
       running = false;
-      for (const d of drums) d.spin = 0;
+      for (const d of drums) { d.spin = 0; d.vel = 0; }
       if (raf !== null) cancelAnimationFrame(raf);
       raf = null;
       draw();
