@@ -1668,15 +1668,36 @@ const GL_PER_DRUM = 12;
  */
 function glDrawSymbol(ctx, sym, y, cell, width) {
   return new Promise((resolve) => {
-    ctx.fillStyle = '#231d15';
+    // The band the symbols are printed on.
+    //
+    // A flat dark fill was most of why the wheels looked cheap: the renders carry their
+    // own black ground, so between symbols there was nothing but black and the drum read
+    // as an empty tube. A real reel band is a material — this one is brushed brass, lit
+    // down its length, with a darker lip at each seam.
+    const band = ctx.createLinearGradient(0, y, width, y + cell);
+    band.addColorStop(0, '#1d1708');
+    band.addColorStop(0.3, '#332912');
+    band.addColorStop(0.5, '#413418');
+    band.addColorStop(0.7, '#2b2210');
+    band.addColorStop(1, '#161105');
+    ctx.fillStyle = band;
     ctx.fillRect(0, y, width, cell);
+
     const img = new Image();
     const rendered = symbolImage(sym, slotTheme);
-    // A render already fills its frame and carries its own black ground, so it goes on
-    // edge to edge; a drawing is line art that needs room to breathe.
     const pad = rendered ? 0 : cell * 0.12;
     img.onload = () => {
-      ctx.drawImage(img, pad, y + pad, width - pad * 2, cell - pad * 2);
+      if (rendered) {
+        // Screened onto the band rather than pasted over it. The renders sit on pure
+        // black, and black contributes nothing under 'lighter', so the object lifts off
+        // the brass instead of arriving inside its own dark square.
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.drawImage(img, 0, y, width, cell);
+        ctx.restore();
+      } else {
+        ctx.drawImage(img, pad, y + pad, width - pad * 2, cell - pad * 2);
+      }
       resolve();
     };
     // A symbol that will not load should not stall the whole strip.

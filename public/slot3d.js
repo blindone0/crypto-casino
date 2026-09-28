@@ -47,9 +47,10 @@ void main() {
   vec3 key = normalize(vec3(-0.25, 0.75, 0.62));
   float d = max(dot(n, key), 0.0);
   float fill = max(dot(n, vec3(0.0, -1.0, 0.2)), 0.0) * 0.16;
-  float spec = pow(max(dot(n, normalize(vec3(0.0, 0.35, 1.0))), 0.0), 22.0) * 0.5;
+  float sheen = pow(max(dot(n, normalize(vec3(0.0, 0.45, 1.0))), 0.0), 8.0) * 0.10;
+  float spec = pow(max(dot(n, normalize(vec3(0.0, 0.35, 1.0))), 0.0), 40.0) * 0.75;
   vec4 tex = texture2D(uTex, vUV);
-  vec3 lit = tex.rgb * (0.30 + 0.85 * d + fill) + spec;
+  vec3 lit = tex.rgb * (0.34 + 0.78 * d + fill + sheen) + spec;
   // A winning symbol lights up on the drum itself. Wrapped distance, because the band
   // can straddle the seam where v rolls over.
   if (uWinV >= 0.0) {
