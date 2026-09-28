@@ -269,6 +269,14 @@ CREATE TABLE IF NOT EXISTS arcade_plays (
 CREATE INDEX IF NOT EXISTS ix_arcade_board ON arcade_plays(game, score DESC);
 CREATE INDEX IF NOT EXISTS ix_arcade_user ON arcade_plays(user_id, game);
 
+-- Who has already had a welcome grant. Kept apart from token_keys because the point is
+-- to survive a key being replaced: the grant is once per account, or losing a phrase on
+-- purpose becomes a way to drain the treasury one wallet at a time.
+CREATE TABLE IF NOT EXISTS token_grants (
+  user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  created_at INTEGER NOT NULL
+);
+
 -- Bets staked in the site token. A separate log from the main bets table, for the same
 -- reason demo has one: tugrik play is not casino-currency play, the two must never be
 -- added together, and the operator's P&L is in one currency. The money itself lives on

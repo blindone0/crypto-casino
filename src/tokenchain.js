@@ -356,13 +356,38 @@ function verifyChain(db) {
 }
 
 // -------------------------------------------------------------------- api
-/** Register the public key a player derived from their phrase. */
-function registerKey(db, userId, pubkey, cfg) {
+/**
+ * Register the public key a player derived from their phrase.
+ *
+ * `replace` is the answer to a lost phrase. Without it an account whose phrase is gone is
+ * locked out of the token permanently: it cannot sign for the wallet it has, and it cannot
+ * register another. That is not how a lost key should behave, even though the tokens
+ * themselves really are gone.
+ *
+ * What replacing does NOT do is recover anything. The old balance stays on the chain,
+ * attached to a key nobody can sign for, and it is unspendable forever. Nor does a
+ * replacement wallet get a second welcome grant: the grant is once per account, or losing
+ * a phrase on purpose becomes a way to drain the treasury.
+ */
+function registerKey(db, userId, pubkey, cfg, { replace = false } = {}) {
   const key = String(pubkey || '').toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(key)) throw new U.BadRequest('public key must be 32 bytes of hex');
 
   return db.tx(() => {
-    const existing = db.get('SELECT * FROM token_keys WHERE user_id=?', userId);
+    let existing = db.get('SELECT * FROM token_keys WHERE user_id=?', userId);
+    if (existing && existing.pubkey !== key && replace) {
+      const stranded = balanceOf(db, existing.pubkey);
+      db.run('DELETE FROM token_keys WHERE user_id=?', userId);
+      db.audit(`user:${userId}`, 'token.key.replaced', {
+        old: existing.pubkey, new: key, stranded,
+      });
+      // Marked as having held a key before, so no second grant is paid below.
+      existing = null;
+      db.run(
+        `INSERT INTO token_grants(user_id, created_at) VALUES(?,?)
+         ON CONFLICT(user_id) DO NOTHING`, userId, Math.floor(Date.now() / 1000),
+      );
+    }
     if (existing && existing.pubkey !== key) {
       throw new U.BadRequest('this account already has a token key; restore that phrase instead');
     }
@@ -379,8 +404,12 @@ function registerKey(db, userId, pubkey, cfg) {
       // the token would be worth exactly what it costs to register.
       const grant = Number(cfg.token?.welcomeGrant ?? 0);
       const treasury = treasuryKey(db).publicRaw;
-      if (grant > 0 && balanceOf(db, treasury) >= grant) {
+      // Once per account, ever. A grant per wallet would make "lose the phrase" a faucet.
+      const already = db.get('SELECT 1 FROM token_grants WHERE user_id=?', userId);
+      if (!already && grant > 0 && balanceOf(db, treasury) >= grant) {
         appendBlock(db, [treasuryTransfer(db, key, grant)]);
+        db.run('INSERT INTO token_grants(user_id, created_at) VALUES(?,?)',
+          userId, Math.floor(Date.now() / 1000));
       }
     }
     return {

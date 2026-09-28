@@ -396,6 +396,9 @@ async function refreshTokenBalance() {
 
 async function signOut() {
   await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
+  // The wallet belongs to the account that just left, so it does not stay on this device.
+  tokenKey = null;
+  await tokenKeys.forget();
   state.user = null;
   state.csrf = null;
   $('#authButtons').classList.remove('hide');
@@ -2132,6 +2135,20 @@ async function debPlay(card) {
 // the session and the user's expectations.
 let tokenKey = null;
 
+/**
+ * Pick up a wallet unlocked on a previous visit.
+ *
+ * Called once during boot. Until this existed, every reload locked the wallet and the
+ * arcade answered a click with "unlock your token wallet first", which reads as the
+ * cabinet being broken rather than as a wallet being locked.
+ */
+async function recallTokenKey() {
+  if (tokenKey) return tokenKey;
+  const found = await tokenKeys.recall();
+  if (found) tokenKey = found;
+  return tokenKey;
+}
+
 async function tokenModal() {
   if (!requireLogin()) return;
   const body = openModal(t('tok.title'), (b) => addKids(b, el('p', { class: 'hint' }, t('common.loading'))));
@@ -2176,6 +2193,7 @@ function renderTokenSetup(body, info) {
       try {
         tokenKey = await tokenKeys.keyFromPhrase(phrase);
         await api('/api/token/key', { method: 'POST', body: { pubkey: tokenKey.publicKey } });
+        await tokenKeys.remember(tokenKey);
         tokenModal();
       } catch (e) { toast(e.message, 'bad'); confirm.disabled = false; }
     });
@@ -2207,11 +2225,50 @@ function renderTokenSetup(body, info) {
           try {
             tokenKey = await tokenKeys.keyFromPhrase(restore.value);
             await api('/api/token/key', { method: 'POST', body: { pubkey: tokenKey.publicKey } });
+            await tokenKeys.remember(tokenKey);
             tokenModal();
           } catch (e) { toast(e.message, 'bad'); }
         },
       }, t('tok.unlock'))),
   );
+}
+
+/**
+ * Give up on a wallet whose phrase is gone and start a new one.
+ *
+ * The tokens in the old one are not recovered and cannot be: they sit on the chain behind
+ * a key nobody holds. This only stops a lost phrase from locking the account out of the
+ * token forever. There is no second welcome grant, or losing a phrase on purpose would be
+ * a way to drain the treasury one wallet at a time.
+ */
+function abandonWallet(info) {
+  const body = openModal(t('tok.lostTitle'), (b) => addKids(b,
+    el('p', { class: 'hint' }, t('tok.lostWhat', { n: fmt(info.balance || 0) })),
+    el('div', { class: 'banner' }, t('tok.lostWarn'))));
+
+  const go = el('button', { class: 'primary big' }, t('tok.lostGo'));
+  go.addEventListener('click', async () => {
+    go.disabled = true;
+    const phrase = tokenKeys.generatePhrase();
+    try {
+      const key = await tokenKeys.keyFromPhrase(phrase);
+      await api('/api/token/key', { method: 'POST', body: { pubkey: key.publicKey, replace: true } });
+      tokenKey = key;
+      await tokenKeys.remember(tokenKey);
+      // Shown once, and written down this time.
+      const words = phrase.split(' ');
+      setKids(body,
+        el('h3', {}, t('tok.phrase')),
+        el('div', { class: 'banner' }, t('tok.phraseWarn')),
+        el('div', { class: 'phrase-box' },
+          ...words.map((w, i) => el('span', {}, el('b', {}, String(i + 1)), w))),
+        el('button', { class: 'primary big', onclick: () => tokenModal() }, t('tok.saved')));
+      applyAll(body);
+    } catch (e) { toast(e.message, 'bad'); go.disabled = false; }
+  });
+  addKids(body, el('div', { class: 'row', style: 'margin-top:12px' },
+    go, el('button', { onclick: closeModal }, t('common.cancel'))));
+  applyAll(body);
 }
 
 /** Normal view: balance, address, sending, and the chain verifier. */
@@ -2245,6 +2302,12 @@ function renderTokenWallet(body, info) {
   );
 
   if (!unlocked) {
+    addKids(body, el('p', { class: 'hint' },
+      el('a', {
+        href: '#',
+        onclick: (e) => { e.preventDefault(); abandonWallet(info); },
+      }, t('tok.lostLink'))));
+
     const phrase = el('input', { class: 'mono', placeholder: t('tok.enterPhrase') });
     addKids(body, 
       el('p', { class: 'hint' }, t('tok.locked')),
@@ -2999,6 +3062,9 @@ async function boot() {
   for (const b of document.querySelectorAll('#modeSwitch button')) {
     b.onclick = () => setWallet(b.dataset.wallet);
   }
+
+  // Before anything asks whether the wallet is unlocked.
+  await recallTokenKey();
 
   audio.armOnFirstGesture();
   const soundBtn = $('#btnSound');

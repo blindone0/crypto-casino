@@ -132,6 +132,81 @@ async function keyFromPhrase(phrase) {
   return { privateKey, publicKey: hex(pub) };
 }
 
+
+// ------------------------------------------------------------ staying unlocked
+//
+// The wallet was unlocked in a variable, which meant every page reload locked it again and
+// asked for sixteen words before a single arcade token could be spent. Nobody types their
+// phrase to play pinball; they give up.
+//
+// So the key is kept in IndexedDB between visits. What makes that safe rather than
+// convenient is that the private half is imported non-extractable: the browser will sign
+// with it and will not hand the bytes to any script, including this one. What is stored is
+// a handle to a key, not a key.
+//
+// The phrase itself is never written anywhere. It exists to restore the wallet on another
+// machine, and a phrase written to disk by a web page is a phrase that outlives the page.
+
+const DB_NAME = 'nullstake-token';
+const STORE = 'keys';
+const RECORD = 'active';
+
+function openStore(mode) {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE);
+    };
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction(STORE, mode);
+      resolve({ store: tx.objectStore(STORE), done: tx, db });
+    };
+  });
+}
+
+const wrap = (request) => new Promise((resolve, reject) => {
+  request.onsuccess = () => resolve(request.result);
+  request.onerror = () => reject(request.error);
+});
+
+/** Remember an unlocked wallet, so a reload does not ask for the phrase again. */
+async function remember(key) {
+  try {
+    const { store, db } = await openStore('readwrite');
+    await wrap(store.put({ privateKey: key.privateKey, publicKey: key.publicKey }, RECORD));
+    db.close();
+    return true;
+  } catch {
+    // Private browsing, a blocked store, or a browser that will not structured-clone a
+    // CryptoKey. The wallet still works; it just will not survive the reload.
+    return false;
+  }
+}
+
+/** The wallet from a previous visit, or null. */
+async function recall() {
+  try {
+    const { store, db } = await openStore('readonly');
+    const found = await wrap(store.get(RECORD));
+    db.close();
+    if (!found || !found.privateKey || !found.publicKey) return null;
+    return { privateKey: found.privateKey, publicKey: found.publicKey };
+  } catch {
+    return null;
+  }
+}
+
+/** Forget it. Used when locking the wallet, and when a different one is restored. */
+async function forget() {
+  try {
+    const { store, db } = await openStore('readwrite');
+    await wrap(store.delete(RECORD));
+    db.close();
+  } catch { /* nothing to forget */ }
+}
+
 function b64urlToBytes(s) {
   const b64 = s.replace(/-/g, '+').replace(/_/g, '/');
   const raw = atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4));
@@ -212,6 +287,7 @@ async function sha256Hex(text) {
 }
 
 export {
+  remember, recall, forget,
   WORDS, PHRASE_LENGTH, supported, generatePhrase, validatePhrase, normalise,
   seedFromPhrase, keyFromPhrase, signTransfer, signSpend, spendPayload,
   verifySignature, verifyOverString,

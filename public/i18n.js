@@ -296,6 +296,17 @@ const STRINGS = {
 
   'tok.coin': { en: 'Tugrik', ru: 'Тугрик' },
   'tok.wallet': { en: 'Tugriks', ru: 'Тугрики' },
+  'tok.lostLink': { en: 'Lost your phrase?', ru: 'Потеряли фразу?' },
+  'tok.lostTitle': { en: 'Start a new wallet', ru: 'Завести новый кошелёк' },
+  'tok.lostWhat': {
+    en: 'The wallet on this account holds {n}. Without the phrase nobody can sign for it, including us, so those tugriks stay on the chain and can never be spent again.',
+    ru: 'На кошельке этого аккаунта {n}. Без фразы за него никто не может подписать, включая нас, поэтому эти тугрики останутся в цепочке и никогда больше не будут потрачены.',
+  },
+  'tok.lostWarn': {
+    en: 'A new wallet starts empty. The welcome grant is paid once per account and has already been paid, so there is no second one. Write the new phrase down.',
+    ru: 'Новый кошелёк начинается с нуля. Стартовые токены выдаются раз на аккаунт и уже выданы, второй раз их не будет. Запишите новую фразу.',
+  },
+  'tok.lostGo': { en: 'I understand, start a new wallet', ru: 'Понимаю, завести новый' },
   'tok.noHouse': {
     en: 'The token wallet is not ready yet. Try again in a moment.',
     ru: 'Токен-кошелёк ещё не готов. Попробуйте через мгновение.',

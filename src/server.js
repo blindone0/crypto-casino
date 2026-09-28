@@ -50,6 +50,18 @@ function build(cfg) {
   const geo = geoMod.createGeo(cfg);
   const publicDir = path.join(cfg.root, 'public');
 
+  // ---------------------------------------------------------------- logging
+  const LEVELS = { quiet: 0, info: 1, debug: 2 };
+  const level = LEVELS[cfg.logLevel] ?? LEVELS.info;
+
+  const logLine = (method, pathname, status, ms, note) => {
+    const stamp = new Date().toISOString().slice(11, 23);
+    console.log(
+      `${stamp} ${String(status).padEnd(3)} ${method.padEnd(4)} ${pathname} ${ms}ms`
+      + `${note ? `  ${note}` : ''}`,
+    );
+  };
+
   // ---------------------------------------------------------------- routing
   const routes = [];
   const add = (method, pattern, handler, opts = {}) => {
@@ -523,7 +535,7 @@ function build(cfg) {
     checkCsrf(req, ctx);
     if (!cfg.token.enabled) throw new U.BadRequest('the site token is disabled');
     const body = await U.readJsonBody(req);
-    return tokenchain.registerKey(db, user.id, body.pubkey, cfg);
+    return tokenchain.registerKey(db, user.id, body.pubkey, cfg, { replace: !!body.replace });
   });
 
   add('POST', '/api/token/transfer', async (ctx, req) => {
@@ -1048,18 +1060,26 @@ function build(cfg) {
       return;
     }
 
+    let ctx = null;
     try {
       limits.enforce(db, cfg, ip, pathname);
       const m = match(req.method, pathname);
       if (!m) throw new U.NotFound('no such endpoint');
 
-      const ctx = { ip, auth: currentUser(req), db, cfg };
+      ctx = { ip, auth: currentUser(req), db, cfg };
       const out = await m.route.handler(ctx, req, res, m.params);
       if (!res.writableEnded) U.sendJson(res, 200, out ?? { ok: true });
+      if (level >= LEVELS.debug) logLine(req.method, pathname, 200, Date.now() - started);
     } catch (e) {
       const status = e.status || 500;
       if (status >= 500) {
         console.error(`[500] ${req.method} ${pathname}: ${e.stack || e.message}`);
+      } else if (level >= LEVELS.info) {
+        // Why a request was refused. The single most useful line in this file while
+        // anything is being built, and until now it was visible nowhere: the server only
+        // logged its own faults, never the ones it was reporting back to a client.
+        const who = ctx?.auth?.user ? `user:${ctx.auth.user.id}` : 'anon';
+        logLine(req.method, pathname, status, Date.now() - started, `${who}  ${e.message}`);
       }
       if (!res.writableEnded) {
         // A rejected oversized body leaves unread bytes on the wire, so close the
@@ -1094,6 +1114,7 @@ function build(cfg) {
         const bank = U.formatAmount(ledger.bankroll(db));
         console.log(`  ${cfg.siteName} listening on http://${cfg.host}:${cfg.port}`);
         console.log(`  wallet driver: ${driver.name}   bankroll: ${bank} ${cfg.currencyLabel}`);
+        console.log(`  log level: ${cfg.logLevel}   (CASINO_LOG=debug logs every request)`);
         if (ledger.bankroll(db) === 0) {
           console.log('  bankroll is empty: fund it in the admin panel or no bets can be accepted');
         }
