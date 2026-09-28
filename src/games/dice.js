@@ -35,7 +35,7 @@ function play({ db, cfg, user, bank }, body) {
     const raw = won ? U.mulUnits(wager, multiplier) : 0;
     // The house can only pay what it holds, and this is where that gets enforced.
     //
-    // Dice and limbo were the only two games that skipped this — crash, mines, puzzle and
+    // Dice and limbo were the only two games that skipped this — crash, mines and
     // slots have always capped. The consequence was not a quiet overpayment but a hard
     // failure: the chain refused a transfer the house could not cover, so the whole bet
     // came back as "insufficient token balance" on an account holding 995 tugriks. A win

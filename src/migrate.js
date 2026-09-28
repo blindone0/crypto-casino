@@ -157,6 +157,22 @@ const STEPS = [
       `);
     },
   },
+  {
+    id: 5,
+    name: 'drop puzzle_games',
+    /**
+     * The reveal-and-cash-out puzzle is gone; the jigsaw replaced it.
+     *
+     * Dropping the table rather than leaving it is deliberate. `npm run doctor` walks
+     * every table looking for rows orphaned from a user, and a table no code writes to is
+     * exactly the kind of thing that sits there for a year accumulating questions. The
+     * rounds in it are finished and settled — the `bets` rows that record them, and the
+     * chain blocks that paid them, are untouched and still verify.
+     */
+    up(db) {
+      db.exec('DROP TABLE IF EXISTS puzzle_games');
+    },
+  },
 ];
 
 const latest = (steps = STEPS) => steps.reduce((n, s) => Math.max(n, s.id), 0);

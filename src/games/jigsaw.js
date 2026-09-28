@@ -1,14 +1,11 @@
 'use strict';
 // A real jigsaw: drag the pieces into place, against a clock.
 //
-// HOW THIS IS DIFFERENT FROM src/games/puzzle.js
+// WHY A SKILL GAME IS AWKWARD HERE
 //
-// The other puzzle is a gamble wearing a picture — you reveal tiles and hope none is
-// broken, and skill has nothing to do with it. This is the opposite: anyone who keeps
-// dragging finishes eventually, so the only thing that can decide a payout is *how fast*.
-//
-// That makes it a skill game, and skill games have a problem a chance game does not: a
-// script drags faster than a person. Everything below is shaped by that.
+// Anyone who keeps dragging finishes eventually, so the only thing that can decide a
+// payout is *how fast*. That makes a script the natural opponent rather than variance, and
+// everything below is shaped by it.
 //
 // WHAT STOPS IT BEING FARMED
 //
@@ -36,6 +33,7 @@
 const U = require('../util');
 const fair = require('../fair');
 const auth = require('../auth');
+const pictures = require('../pictures');
 
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -141,7 +139,7 @@ function view(db, cfg, g) {
     wager: g.wager,
     elapsed,
     par: Math.round(board.par * board.pieces),
-    payTable: payTable(g.board, cfg.houseEdge.puzzle),
+    payTable: payTable(g.board, cfg.houseEdge.jigsaw),
     multiplier: g.multiplier ?? null,
     payout: g.payout ?? null,
     seconds: g.seconds ?? null,
@@ -160,8 +158,7 @@ function start({ db, cfg, user, bank }, body) {
     const seed = auth.activeSeed(db, user.id);
     const nonce = auth.claimNonce(db, seed.id);
     const scramble = scrambleFor(seed.seed, user.client_seed, nonce, board);
-    // The picture pool is the puzzle's, so imported artwork shows up in both.
-    const picture = require('./puzzle').pictureFor(seed.seed, user.client_seed, nonce, cfg);
+    const picture = pictures.pictureFor(seed.seed, user.client_seed, nonce, cfg);
 
     bank.takeStake(user, wager, `jigsaw#${nonce}`);
     db.run(
@@ -202,7 +199,7 @@ function solve({ db, cfg, user, bankFor }, body) {
 
     const seconds = now() - g.started_at;
     const bank = bankFor();
-    const edge = cfg.houseEdge.puzzle;
+    const edge = cfg.houseEdge.jigsaw;
 
     // Faster than a person can physically drag: no payout, and the round still closes so
     // the entry is not refunded. Saying so plainly beats a silent zero.

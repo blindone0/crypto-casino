@@ -27,7 +27,6 @@ const limbo = require('./games/limbo');
 const mines = require('./games/mines');
 const slots = require('./games/slots');
 const preferans = require('./games/preferans');
-const puzzle = require('./games/puzzle');
 const debertz = require('./games/debertz');
 const crashMod = require('./games/crash');
 
@@ -358,30 +357,6 @@ function build(cfg) {
   });
 
   add('GET', '/api/bet/slots/info', async () => slots.info(cfg));
-
-  // ---------------------------------------------------------------- puzzle
-  add('POST', '/api/bet/puzzle/start', async (ctx, req) => {
-    checkCsrf(req, ctx);
-    const body = await U.readJsonBody(req);
-    return puzzle.start(gameCtx(ctx, body.spend), body);
-  });
-
-  add('POST', '/api/bet/puzzle/reveal', async (ctx, req) => {
-    checkCsrf(req, ctx);
-    return puzzle.reveal(gameCtx(ctx), await U.readJsonBody(req));
-  });
-
-  add('POST', '/api/bet/puzzle/cashout', async (ctx, req) => {
-    checkCsrf(req, ctx);
-    return puzzle.cashout(gameCtx(ctx));
-  });
-
-  add('GET', '/api/bet/puzzle/current', async (ctx) => {
-    const user = requireUser(ctx);
-    return puzzle.current({ db, cfg, user });
-  });
-
-  add('GET', '/api/bet/puzzle/info', async () => puzzle.info(cfg));
 
   // --------------------------------------------------------------- debertz
   add('POST', '/api/bet/debertz/start', async (ctx, req) => {

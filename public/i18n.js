@@ -40,6 +40,38 @@ const STRINGS = {
   'pick.kind.glass':  { en: 'Multiplier', ru: 'Множитель' },
   'pick.kind.resin':  { en: 'Roll', ru: 'Бросок' },
   'pick.kind.cotton': { en: 'Table', ru: 'Стол' },
+  'game.jigsaw': { en: 'Jigsaw', ru: 'Мозаика' },
+  'jig.board':  { en: 'Board', ru: 'Поле' },
+  'jig.easy':   { en: 'Easy — 16 pieces', ru: 'Лёгкая — 16 кусочков' },
+  'jig.medium': { en: 'Medium — 20 pieces', ru: 'Средняя — 20 кусочков' },
+  'jig.hard':   { en: 'Hard — 25 pieces', ru: 'Сложная — 25 кусочков' },
+  'jig.expert': { en: 'Expert — 36 pieces', ru: 'Эксперт — 36 кусочков' },
+  'jig.start':  { en: 'Start the jigsaw', ru: 'Начать мозаику' },
+  'jig.entry':  { en: 'Entry', ru: 'Взнос' },
+  'jig.give':   { en: 'Give up', ru: 'Бросить' },
+  'jig.within': { en: 'Under {n}', ru: 'Быстрее {n}' },
+  'jig.left':   { en: '{n} left at full rate', ru: 'ещё {n} по полной ставке' },
+  'jig.over':   { en: '{n} over', ru: 'превышение {n}' },
+  'jig.intro': {
+    en: 'Drag the pieces into place. The entry is staked and the faster you finish the '
+      + 'more it pays — the clock is the server, not your browser, so it is the same '
+      + 'clock for everyone.',
+    ru: 'Перетащите кусочки на свои места. Взнос ставится, и чем быстрее вы соберёте, '
+      + 'тем больше выплата — время считает сервер, одинаково для всех.',
+  },
+  'jig.idle':   { en: 'Pick a board and start.', ru: 'Выберите поле и начните.' },
+  'jig.won': {
+    en: 'Finished in {n} — paid {m}x.',
+    ru: 'Собрано за {n} — выплата {m}x.',
+  },
+  'jig.slow': {
+    en: 'Finished in {n}, which was too slow to pay.',
+    ru: 'Собрано за {n} — слишком медленно для выплаты.',
+  },
+  'jig.tooFast': {
+    en: 'That was faster than anyone can drag, so it paid nothing.',
+    ru: 'Быстрее, чем человек может перетаскивать, — выплаты нет.',
+  },
   'game.dice': { en: 'Dice', ru: 'Кости' },
   'game.limbo': { en: 'Limbo', ru: 'Лимбо' },
   'game.mines': { en: 'Mines', ru: 'Мины' },
@@ -118,26 +150,6 @@ const STRINGS = {
   'slots.theme.rendered': { en: 'Gilded Royale', ru: 'Золотая корона' },
 
   // ---- puzzle
-  'game.puzzle': { en: 'Puzzle', ru: 'Пазл' },
-  'puzzle.difficulty': { en: 'Difficulty', ru: 'Сложность' },
-  'puzzle.easy': { en: 'Easy', ru: 'Лёгкий' },
-  'puzzle.medium': { en: 'Medium', ru: 'Средний' },
-  'puzzle.hard': { en: 'Hard', ru: 'Сложный' },
-  'puzzle.expert': { en: 'Expert', ru: 'Эксперт' },
-  'puzzle.start': { en: 'Start puzzle', ru: 'Начать пазл' },
-  'puzzle.cashout': { en: 'Collect {amount}', ru: 'Забрать {amount}' },
-  'puzzle.next': { en: 'Next piece pays', ru: 'Следующий фрагмент' },
-  'puzzle.broken': { en: 'Broken pieces', ru: 'Битых фрагментов' },
-  'puzzle.pieces': { en: 'Pieces to complete', ru: 'Фрагментов до конца' },
-  'puzzle.complete': { en: 'Completed! {mult}x', ru: 'Собран! {mult}x' },
-  'puzzle.cracked': { en: 'Broken piece. Round over.', ru: 'Битый фрагмент. Раунд окончен.' },
-  'puzzle.pick': { en: 'Uncover a piece', ru: 'Откройте фрагмент' },
-  'puzzle.ladder': { en: 'Payout ladder', ru: 'Лестница выплат' },
-  'puzzle.sameEdge': {
-    en: 'Every difficulty carries the same house edge. Harder grids buy variance, not worse odds.',
-    ru: 'У всех уровней одинаковое преимущество казино. Сложность меняет разброс, а не шансы.',
-  },
-  'puzzle.topPrize': { en: 'Complete the picture', ru: 'Собрать всю картину' },
 
   // ---- debertz
   'game.debertz': { en: 'Debertz', ru: 'Деберц' },

@@ -383,3 +383,64 @@ header.top nav#navGames button.on::after { opacity: 1; }
   box-shadow: inset 0 2px 5px rgba(255, 255, 255, .09), inset 0 -5px 12px rgba(0, 0, 0, .4);
 }
 .solo-start:active { transform: translateY(2px) scaleY(.99); }
+
+/* ------------------------------------------------------------- the jigsaw ---
+   A dragged piece has to feel like an object you picked up, which is mostly
+   shadow and scale: it lifts, it casts, and it settles. */
+.jig-board {
+  width: 100%;
+  max-width: min(100%, 560px);
+  aspect-ratio: auto;
+  display: block;
+  margin: 0 auto;
+  /* Without this the browser claims a drag as a scroll and the piece never moves. */
+  touch-action: none;
+  user-select: none;
+}
+.jig-slot {
+  fill: rgba(0, 0, 0, .34);
+  stroke: rgba(255, 255, 255, .05);
+  stroke-width: 1.5;
+}
+.jig-blank { fill: #2a2420; }
+
+.jig-piece { cursor: grab; }
+.jig-piece.jig-settling { transition: transform .16s cubic-bezier(.2, .8, .3, 1); }
+.jig-edge {
+  fill: none;
+  stroke: rgba(0, 0, 0, .55);
+  stroke-width: 2;
+  pointer-events: none;
+}
+/* A piece in its right place stops advertising itself. */
+.jig-piece.jig-home .jig-edge { stroke: rgba(0, 0, 0, .3); }
+
+.jig-piece.jig-held {
+  cursor: grabbing;
+  filter: drop-shadow(0 10px 14px rgba(0, 0, 0, .6));
+}
+.jig-piece.jig-held .jig-edge { stroke: var(--gold); stroke-width: 3; }
+
+@media (hover: hover) {
+  .jig-piece:not(.jig-held):hover .jig-edge { stroke: rgba(217, 180, 90, .5); }
+}
+
+/* Finished. The seams fade rather than vanish, so it still reads as a jigsaw. */
+.jig-board.jig-solved .jig-edge {
+  stroke: rgba(217, 180, 90, .28);
+  transition: stroke .5s ease;
+}
+.jig-board.jig-solved .jig-piece { cursor: default; }
+.jig-board.jig-done .jig-piece { cursor: default; pointer-events: none; }
+
+.jig-bar {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin-bottom: 10px;
+}
+.jig-clock {
+  font: 600 20px/1 ui-monospace, monospace;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+.jig-pace { font-size: 12px; color: var(--text-dim); }
+.jig-pace.over { color: var(--warn); }

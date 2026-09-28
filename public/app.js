@@ -4,6 +4,7 @@ import {
 } from './symbols.js';
 import { pictureSvg } from './pictures.js';
 import { createCut } from './jigsaw.js';
+import { board as jigsawBoard } from './jigsawboard.js';
 import * as audio from './audio.js';
 import * as tokenKeys from './tokenkeys.js';
 import { verifyChain, compareHeads } from './chainverify.js';
@@ -86,7 +87,7 @@ const svgEl = (tag, attrs = {}) => {
 const state = {
   cfg: null, user: null, csrf: null,
   game: 'slots', feed: 'recent',
-  mines: null, crash: null, es: null, parallax: null, solo: null,
+  mines: null, crash: null, es: null, parallax: null, solo: null, jigsaw: null,
   // Head-to-head matches: the lobby, the one being watched, its board and its poll.
   matchLobby: null, matchId: null, matchView: null, board: null, matchTimer: null,
   // Pictures the operator imported for the puzzle, keyed the same way the drawn ones are.
@@ -1967,180 +1968,133 @@ function slotPaytableModal() {
 }
 
 
-// ----------------------------------------------------------------- puzzle
-let puzzleInfo = null;
+// ----------------------------------------------------------------- jigsaw
+let jigBoard = null;
+let jigClock = null;
 
-async function renderPuzzle() {
-  if (!puzzleInfo) {
-    try { puzzleInfo = await api('/api/bet/puzzle/info'); } catch { /* offline */ }
-  }
-  let game = { state: 'none' };
+/**
+ * The timed jigsaw.
+ *
+ * The clock on screen is read from the server's `elapsed` and ticked locally for display.
+ * It is not what decides the payout — the server measures the round itself — so a tampered
+ * display changes nothing but itself, which is why it can be ticked here at all.
+ */
+async function renderJigsaw() {
+  stopJigClock();
+  let game = null;
   if (state.user) {
-    try { game = await api('/api/bet/puzzle/current'); } catch { /* nothing open */ }
+    try { game = await api('/api/bet/jigsaw/current'); } catch { /* nothing open */ }
   }
-  state.puzzle = game;
-  paintPuzzle();
+  state.jigsaw = game;
+  paintJigsaw();
 }
 
-function paintPuzzle() {
-  const g = state.puzzle || { state: 'none' };
-  const live = g.state === 'active';
+function stopJigClock() {
+  if (jigClock) { clearInterval(jigClock); jigClock = null; }
+}
+
+const jigTime = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+function paintJigsaw() {
+  const g = state.jigsaw;
   const panel = $('#betPanel');
+  const amount = amountControl();
+  const boardSel = el('select', {},
+    ...['easy', 'medium', 'hard', 'expert'].map((k) => el('option', { value: k }, t(`jig.${k}`))));
 
-  if (!live) {
-    const amount = amountControl();
-    const diff = el('select', {}, ...(puzzleInfo?.tiers || []).map((tier) => el('option', {
-      value: tier.key, selected: tier.key === (state.puzzleTier || 'medium') ? 'selected' : false,
-    }, `${t(`puzzle.${tier.key}`)} — ${tier.cols}x${tier.rows}, ${tier.broken} broken`)));
-    diff.addEventListener('change', () => { state.puzzleTier = diff.value; paintPuzzle(); });
+  const go = el('button', { class: 'primary big' }, t('jig.start'));
+  go.onclick = async () => {
+    if (!requireLogin()) return;
+    go.disabled = true;
+    try {
+      state.jigsaw = await api('/api/bet/jigsaw/start', {
+        method: 'POST', body: { amount: amount.get(), board: boardSel.value },
+      });
+      paintJigsaw();
+    } catch (e) { toast(e.message, 'bad'); go.disabled = false; }
+  };
 
-    const tier = (puzzleInfo?.tiers || []).find((x) => x.key === (state.puzzleTier || 'medium'));
-    const start = el('button', { class: 'primary big' }, t('puzzle.start'));
-    start.addEventListener('click', async () => {
-      if (!requireLogin()) return;
-      start.disabled = true;
-      try {
-        state.puzzle = await api('/api/bet/puzzle/start', {
-          method: 'POST', body: { amount: amount.get(), difficulty: diff.value },
-        });
-        setBalance(state.puzzle.balance, -1);
-        paintPuzzle();
-      } catch (e) {
-        toast(e.message, 'bad');
-        start.disabled = false;
-      }
-    });
-
-    setKids(panel, 
+  if (!g || g.state !== 'active') {
+    setKids(panel,
       amount.node,
-      el('label', { class: 'field' }, el('span', {}, t('puzzle.difficulty')), diff),
-      tier ? statRow('puzzle.topPrize', el('span', {}, `${tier.complete.toFixed(2)}x`)) : null,
-      tier ? statRow('puzzle.broken', el('span', {}, String(tier.broken))) : null,
-      start,
-      el('p', { class: 'hint' }, t('puzzle.sameEdge')),
-    );
-  } else {
-    const cash = el('button', { class: 'primary big' },
-      t('puzzle.cashout', { amount: fmtShort(g.cashoutValue || 0) }));
-    cash.disabled = !g.picks?.length;
-    cash.addEventListener('click', async () => {
-      cash.disabled = true;
-      try {
-        const out = await api('/api/bet/puzzle/cashout', { method: 'POST' });
-        state.puzzle = out;
-        setBalance(out.balance, 1);
-        paintPuzzle();
-        loadFeed();
-      } catch (e) { toast(e.message, 'bad'); cash.disabled = false; }
-    });
-    setKids(panel, 
-      statRow('bet.multiplier', el('span', {}, `${(g.multiplier || 0).toFixed(2)}x`)),
-      statRow('puzzle.next', el('span', {}, g.nextMultiplier ? `${g.nextMultiplier.toFixed(2)}x` : '-')),
-      statRow('puzzle.pieces', el('span', {}, String(g.remaining ?? 0))),
-      cash,
-      ladderList(g),
-    );
+      el('label', { class: 'field' }, el('span', {}, t('jig.board')), boardSel),
+      go,
+      el('p', { class: 'hint' }, t('jig.intro')));
+    applyAll(panel);
+    setKids($('#stage'), el('p', { class: 'hint' }, t('jig.idle')));
+    if (g && g.state === 'done') showJigResult(g);
+    return;
   }
+
+  // A round is open: the panel becomes the clock and a way out.
+  const clock = el('span', { class: 'jig-clock' }, jigTime(g.elapsed || 0));
+  const pace = el('span', { class: 'jig-pace' }, '');
+  let shown = g.elapsed || 0;
+  const tick = () => {
+    shown += 1;
+    clock.textContent = jigTime(shown);
+    const over = shown > g.par;
+    pace.textContent = over
+      ? t('jig.over', { n: jigTime(shown - g.par) })
+      : t('jig.left', { n: jigTime(g.par - shown) });
+    pace.classList.toggle('over', over);
+  };
+  tick();
+  stopJigClock();
+  jigClock = setInterval(tick, 1000);
+
+  setKids(panel,
+    el('div', { class: 'jig-bar' }, clock, pace),
+    el('div', { class: 'stat-row' },
+      el('span', { class: 'k' }, t('jig.entry')),
+      el('span', { class: 'v' }, `${fmt(g.wager)} ${state.cfg?.token?.symbol || 'TUG'}`)),
+    ...(g.payTable || []).map((row) => el('div', { class: 'stat-row' },
+      el('span', { class: 'k' }, t('jig.within', { n: jigTime(row.within) })),
+      el('span', { class: 'v' }, `${row.multiplier.toFixed(2)}x`))),
+    el('button', { class: 'ghost', onclick: giveUpJigsaw }, t('jig.give')));
   applyAll(panel);
 
-  // ---- the stage: artwork underneath, covers on top
-  const tier = (puzzleInfo?.tiers || []).find((x) => x.key === (g.difficulty || state.puzzleTier || 'medium'))
-    || { cols: 4, rows: 3, tiles: 12 };
-  const cols = g.cols || tier.cols;
-  const rows = g.rows || tier.rows;
-  const total = g.tiles || tier.tiles;
-  const picks = new Set(g.picks || []);
-  const broken = new Set(g.state && g.state !== 'active' ? (g.broken || []) : []);
-
-  const art = el('div', { class: 'puzzle-art' });
-  const key = g.picture || 'deco';
-  const own = state.puzzlePictures?.[key];
-  if (own) {
-    // An imported picture. Set as a background rather than written into the markup, so a
-    // filename can never become markup on the page.
-    art.style.backgroundImage = `url("${own}")`;
-    art.style.backgroundSize = 'cover';
-    art.style.backgroundPosition = 'center';
-  } else {
-    art.innerHTML = pictureSvg(key);
-  }
-
-  // Real jigsaw pieces rather than a grid of squares: neighbouring pieces share an edge
-  // exactly, so a tab on one is the blank on the other. The cut is seeded from the round
-  // so it stays put across re-renders; which pieces are broken still comes from the
-  // server, never from here.
-  const BOARD = 1000;
-  const boardH = Math.round((BOARD * rows) / cols);
-  const cut = createCut({
-    cols, rows, width: BOARD, height: boardH, seed: (g.nonce || 1) * 2654435761,
+  // The board.
+  const host = el('div');
+  setKids($('#stage'), host);
+  jigBoard = jigsawBoard(host, {
+    cols: g.cols,
+    rows: g.rows,
+    scramble: g.scramble,
+    cutSeed: g.cutSeed,
+    picture: state.puzzlePictures?.[g.picture] || null,
+    onSolve: (arrangement) => submitJigsaw(arrangement),
   });
-  const grid = svgEl('svg', {
-    class: 'puzzle-pieces',
-    viewBox: `0 0 ${BOARD} ${boardH}`,
-    preserveAspectRatio: 'none',
-  });
-  for (let i = 0; i < total; i += 1) {
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    const open = picks.has(i);
-    const cracked = broken.has(i);
-    const piece = svgEl('path', {
-      d: cut.path(col, row),
-      class: `piece ${open ? 'open' : ''} ${cracked ? 'cracked' : ''}`,
-    });
-    if (g.state === 'active' && !open) {
-      piece.addEventListener('click', () => revealPiece(i));
-    }
-    addKids(grid, piece);
-  }
-
-  const status = g.state === 'lost' ? t('puzzle.cracked')
-    : (g.state === 'cashed'
-      ? t('puzzle.complete', { mult: (g.multiplier || 0).toFixed(2) })
-      : (g.state === 'active' ? `${(g.multiplier || 0).toFixed(2)}x` : t('puzzle.pick')));
-
-  const shape = cols / rows >= 1.6 ? 'widest' : (cols / rows > 1.05 ? 'wide' : '');
-  setKids($('#stage'), 
-    el('div', {
-      class: `puzzle-status ${g.state === 'lost' ? 'lost' : (g.state === 'cashed' ? 'won' : '')}`,
-    }, status),
-    el('div', { class: `puzzle-frame ${shape}` }, art, grid),
-  );
-
-  infoPanel(puzzleInfo ? [
-    el('div', { class: 'stat-row' },
-      el('span', { class: 'k' }, t('bet.edge')),
-      el('span', { class: 'v' }, `${(puzzleInfo.edge * 100).toFixed(2)}%`)),
-  ] : []);
 }
 
-/** The payout ladder, with the rung already reached marked. */
-function ladderList(g) {
-  const rungs = g.ladder || [];
-  const at = (g.picks || []).length;
-  return el('div', {},
-    el('h3', { style: 'margin-top:14px' }, t('puzzle.ladder')),
-    el('div', { class: 'ladder-list' }, ...rungs.map((m, i) => el('span', {
-      class: i + 1 < at ? 'done' : (i + 1 === at ? 'now' : ''),
-    }, `${m.toFixed(2)}x`))));
-}
-
-async function revealPiece(tile) {
+async function submitJigsaw(arrangement) {
+  stopJigClock();
+  jigBoard?.freeze();
   try {
-    const out = await api('/api/bet/puzzle/reveal', { method: 'POST', body: { tile } });
-    state.puzzle = out;
-    if (out.balance != null) setBalance(out.balance, out.safe ? 0 : -1);
-    paintPuzzle();
-    audio.sfx(out.safe ? 'tileOpen' : 'crack');
-    if (out.completed) audio.sfx('bigWin');
-    if (!out.safe) { toast(t('puzzle.cracked'), 'bad'); loadFeed(); }
-    if (out.completed) {
-      toast(t('puzzle.complete', { mult: (out.multiplier || 0).toFixed(2) }));
-      loadFeed();
-    }
-  } catch (e) {
-    toast(e.message, 'bad');
-  }
+    const out = await api('/api/bet/jigsaw/solve', { method: 'POST', body: { arrangement } });
+    state.jigsaw = out;
+    audio.sfx(out.payout > 0 ? 'win' : 'lose');
+    await refreshTokenBalance();
+    setBalance(state.tokenBalance);
+    showJigResult(out);
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
+function showJigResult(out) {
+  const won = (out.payout || 0) > 0;
+  const line = out.tooFast
+    ? t('jig.tooFast')
+    : (won
+      ? t('jig.won', { n: jigTime(out.seconds || 0), m: (out.multiplier || 0).toFixed(2) })
+      : t('jig.slow', { n: jigTime(out.seconds || 0) }));
+  addKids($('#stage'), el('p', { class: `hint ${won ? 'pos' : 'neg'}` }, line));
+}
+
+async function giveUpJigsaw() {
+  stopJigClock();
+  try { await api('/api/bet/jigsaw/give', { method: 'POST' }); } catch { /* gone either way */ }
+  state.jigsaw = null;
+  renderJigsaw();
 }
 
 // -------------------------------------------------------------- preferans
@@ -3666,7 +3620,7 @@ async function claimFlag(id) {
 
 // Slots first: it is the game the site is built around and the one a new arrival should
 // land on. The rest follow in the order they were built.
-const GAMES = ['slots', 'dice', 'limbo', 'mines', 'crash', 'puzzle', 'preferans', 'debertz', 'arcade', 'match'];
+const GAMES = ['slots', 'dice', 'limbo', 'mines', 'crash', 'jigsaw', 'preferans', 'debertz', 'arcade', 'match'];
 
 /**
  * What each game is made of.
@@ -3682,7 +3636,7 @@ const GAME_SKIN = {
   slots:     { m: 'brass',  hue: 42 },   // the cabinet's own lacquer and brass
   arcade:    { m: 'brass',  hue: 14 },   // moulded plastic over a dark bezel
   mines:     { m: 'tile',   hue: 210 },  // a pressed tile that actually depresses
-  puzzle:    { m: 'tile',   hue: 268 },  // cut card stock
+  jigsaw:    { m: 'tile',   hue: 268 },  // cut card stock
   crash:     { m: 'glass',  hue: 152 },  // a line on a chart, lit from within
   limbo:     { m: 'glass',  hue: 190 },
   dice:      { m: 'resin',  hue: 8 },    // moulded, rounded, heavy
@@ -3757,7 +3711,7 @@ function renderGame() {
   else if (state.game === 'limbo') renderLimbo();
   else if (state.game === 'mines') { state.mines = null; renderMines(); loadMinesState(); }
   else if (state.game === 'slots') renderSlots();
-  else if (state.game === 'puzzle') { loadPuzzlePictures(); renderPuzzle(); }
+  else if (state.game === 'jigsaw') { loadPuzzlePictures(); renderJigsaw(); }
   else if (state.game === 'preferans') renderPreferans();
   else if (state.game === 'debertz') renderDebertz();
   else if (state.game === 'arcade') renderArcade();

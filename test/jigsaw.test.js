@@ -11,6 +11,7 @@ const assert = require('node:assert');
 const crypto = require('node:crypto');
 const { testConfig, openTestDb, cleanup } = require('./helpers');
 const jigsaw = require('../src/games/jigsaw');
+const fair = require('../src/fair');
 const bankMod = require('../src/bank');
 const tc = require('../src/tokenchain');
 const matches = require('../src/match');
@@ -150,7 +151,7 @@ test('slower finishes pay less, down to nothing', () => {
   const cfg = testConfig();
   const board = jigsaw.boardOf('medium');
   const par = board.par * board.pieces;
-  const edge = cfg.houseEdge.puzzle;
+  const edge = cfg.houseEdge.jigsaw;
   const at = (s) => jigsaw.payoutMultiplier(s, board, edge);
 
   assert.ok(at(par) > 0, 'par pays the most');
@@ -163,11 +164,15 @@ test('slower finishes pay less, down to nothing', () => {
 
 test('the house edge is taken once, at the top of the table', () => {
   const cfg = testConfig();
-  const edge = cfg.houseEdge.puzzle;
+  const edge = cfg.houseEdge.jigsaw;
   for (const name of Object.keys(jigsaw.BOARDS)) {
     const board = jigsaw.boardOf(name);
     const best = jigsaw.payoutMultiplier(0, board, edge);
-    const want = Math.floor(jigsaw.MAX_MULTIPLIER * (1 - edge) * 100) / 100;
+    // Through the same `floor2` the game uses, not a hand-rolled truncation: at a 5% edge
+    // `3 * 0.95` is 2.8499999999999996 in a double, and a plain floor turns an exact 2.85
+    // into 2.84. That is the representation bug already fixed once in src/fair.js, and
+    // reimplementing the arithmetic here reintroduced it in the test instead.
+    const want = fair.floor2(jigsaw.MAX_MULTIPLIER * (1 - edge));
     assert.strictEqual(best, want, `${name} tops out at the advertised multiple`);
   }
 });

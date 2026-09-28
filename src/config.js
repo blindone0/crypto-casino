@@ -34,9 +34,13 @@ const DEFAULTS = {
     // Slots run a wider edge than the originals because that is the market norm and
     // because their variance is far higher; 0.03 means a 97% return to player.
     slots: 0.03,
-    // Puzzle uses the same combinatorial pricing as mines, so the edge is exact and
-    // identical across every difficulty tier. Difficulty buys variance, not worse odds.
-    puzzle: 0.01,
+    // The jigsaw is pure SKILL — there is no chance in it at all, so unlike every other
+    // game here the edge is not a mathematical property of the payout table. It is the
+    // gap between the par time and how fast people actually are. Set wide for the same
+    // reason Preferans is: someone much faster than par takes the full multiple every
+    // round, and the entry fee is the only thing that makes that cost them anything.
+    // Watch the per-game hold rather than trusting this number.
+    jigsaw: 0.05,
     // Preferans is a game of SKILL, so this edge is not guaranteed the way the others
     // are. It is calibrated against the bot's own play: a player who plays better than
     // the bot erodes it, a weaker one loses more. Keep it wide to absorb that, and watch
