@@ -1,10 +1,5 @@
 'use strict';
-// Orbit Pinball, driven headlessly.
-//
-// The table is browser code, so this stands up just enough of a DOM to run it: a canvas
-// whose 2D context swallows every drawing call, a virtual clock, and a requestAnimationFrame
-// that only advances when this file says so. The physics are a pure function of the timestep,
-// so a fixed-step run here is deterministic and these assertions cannot flake.
+// Orbit Pinball, driven headlessly. The fake browser lives in cabinet-harness.js.
 //
 // Both launch bugs this catches were real and both made the cabinet unplayable:
 //   - the plunger's full power was below escape velocity for the launch lane, so the ball
@@ -15,95 +10,11 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-/** A 2D context that accepts everything and draws nothing. */
-function stubContext() {
-  const gradient = { addColorStop() {} };
-  return new Proxy({}, {
-    get(target, prop) {
-      if (prop === 'createRadialGradient' || prop === 'createLinearGradient') {
-        return () => gradient;
-      }
-      if (prop === 'measureText') return () => ({ width: 0 });
-      if (!(prop in target)) target[prop] = () => {};
-      return typeof target[prop] === 'function' ? target[prop] : target[prop];
-    },
-    set(target, prop, value) { target[prop] = value; return true; },
-  });
-}
-
-/**
- * Install the globals the table expects and hand back a driver.
- * `advance(ms)` runs whole frames; nothing moves unless it is called.
- */
-function harness() {
-  const listeners = { window: {}, canvas: {} };
-  const addTo = (bag) => (type, fn) => { (bag[type] ||= []).push(fn); };
-  const removeFrom = (bag) => (type, fn) => {
-    bag[type] = (bag[type] || []).filter((f) => f !== fn);
-  };
-
-  let clock = 0;
-  let pending = null;
-
-  const canvas = {
-    width: 0,
-    height: 0,
-    getContext: () => stubContext(),
-    getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 640 }),
-    addEventListener: addTo(listeners.canvas),
-    removeEventListener: removeFrom(listeners.canvas),
-    focus() {},
-  };
-
-  const saved = {
-    window: global.window,
-    performance: global.performance,
-    requestAnimationFrame: global.requestAnimationFrame,
-    cancelAnimationFrame: global.cancelAnimationFrame,
-  };
-
-  global.window = {
-    addEventListener: addTo(listeners.window),
-    removeEventListener: removeFrom(listeners.window),
-  };
-  global.performance = { now: () => clock };
-  global.requestAnimationFrame = (fn) => { pending = fn; return 1; };
-  global.cancelAnimationFrame = () => { pending = null; };
-
-  const fire = (type, code) => {
-    const event = { code, repeat: false, preventDefault() {} };
-    for (const fn of listeners.window[type] || []) fn(event);
-  };
-
-  return {
-    canvas,
-    /** Run `frames` frames of `stepMs` each. Returns how many actually ran. */
-    advance(frames, stepMs = 16) {
-      let ran = 0;
-      for (let i = 0; i < frames; i += 1) {
-        const fn = pending;
-        if (!fn) break;
-        pending = null;
-        clock += stepMs;
-        fn(clock);
-        ran += 1;
-      }
-      return ran;
-    },
-    keyDown: (code) => fire('keydown', code),
-    keyUp: (code) => fire('keyup', code),
-    restore() {
-      global.window = saved.window;
-      global.performance = saved.performance;
-      global.requestAnimationFrame = saved.requestAnimationFrame;
-      global.cancelAnimationFrame = saved.cancelAnimationFrame;
-    },
-  };
-}
+const { harness } = require('./cabinet-harness');
 
 /** Start a table, run `body`, and always put the globals back. */
 async function table(body) {
-  const h = harness();
+  const h = harness({ width: 400, height: 640 });
   const mod = await import('../public/games/pinball.js');
   const events = { ends: [], balls: [], scores: [] };
   const game = mod.start(h.canvas, {

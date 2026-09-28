@@ -2280,6 +2280,8 @@ function renderTokenWallet(body, info) {
 // unverifiable number would be farmed the same day.
 const CABINET_MODULES = {
   pinball: () => import('./games/pinball.js'),
+  billiards: () => import('./games/billiards.js'),
+  invaders: () => import('./games/invaders.js'),
 };
 
 async function renderArcade() {

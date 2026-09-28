@@ -33,7 +33,8 @@ const GAMES = {
     key: 'billiards',
     name: 'Billiards',
     blurb: 'Pot every ball in as few shots as you can.',
-    maxScore: 100000,
+    // Nine balls at a thousand, plus the clearance bonus and whatever shots are left.
+    maxScore: 30000,
   },
   invaders: {
     key: 'invaders',
