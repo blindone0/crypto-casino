@@ -36,6 +36,7 @@ const U = require('./util');
 const chess = require('./chess');
 const seabattle = require('./seabattle');
 const balda = require('./balda');
+const durak = require('./durak');
 const wordsRu = require('./words-ru');
 
 /** The other seat, at a table of two. */
@@ -315,8 +316,165 @@ const BALDA = {
   },
 };
 
+
+// -------------------------------------------------------------------- Дурак
+/**
+ * Дурак переводной, for two to six.
+ *
+ * The rules live in durak.js. What this adds is the part the rules do not care about:
+ * whose turn it is for the framework's purposes, what each player is allowed to see, and
+ * who has won when it ends.
+ *
+ * "Whose turn" is more interesting here than in chess. For most of a bout it is the
+ * defender's, but once everything on the table has been beaten it belongs to whichever
+ * attacker has not yet said they are finished, and any of them may throw in a card. The
+ * clock follows whoever that is.
+ */
+const DURAK = {
+  key: 'durak',
+  name: 'Durak',
+  seats: { min: 2, max: durak.MAX_SEATS, default: 2 },
+  clockMs: 6 * 60 * 1000,
+  incrementMs: 8 * 1000,
+
+  create(cfg, seats) {
+    return durak.start(durak.deal(seats));
+  },
+
+  /**
+   * Who is on the clock.
+   *
+   * The defender while anything is unbeaten or nothing has been played; otherwise the
+   * first attacker still deciding whether to add a card. Returning null would stop the
+   * clock entirely, and a bout where everyone simply waits is how a stake gets held
+   * hostage.
+   */
+  toMove(state) {
+    if (state.finished) return null;
+    if (durak.unbeaten(state).length || state.attacks.length === 0) return state.defender;
+    for (let step = 0; step < state.hands.length; step += 1) {
+      const seat = (state.attacker + step) % state.hands.length;
+      if (seat === state.defender || state.out[seat]) continue;
+      if (!state.passed.includes(seat)) return seat;
+    }
+    return state.defender;
+  },
+
+  // Anyone still in may add a card once the table has been beaten, not only the seat the
+  // clock happens to be on, so the framework asks the rules rather than the turn order.
+  canAct(state, seat) {
+    if (state.finished || state.out[seat]) return false;
+    return Object.values(durak.options(state, seat)).some(Boolean);
+  },
+
+  act(state, seat, payload) {
+    const play = String(payload.play || '');
+    let next;
+    if (play === 'attack') next = durak.attack(state, seat, String(payload.card));
+    else if (play === 'defend') next = durak.defend(state, seat, String(payload.card), payload.on);
+    else if (play === 'pass') next = durak.passOn(state, seat, String(payload.card));
+    else if (play === 'take') next = durak.take(state, seat);
+    else if (play === 'done') next = durak.done(state, seat);
+    else throw new U.BadRequest('no such move');
+
+    if (!next.finished) return { state: next, note: play };
+    // Everyone except the fool has won. At a table of two that is one player; at a table
+    // of five it is four, and they share the pot.
+    //
+    // A null fool is a real outcome rather than a missing one: the last players can go
+    // out on the same bout, and then nobody was left holding cards. That is a draw, and
+    // everybody takes a share.
+    if (next.fool === null || next.fool === undefined || next.fool < 0) {
+      const all = [];
+      for (let i = 0; i < next.hands.length; i += 1) all.push(i);
+      return { state: next, note: play, winners: all, reason: 'no-fool' };
+    }
+    const winners = allBut(next.fool, next.hands.length);
+    return { state: next, note: play, winners, reason: 'fool' };
+  },
+
+  /**
+   * What one seat may see.
+   *
+   * Your own cards, and for everyone else only how many they hold. A hand visible to the
+   * wrong player is the whole game, so this is the one view in the project whose test
+   * searches the serialised response for the actual cards.
+   */
+  view(state, seat) {
+    const mine = seat === null || seat === undefined ? null : state.hands[seat];
+    const open = durak.unbeaten(state);
+    return {
+      trump: state.trump,
+      stock: state.stock.length,
+      // The trump card at the bottom is face up in front of everyone, so it is not secret.
+      trumpCard: state.stock.length ? state.stock[state.stock.length - 1] : null,
+      discarded: state.discarded,
+      attacker: state.attacker,
+      defender: state.defender,
+      attacks: state.attacks.map((a) => ({ card: a.card, beat: a.beat })),
+      counts: state.hands.map((h) => h.length),
+      out: state.out,
+      passed: state.passed,
+      finished: !!state.finished,
+      fool: state.finished ? state.fool : null,
+      hand: mine ? mine.slice() : null,
+      options: mine ? durak.options(state, seat) : {},
+      // Which of your cards are legal right now, worked out here so the table does not
+      // have to reimplement the rules to grey out a card.
+      canBeat: mine && open.length
+        ? mine.filter((c) => durak.beats(c, open[0].card, state.trump))
+        : [],
+      playable: mine ? playableFor(state, seat, mine) : [],
+      log: state.log.slice(-14),
+    };
+  },
+
+  resultOnTimeout(state, seat, seats) {
+    // Running out of time is losing, and losing дурак means being the fool.
+    return allBut(seat, seats);
+  },
+
+  /**
+   * Resigning at a table of more than two folds you rather than ending it.
+   * Your cards go back to the stock so the others can play on, and you are the fool if
+   * everyone else finishes. Nobody should be able to end four people's game by leaving.
+   */
+  onQuit(state, seat, seats) {
+    const live = durak.liveSeats(state);
+    if (live <= 2) return { winners: allBut(seat, seats), reason: 'resignation' };
+    const out = state.out.slice();
+    out[seat] = true;
+    const hands = state.hands.map((h, i) => (i === seat ? [] : h.slice()));
+    const next = { ...state, out, hands, quit: [...(state.quit || []), seat] };
+    if (durak.liveSeats(next) <= 1) {
+      const fool = next.out.findIndex((o) => !o);
+      return { winners: allBut(fool < 0 ? seat : fool, seats), reason: 'fool' };
+    }
+    // Whoever was involved with this seat needs replacing at the table.
+    const attacker = next.out[next.attacker] ? durak.nextLive(next, next.attacker) : next.attacker;
+    const defender = next.out[next.defender] ? durak.nextLive(next, attacker) : next.defender;
+    return { state: { ...next, attacker, defender } };
+  },
+};
+
+/** Which of a hand's cards could legally be put down right now. */
+function playableFor(state, seat, hand) {
+  const opts = durak.options(state, seat);
+  if (opts.defend && durak.unbeaten(state).length) {
+    const target = durak.unbeaten(state)[0].card;
+    return hand.filter((c) => durak.beats(c, target, state.trump));
+  }
+  if (opts.attack) {
+    if (state.attacks.length === 0) return hand.slice();
+    const ranks = new Set(durak.tableCards(state).map(durak.rankOf));
+    return hand.filter((c) => ranks.has(durak.rankOf(c)));
+  }
+  return [];
+}
+
 const GAMES = {
   chess: CHESS,
+  durak: DURAK,
   balda: BALDA,
   seabattle: SEABATTLE,
 };

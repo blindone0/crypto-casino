@@ -2588,6 +2588,7 @@ const MATCH_BOARDS = {
   chess: () => import('./games/chessboard.js'),
   seabattle: () => import('./games/seabattleboard.js'),
   balda: () => import('./games/baldaboard.js'),
+  durak: () => import('./games/durakboard.js'),
 };
 
 /** Poll while a match is live. Matches are turn-based, so a socket would be overkill. */
@@ -2915,6 +2916,7 @@ function eventLog(view) {
 
   return (view.view.log || []).slice().reverse().map((entry) => {
     if (entry.pass) return row(entry.seat, t('match.passed'), '');
+    if (entry.act) return row(entry.seat, t(`durak.${entry.act}`), entry.card || '');
     if (entry.word) return row(entry.seat, entry.word, `+${entry.score}`, 'pos');
     return row(
       entry.seat,

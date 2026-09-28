@@ -1056,3 +1056,45 @@ body.couch .bigwin .amount { color: #e8eeff; text-shadow: 0 0 44px rgba(143, 166
   border-radius: 10px;
   color: var(--text-dim);
 }
+
+/* ---------------------------------------------------------------- durak */
+.durak { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; }
+.durak-seats { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+.durak-seat {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--panel); min-width: 62px;
+}
+.durak-seat.defending { border-color: var(--gold); }
+.durak-seat .count { font: 600 18px/1 ui-monospace, monospace; }
+
+.durak-deck { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--text-dim); }
+.durak-table {
+  display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
+  min-height: 92px; align-items: center;
+  padding: 10px; border: 1px dashed var(--line); border-radius: 10px;
+  width: min(92vw, 520px);
+}
+.durak-table .pair { position: relative; width: 46px; height: 68px; }
+.durak-table .pair .card { position: absolute; inset: 0; }
+.durak-table .pair .beat { transform: translate(9px, 11px) rotate(8deg); }
+
+.durak-hand { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; max-width: min(92vw, 560px); }
+.durak-status { min-height: 16px; }
+.durak-actions { gap: 6px; }
+
+.card {
+  width: 46px; height: 68px; border-radius: 5px;
+  background: #f3efe6; border: 1px solid #b9b0a0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  font-family: ui-monospace, monospace; line-height: 1; user-select: none;
+}
+.card .r { font-size: 17px; font-weight: 700; }
+.card .s { font-size: 15px; }
+.card.red { color: #b3223a; }
+.card.black { color: #14161a; }
+.card.dim { opacity: .45; }
+.card.playable { cursor: pointer; box-shadow: 0 0 0 1px var(--gold-line); }
+.card.playable:hover { transform: translateY(-4px); }
+.card.picked { box-shadow: 0 0 0 2px var(--gold); transform: translateY(-6px); }
+.card.trump-card { transform: rotate(90deg) scale(.8); }
