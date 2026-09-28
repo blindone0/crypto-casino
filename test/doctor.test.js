@@ -221,3 +221,56 @@ test('with the token off the token checks pass rather than crash', (t) => {
   assert.strictEqual(named(out, 'token chain').detail, 'token is off');
   assert.strictEqual(named(out, 'supply').detail, 'token is off');
 });
+
+// ---------------------------------------------------------------------------
+// The WAL check.
+//
+// This one is deliberately unlike the others: it reports and never fails. An oversized
+// write-ahead log is a shape worth seeing, not money going somewhere it should not, and
+// a doctor that cries wolf about disk usage gets ignored when it matters.
+//
+// It exists because the WAL reached 4.16MB in front of a 1.7MB database and looked like
+// corruption. It was not — every frame had been checkpointed. The file simply keeps its
+// high-water mark, because only a TRUNCATE checkpoint shrinks it.
+
+test('the wal check reports its size and never fails the run', (t) => {
+  const { db, cfg } = setup();
+  t.after(() => cleanup(db, cfg));
+
+  const out = doctor.checkAll(db, cfg);
+  const wal = named(out, 'wal');
+  assert.ok(wal, 'the doctor must report a wal check');
+  assert.strictEqual(wal.ok, true, 'the wal check must never fail the run');
+  assert.match(wal.detail, /MB|none/, `unexpected detail: ${wal.detail}`);
+});
+
+test('a wal larger than its database is called out by name', (t) => {
+  const { db, cfg } = setup();
+  t.after(() => cleanup(db, cfg));
+
+  const fs = require('node:fs');
+  // Grow the real WAL past both thresholds: bigger than the database AND over a
+  // megabyte. Padding the file is enough — the check reads sizes, not contents, and
+  // this must not disturb a database the other tests share a shape with.
+  const walPath = `${cfg.dbPath}-wal`;
+  const dbBytes = fs.statSync(cfg.dbPath).size;
+  const want = Math.max(dbBytes + 1, 1048576) + 4096;
+  const had = fs.existsSync(walPath) ? fs.statSync(walPath).size : 0;
+  fs.appendFileSync(walPath, Buffer.alloc(Math.max(0, want - had)));
+
+  const wal = named(doctor.checkAll(db, cfg), 'wal');
+  assert.strictEqual(wal.ok, true, 'it still must not fail the run');
+  assert.match(wal.detail, /vacuum-wal/,
+    `an oversized wal must name the tool that fixes it, got: ${wal.detail}`);
+});
+
+test('a wal smaller than its database says nothing about vacuuming', (t) => {
+  const { db, cfg } = setup();
+  t.after(() => cleanup(db, cfg));
+
+  // The other half of the branch: advice that appears when it is not needed is noise,
+  // and noise in a health check is how real findings get skimmed past.
+  const wal = named(doctor.checkAll(db, cfg), 'wal');
+  assert.ok(!/vacuum-wal/.test(wal.detail),
+    `a normal wal must not advise vacuuming, got: ${wal.detail}`);
+});

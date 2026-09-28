@@ -17,6 +17,7 @@
     "token-reset": "node tools/token-reset.js",
     "migrate": "node tools/migrate.js",
     "doctor": "node tools/doctor.js",
+    "vacuum-wal": "node tools/vacuum-wal.js",
     "export-pictures": "node tools/export-pictures.js"
   }
 }

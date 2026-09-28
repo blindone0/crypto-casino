@@ -21,11 +21,44 @@ const migrate = require('./migrate');
  * migration that only ever runs on a fresh database and every later connection quietly
  * opens with foreign keys off. They also cannot run inside a transaction, which is how
  * this was found.
+ *
+ * ON THE WAL SIZE
+ *
+ * The WAL reached 4.16MB in front of a 1.7MB database. Nothing was wrong with it: every
+ * frame had been checkpointed, `busy` was 0, and the database itself was 425 pages with
+ * an empty freelist. The file was simply mostly empty space being held open.
+ *
+ *   wal_autocheckpoint  how full the WAL gets before SQLite writes it back. The default
+ *                       1000 pages is 4MB at this page size, which is how a database
+ *                       this small ends up behind a 4MB log. 256 pages is 1MB.
+ *
+ *   journal_size_limit  the size SQLite will truncate DOWN TO, but only when a
+ *                       checkpoint actually truncates. It is not a cap on growth.
+ *
+ * That second point is worth being exact about, because the obvious reading is wrong and
+ * I held it until I measured. Running all four checkpoint modes against a 3.0MB WAL on an
+ * idle database, with the limit set to 2MB:
+ *
+ *   PASSIVE   busy=0, all frames written back -> file unchanged at 3.0MB
+ *   FULL      busy=0, all frames written back -> file unchanged at 3.0MB
+ *   RESTART   busy=0, all frames written back -> file unchanged at 3.0MB
+ *   TRUNCATE  busy=0                          -> file 0 bytes
+ *
+ * So the automatic checkpoint keeps the WAL's CONTENTS small, and the file grows to its
+ * high-water mark and stays there until something runs TRUNCATE. That is what
+ * `npm run vacuum-wal` is for, and why it exists as a separate tool rather than a pragma
+ * someone expects to handle it.
+ *
+ * The autocheckpoint is cheap here because writes are small and already synchronous =
+ * FULL. A busier database would want the opposite trade — fewer, larger checkpoints — so
+ * these numbers belong to this workload rather than being generally correct.
  */
 const PRAGMAS = `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 PRAGMA synchronous = FULL;
+PRAGMA wal_autocheckpoint = 256;
+PRAGMA journal_size_limit = 2097152;
 `;
 
 /**

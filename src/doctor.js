@@ -15,6 +15,8 @@
  * of it has gone somewhere it should not be able to go.
  */
 
+const fs = require('node:fs');
+
 const ledger = require('./ledger');
 const tokenchain = require('./tokenchain');
 const matches = require('./match');
@@ -156,6 +158,42 @@ function schemaCurrent(db) {
   };
 }
 
+/**
+ * The write-ahead log is not larger than the database it fronts.
+ *
+ * Unlike every other check here, this one is not about money. It reports rather than
+ * fails: a large WAL is a shape worth seeing, never a reason to page anyone at 3am, and
+ * a doctor that cries wolf gets ignored when it matters.
+ *
+ * It grew to 4.16MB against a 1.7MB database once. Nothing was wrong — every frame had
+ * been checkpointed — but `journal_size_limit` defaults to -1, meaning SQLite never
+ * shrinks the file back after writing it out, so it keeps its high-water mark forever.
+ * src/db.js sets both that and a smaller autocheckpoint now. An existing oversized file
+ * is reclaimed by `npm run vacuum-wal`, because doing it here would make a read-only
+ * tool write, and this one is documented as safe to run against a live server.
+ */
+function walInCheck(db, cfg) {
+  const path = cfg.dbPath;
+  const size = (p) => { try { return fs.statSync(p).size; } catch { return 0; } };
+  const mb = (n) => `${(n / 1048576).toFixed(1)}MB`;
+
+  const dbBytes = size(path);
+  const walBytes = size(`${path}-wal`);
+
+  if (!walBytes) return { name: 'wal', ok: true, detail: 'none (not in WAL mode, or already written back)' };
+
+  // Bigger than the database AND over a megabyte. Either alone is normal: a small
+  // database legitimately has a WAL larger than itself for a moment after a write.
+  const oversized = walBytes > dbBytes && walBytes > 1048576;
+  return {
+    name: 'wal',
+    ok: true,
+    detail: oversized
+      ? `${mb(walBytes)} against a ${mb(dbBytes)} database — run npm run vacuum-wal`
+      : `${mb(walBytes)} against a ${mb(dbBytes)} database`,
+  };
+}
+
 /** Run the lot. Returns { ok, checks }. */
 function checkAll(db, cfg, at = Math.floor(Date.now() / 1000)) {
   const checks = [
@@ -166,12 +204,14 @@ function checkAll(db, cfg, at = Math.floor(Date.now() / 1000)) {
     escrowCovered(db, cfg),
     nothingStranded(db, cfg, at),
     noOrphans(db),
+    walInCheck(db, cfg),
   ];
   return { ok: checks.every((c) => c.ok), checks };
 }
 
 module.exports = {
   checkAll,
+  walInCheck,
   schemaCurrent,
   booksBalance,
   chainVerifies,
