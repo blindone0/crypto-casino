@@ -291,6 +291,9 @@ function load() {
   validate(cfg);
   cfg.root = ROOT;
   cfg.dbPath = path.isAbsolute(cfg.dbFile) ? cfg.dbFile : path.join(ROOT, cfg.dbFile);
+  // Where optional data files live, next to the database. The Балда dictionary is read
+  // from here if the operator has supplied a bigger one than the built-in list.
+  cfg.dataDir = path.dirname(cfg.dbPath);
   applyAssetOverrides(cfg);
   return cfg;
 }

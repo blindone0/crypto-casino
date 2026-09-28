@@ -22,6 +22,8 @@ const U = require('./util');
 const tokenchain = require('./tokenchain');
 const chess = require('./chess');
 const seabattle = require('./seabattle');
+const balda = require('./balda');
+const wordsRu = require('./words-ru');
 
 const now = () => Math.floor(Date.now() / 1000);
 const nowMs = () => Date.now();
@@ -195,6 +197,86 @@ const GAMES = {
     },
   },
 
+  balda: {
+    key: 'balda',
+    name: 'Balda',
+    clockMs: 10 * 60 * 1000,
+    incrementMs: 10 * 1000,
+
+    create(cfg) {
+      // The opening word is drawn from the dictionary, so every game starts differently
+      // and neither player can have prepared for this particular board.
+      const dictionary = wordsRu.loadWords(cfg && cfg.dataDir);
+      const five = wordsRu.wordsOfLength(dictionary, balda.SIZE);
+      if (!five.length) throw new Error('the dictionary has no five-letter word to open with');
+      const opening = five[crypto.randomInt(five.length)];
+      return {
+        grid: balda.startGrid(opening),
+        opening,
+        scores: { host: 0, guest: 0 },
+        used: [opening],
+        turn: crypto.randomInt(2) === 0 ? 'host' : 'guest',
+        passes: 0,
+        log: [],
+      };
+    },
+
+    toMove(state) {
+      return state.turn;
+    },
+
+    act(state, seat, payload, cfg) {
+      const dictionary = wordsRu.loadWords(cfg && cfg.dataDir);
+
+      // Passing is a move. Two in a row ends the game, which is what stops a player who
+      // has run out of ideas from simply sitting on a lead until the clock does it.
+      if (payload.pass) {
+        const passes = state.passes + 1;
+        const next = {
+          ...state,
+          passes,
+          turn: otherSeat(seat),
+          log: [...state.log, { seat, pass: true }],
+        };
+        if (passes >= 2) return { state: next, note: 'pass', ...finish(next) };
+        return { state: next, note: 'pass' };
+      }
+
+      const move = balda.play(state, dictionary, payload);
+      const scores = { ...state.scores, [seat]: state.scores[seat] + move.score };
+      const next = {
+        ...state,
+        grid: move.grid,
+        scores,
+        used: [...state.used, move.word],
+        turn: otherSeat(seat),
+        passes: 0,
+        log: [...state.log, { seat, word: move.word, score: move.score, path: move.path }],
+      };
+      if (balda.gridFull(next.grid)) return { state: next, note: move.word, ...finish(next) };
+      return { state: next, note: move.word };
+    },
+
+    view(state) {
+      // Nothing here is secret. Both players look at the same board, and the list of words
+      // already spent is part of it.
+      return {
+        size: balda.SIZE,
+        grid: state.grid,
+        scores: state.scores,
+        used: state.used,
+        opening: state.opening,
+        turn: state.turn,
+        playable: balda.playable(state.grid),
+        log: state.log.slice(-12),
+      };
+    },
+
+    resultOnTimeout(state, seat) {
+      return otherSeat(seat);
+    },
+  },
+
   seabattle: {
     key: 'seabattle',
     name: 'Sea Battle',
@@ -293,6 +375,13 @@ const GAMES = {
     },
   },
 };
+
+/** Who won a finished Балда game. Written once and used by both endings. */
+function finish(state) {
+  const { host, guest } = state.scores;
+  if (host === guest) return { result: 'draw', reason: 'tied' };
+  return { result: host > guest ? 'host' : 'guest', reason: 'higher-score' };
+}
 
 const gameFor = (key) => GAMES[String(key || '')] || null;
 
@@ -414,7 +503,7 @@ function join(db, cfg, user, { id, spend }) {
     escrow(db, spend, match.stake);
 
     const plugin = gameFor(match.game);
-    const state = plugin.create();
+    const state = plugin.create(cfg);
     db.run(
       `UPDATE matches SET status='playing', guest_id=?, guest_key=?, state=?,
               started_at=?, moved_at_ms=?, host_ms=?, guest_ms=? WHERE id=?`,
@@ -465,7 +554,7 @@ function act(db, cfg, user, { id, ...payload }) {
       return { ...settle(db, cfg, match, result, 'timeout'), flagged: seat };
     }
 
-    const outcome = plugin.act(state, seat, payload);
+    const outcome = plugin.act(state, seat, payload, cfg);
     const ply = db.get('SELECT COUNT(*) AS n FROM match_moves WHERE match_id=?', match.id).n;
     db.run(
       `INSERT INTO match_moves(match_id, seat, ply, move, note, created_at)

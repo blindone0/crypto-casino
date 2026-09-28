@@ -26,6 +26,7 @@ function testConfig(overrides = {}) {
   cfg.root = ROOT;
   cfg.dbPath = dbPath;
   cfg.dbFile = dbPath;
+  cfg.dataDir = path.dirname(dbPath);
   configMod.applyAssetOverrides(cfg);
   return cfg;
 }

@@ -38,14 +38,16 @@ let reverb = null;
 let reverbGain = null;
 let vinyl = null;
 
-// The bed of vinyl surface noise under the music. It is a deliberate part of the sound,
-// but it is also a hiss that nobody asked for, so it gets its own switch.
-let vinylOn = true;
+// The bed of vinyl surface noise under the music.
+//
+// Off unless it is asked for. It is a nice texture and it is also a hiss, and a hiss that
+// arrives without being requested is just noise coming out of somebody's speakers.
+let vinylOn = false;
 
 try {
   enabled = localStorage.getItem('sound') !== 'off';
   musicOn = localStorage.getItem('music') !== 'off';
-  vinylOn = localStorage.getItem('vinyl') !== 'off';
+  vinylOn = localStorage.getItem('vinyl') === 'on';
 } catch { /* private mode */ }
 
 // ---------------------------------------------------------------- plumbing
@@ -132,7 +134,8 @@ function startVinyl() {
   lp.frequency.value = 7000;
 
   const g = ctx.createGain();
-  g.gain.value = 0.012;
+  // Silent until something asks for it. See surfaceLevel().
+  g.gain.value = 0;
 
   src.connect(hp); hp.connect(lp); lp.connect(g); g.connect(master);
   src.start();
@@ -569,15 +572,31 @@ function announce() {
   }
 }
 
+/**
+ * How loud the surface noise should be right now.
+ *
+ * Zero unless the music is actually playing and the listener asked for it. The noise is a
+ * looping buffer connected to the master output: it is started once and runs for the life
+ * of the page, so nothing else ever silences it. Stopping the scheduler stops the notes
+ * and leaves this hissing away on its own, which is exactly what it did.
+ */
+function surfaceLevel() {
+  if (!vinylOn || !enabled || !musicOn || !musicTimer || !track) return 0;
+  return 0.002 + track.vinyl * 0.009;
+}
+
+function applySurface(at) {
+  if (!ctx || !vinyl) return;
+  const t = Math.max(at ?? ctx.currentTime, ctx.currentTime);
+  vinyl.level.setTargetAtTime(surfaceLevel(), t, 0.25);
+}
+
 /** Each track carries its own room and surface noise, so the dial has a sense of place. */
 function applyTrackTone(at) {
-  if (!ctx || !track) return;
+  if (!ctx) return;
   const t = Math.max(at ?? ctx.currentTime, ctx.currentTime);
-  if (reverbGain) reverbGain.gain.setTargetAtTime(0.25 + track.room * 0.55, t, 0.4);
-  // Roughly half what it was: audible as a texture under the music, not as a hiss beside
-  // it. The level is per-track, because a wide ballad wants less of it than a blues.
-  const surface = vinylOn ? 0.002 + track.vinyl * 0.009 : 0;
-  if (vinyl) vinyl.level.setTargetAtTime(surface, t, 0.4);
+  if (reverbGain && track) reverbGain.gain.setTargetAtTime(0.25 + track.room * 0.55, t, 0.4);
+  applySurface(t);
 }
 
 function selectTrack(id, at) {
@@ -683,10 +702,16 @@ function startMusic() {
   nextNoteTime = ctx.currentTime + 0.15;
   musicLoop();
   musicTimer = setInterval(musicLoop, 60);
+  // After the timer exists, not before: surfaceLevel() reads it to decide whether the
+  // music is actually running, and it is not running until this line has happened.
+  applySurface(ctx.currentTime);
 }
 
 function stopMusic() {
   if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
+  // The scheduler stopping is not enough: the surface noise is its own source and has to
+  // be turned down explicitly, or the music goes quiet and the hiss carries on.
+  applySurface();
 }
 
 // ------------------------------------------------------------- radio api
@@ -818,6 +843,7 @@ function setEnabled(on) {
   try { localStorage.setItem('sound', enabled ? 'on' : 'off'); } catch { /* ignore */ }
   if (!enabled) stopMusic();
   else if (musicOn) startMusic();
+  applySurface();
   return enabled;
 }
 
@@ -825,7 +851,7 @@ function setEnabled(on) {
 function setVinyl(on) {
   vinylOn = !!on;
   try { localStorage.setItem('vinyl', vinylOn ? 'on' : 'off'); } catch { /* private mode */ }
-  applyTrackTone();
+  applySurface();
   return vinylOn;
 }
 
@@ -836,6 +862,7 @@ function setMusic(on) {
   try { localStorage.setItem('music', musicOn ? 'on' : 'off'); } catch { /* ignore */ }
   if (musicOn && enabled) startMusic();
   else stopMusic();
+  applySurface();
   return musicOn;
 }
 
