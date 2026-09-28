@@ -120,8 +120,10 @@ reasons a player can now see, and the fact that дурак can end in a draw.
 
 Smaller, and worth doing only once the above is true:
 
-- **A match clock that survives a restart.** Clocks are wall-clock, so a server restart
-  mid-game burns whoever was on the clock. Storing the pause would be fairer.
+- ~~**A match clock that survives a restart.**~~ Done, and it was worse than it looked:
+  since the sweeper landed, `abandonSeconds` is measured the same way, so an outage longer
+  than an hour would have come back and settled every game in progress as abandoned. The
+  server now records a heartbeat and gives the gap back to every clock on the next start.
 - **Spectating.** `match.detail` already refuses to send a hand to somebody not at the
   table, so the hard part is done.
 - **An admin action log that can be read.** `db.audit` is already called all over the

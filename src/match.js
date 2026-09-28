@@ -563,6 +563,59 @@ function escrowHealth(db) {
   return { held, owed, spare: held - owed, ok: held >= owed };
 }
 
+/** Note that the server is alive. Cheap, and the only thing creditDowntime has to go on. */
+function heartbeat(db, at = nowMs()) {
+  db.kvSet('match.heartbeat', at);
+}
+
+/**
+ * Give back the time the server was not running.
+ *
+ * Every clock in the match layer is wall-clock: a seat's remaining time is its stored
+ * milliseconds minus how long ago the last move was. That is right while the server is
+ * up and badly wrong across a restart, because the player on the clock is charged for an
+ * outage they had no part in. Deploy during a game and somebody loses on time.
+ *
+ * Worse since the sweeper: abandonSeconds is measured the same way, so a server down
+ * longer than an hour would come back, find every live match untouched for over an hour,
+ * and settle the lot as abandoned. An hour of downtime would have ended every game in
+ * progress on the site.
+ *
+ * So the outage is subtracted from the clocks by pushing the marks forward. A challenge
+ * that was posted just before an outage has not really been sitting unanswered, either,
+ * so its expiry moves with it.
+ *
+ * The heartbeat is the only record of when the server was last alive; without one, this
+ * is the first start and there is nothing to credit.
+ */
+function creditDowntime(db, cfg, at = nowMs()) {
+  const last = db.kvGet('match.heartbeat');
+  heartbeat(db, at);
+  if (!Number.isFinite(last)) return { down: 0, matches: 0 };
+
+  // A gap no longer than the heartbeat is just the interval, not an outage. A negative
+  // one means the clock went backwards, which is not something to pay out on.
+  const down = at - last;
+  const floor = (cfg.match.heartbeatSeconds || 15) * 2 * 1000;
+  if (down < floor) return { down: 0, matches: 0 };
+
+  return db.tx(() => {
+    const playing = db.run(
+      "UPDATE matches SET moved_at_ms = moved_at_ms + ? WHERE status='playing' AND moved_at_ms > 0",
+      down,
+    );
+    const open = db.run(
+      "UPDATE matches SET created_at = created_at + ? WHERE status='open'",
+      Math.floor(down / 1000),
+    );
+    const touched = (playing.changes || 0) + (open.changes || 0);
+    if (touched) {
+      db.audit('system', 'match.downtime', { ms: down, matches: touched });
+    }
+    return { down, matches: touched };
+  });
+}
+
 /**
  * Close out tables that nobody is coming back to.
  *
@@ -614,5 +667,5 @@ module.exports = {
   GAMES, gameFor, houseKey, houseTransfer, escrow,
   create, join, cancel, act, resign, claimTimeout,
   lobby, detail, summary, settle, refund, stats, seatOf, seatsOf,
-  timeoutOutcome, sweep, escrowHealth,
+  timeoutOutcome, sweep, escrowHealth, heartbeat, creditDowntime,
 };

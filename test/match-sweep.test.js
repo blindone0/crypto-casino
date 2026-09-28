@@ -304,3 +304,121 @@ test('sweeping twice changes nothing the second time', (t) => {
     { expired: 0, resolved: 0, refunded: 0, failed: 0 });
   assert.strictEqual(balance(db, keys.alice), settled, 'not refunded twice');
 });
+
+// ----------------------------------------------------------------- downtime
+
+test('an outage is given back to the clocks', (t) => {
+  const { cfg, db, users, keys } = setup();
+  t.after(() => cleanup(cfg, db));
+  const stake = 30 * TUG;
+  const made = match.create(db, cfg, users.alice, {
+    game: 'chess', stake, seats: 2, spend: spend(db, keys.alice, stake),
+  });
+  match.join(db, cfg, users.bob, { id: made.id, spend: spend(db, keys.bob, stake) });
+
+  const at = Date.now();
+  match.heartbeat(db, at);
+  const before = db.get('SELECT moved_at_ms FROM matches WHERE id=?', made.id).moved_at_ms;
+
+  // The server was off for two hours.
+  const out = match.creditDowntime(db, cfg, at + 2 * HOUR * 1000);
+
+  assert.strictEqual(out.down, 2 * HOUR * 1000);
+  assert.strictEqual(out.matches, 1);
+  const after = db.get('SELECT moved_at_ms FROM matches WHERE id=?', made.id).moved_at_ms;
+  assert.strictEqual(after - before, 2 * HOUR * 1000, 'the clock mark moved with the outage');
+});
+
+test('an outage does not end every game in progress', (t) => {
+  // The regression this exists for. abandonSeconds is measured from the last move, so
+  // without crediting the downtime a server that was off for longer than that comes back,
+  // finds every live table untouched, and settles the lot as abandoned.
+  const { cfg, db, users, keys } = setup();
+  t.after(() => cleanup(cfg, db));
+  const stake = 30 * TUG;
+  const made = match.create(db, cfg, users.alice, {
+    game: 'chess', stake, seats: 2, spend: spend(db, keys.alice, stake),
+  });
+  match.join(db, cfg, users.bob, { id: made.id, spend: spend(db, keys.bob, stake) });
+
+  const at = Date.now();
+  match.heartbeat(db, at);
+  const off = (cfg.match.abandonSeconds + 600) * 1000;
+
+  match.creditDowntime(db, cfg, at + off);
+  const swept = match.sweep(db, cfg, Math.floor((at + off) / 1000));
+
+  assert.deepStrictEqual(swept, { expired: 0, resolved: 0, refunded: 0, failed: 0 },
+    'the game survived the outage');
+  assert.strictEqual(status(db, made.id), 'playing');
+});
+
+test('an outage does not expire the challenges posted before it', (t) => {
+  const { cfg, db, users, keys } = setup();
+  t.after(() => cleanup(cfg, db));
+  const stake = 30 * TUG;
+  const made = match.create(db, cfg, users.alice, {
+    game: 'chess', stake, seats: 2, spend: spend(db, keys.alice, stake),
+  });
+  // Posted well into its life, then the server goes down for long enough to finish it off.
+  age(db, made.id, cfg.match.openExpirySeconds - 600);
+
+  const at = Date.now();
+  match.heartbeat(db, at);
+  const off = 3600 * 1000;
+  match.creditDowntime(db, cfg, at + off);
+  const swept = match.sweep(db, cfg, Math.floor((at + off) / 1000));
+
+  assert.strictEqual(swept.expired, 0, 'it still has the time it had left');
+  assert.strictEqual(status(db, made.id), 'open');
+});
+
+test('the heartbeat interval is not treated as an outage', (t) => {
+  const { cfg, db, users, keys } = setup();
+  t.after(() => cleanup(cfg, db));
+  const made = match.create(db, cfg, users.alice, {
+    game: 'chess', stake: 30 * TUG, seats: 2, spend: spend(db, keys.alice, 30 * TUG),
+  });
+  match.join(db, cfg, users.bob, { id: made.id, spend: spend(db, keys.bob, 30 * TUG) });
+
+  const at = Date.now();
+  match.heartbeat(db, at);
+  const before = db.get('SELECT moved_at_ms FROM matches WHERE id=?', made.id).moved_at_ms;
+
+  // One beat late is a normal tick, not an outage.
+  const out = match.creditDowntime(db, cfg, at + cfg.match.heartbeatSeconds * 1000);
+
+  assert.strictEqual(out.matches, 0);
+  assert.strictEqual(
+    db.get('SELECT moved_at_ms FROM matches WHERE id=?', made.id).moved_at_ms, before,
+  );
+});
+
+test('a first start has nothing to credit', (t) => {
+  const { cfg, db } = setup();
+  t.after(() => cleanup(cfg, db));
+  // No heartbeat has ever been written, so there is no outage to infer.
+  assert.deepStrictEqual(match.creditDowntime(db, cfg), { down: 0, matches: 0 });
+  // And it leaves one behind for next time.
+  assert.ok(Number.isFinite(db.kvGet('match.heartbeat')));
+});
+
+test('a clock that went backwards is not paid out on', (t) => {
+  const { cfg, db, users, keys } = setup();
+  t.after(() => cleanup(cfg, db));
+  const made = match.create(db, cfg, users.alice, {
+    game: 'chess', stake: 30 * TUG, seats: 2, spend: spend(db, keys.alice, 30 * TUG),
+  });
+  match.join(db, cfg, users.bob, { id: made.id, spend: spend(db, keys.bob, 30 * TUG) });
+
+  const at = Date.now();
+  match.heartbeat(db, at);
+  const before = db.get('SELECT moved_at_ms FROM matches WHERE id=?', made.id).moved_at_ms;
+
+  const out = match.creditDowntime(db, cfg, at - 5 * HOUR * 1000);
+
+  assert.strictEqual(out.matches, 0, 'a negative gap credits nothing');
+  assert.strictEqual(
+    db.get('SELECT moved_at_ms FROM matches WHERE id=?', made.id).moved_at_ms, before,
+  );
+});

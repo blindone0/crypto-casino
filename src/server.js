@@ -1105,6 +1105,7 @@ function build(cfg) {
 
   let stopPoller = null;
   let sweeper = null;
+  let heartbeats = null;
 
   function start() {
     // Bootstrap: an admin token so the panel is reachable before any account exists.
@@ -1121,6 +1122,22 @@ function build(cfg) {
     // Run once on the way up as well as on the timer: a server that was down for a day
     // comes back to challenges that expired while it was off, and those stakes should be
     // released now rather than ten minutes from now.
+    // Before anything else looks at a clock: an outage is not a player thinking.
+    try {
+      const credited = matches.creditDowntime(db, cfg);
+      if (credited.matches && level >= LEVELS.info) {
+        console.log(`  gave back ${Math.round(credited.down / 1000)}s of downtime `
+          + `to ${credited.matches} table(s)`);
+      }
+    } catch (e) {
+      console.error(`  downtime credit failed: ${e.message}`);
+    }
+    const beat = setInterval(() => {
+      try { matches.heartbeat(db); } catch { /* the next one will do */ }
+    }, (cfg.match.heartbeatSeconds || 15) * 1000);
+    beat.unref?.();
+    heartbeats = beat;
+
     const housekeeping = () => {
       limits.sweep(db);
       try {
@@ -1157,6 +1174,7 @@ function build(cfg) {
     crash.stop();
     if (stopPoller) stopPoller();
     if (sweeper) clearInterval(sweeper);
+    if (heartbeats) clearInterval(heartbeats);
     return new Promise((resolve) => server.close(resolve));
   }
 

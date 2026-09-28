@@ -146,6 +146,11 @@ const DEFAULTS = {
     // for ever. It is deliberately far longer than any clock, so a live game is never
     // touched by it.
     abandonSeconds: 3600,
+    // How often the server records that it is alive. On the next start the gap since the
+    // last one is the outage, and every match clock gets that time back — otherwise a
+    // deploy charges whoever was on the clock for it, and a long enough outage would
+    // have the sweeper end every game in progress at once.
+    heartbeatSeconds: 15,
   },
 
   // ---- FREE PLAY --------------------------------------------------------
