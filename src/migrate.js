@@ -78,6 +78,45 @@ const STEPS = [
       db.exec("ALTER TABLE arcade_plays ADD COLUMN mode TEXT NOT NULL DEFAULT 'real'");
     },
   },
+  {
+    id: 3,
+    name: 'solo_games',
+    /**
+     * Playing the match games on your own.
+     *
+     * This is a separate table from `matches` on purpose, and the reason is structural
+     * rather than tidiness. Every seat in `match_seats` is a real person by construction:
+     * `user_id` is NOT NULL with an enforced foreign key, joining demands a `token_keys`
+     * row, and the stake is an ed25519 signature the server cannot forge. A bot seat
+     * would need a fake account and a server-held private key — a great deal of machinery
+     * built to protect money that is not present, since singleplayer is free practice.
+     *
+     * So it follows the shape Preferans and Debertz already use: one row per player per
+     * game, the whole position as JSON, and bots that run inside the player's own request.
+     *
+     * `status` is 'playing' or 'done'. The partial unique index is what stops a second
+     * live game of the same type without stopping a history of finished ones.
+     */
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS solo_games (
+          id         INTEGER PRIMARY KEY,
+          user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          game       TEXT NOT NULL,
+          seats      INTEGER NOT NULL,
+          state      TEXT NOT NULL,
+          status     TEXT NOT NULL DEFAULT 'playing',
+          winners    TEXT,
+          reason     TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_solo_live
+          ON solo_games(user_id, game) WHERE status = 'playing';
+        CREATE INDEX IF NOT EXISTS ix_solo_user ON solo_games(user_id, id DESC);
+      `);
+    },
+  },
 ];
 
 const latest = (steps = STEPS) => steps.reduce((n, s) => Math.max(n, s.id), 0);

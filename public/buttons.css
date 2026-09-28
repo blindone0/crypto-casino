@@ -361,3 +361,25 @@ header.top nav#navGames button.on::after { opacity: 1; }
 @media (hover: hover) {
   .risk-row .risk:hover:not(.on) { color: var(--text); }
 }
+
+/* --------------------------------------------------------- play the machine ---
+   Set apart from the staked controls above it, because it is a different kind of
+   thing: nothing is wagered and nothing is paid. Felt, like the card games it
+   mostly leads to. */
+.solo-box {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.solo-start {
+  --g-hue: 158;
+  width: 100%;
+  color: hsl(var(--g-hue) 40% 86%);
+  background:
+    repeating-linear-gradient(90deg,
+      rgba(255, 255, 255, .04) 0 1px, rgba(0, 0, 0, .05) 1px 3px),
+    linear-gradient(168deg, hsl(var(--g-hue) 26% 28%), hsl(var(--g-hue) 24% 18%));
+  border-color: hsl(var(--g-hue) 30% 38%);
+  box-shadow: inset 0 2px 5px rgba(255, 255, 255, .09), inset 0 -5px 12px rgba(0, 0, 0, .4);
+}
+.solo-start:active { transform: translateY(2px) scaleY(.99); }

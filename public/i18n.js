@@ -277,6 +277,18 @@ const STRINGS = {
     en: 'Play another player for tokens. The board is held by the server and every move is checked against the rules, so nothing here depends on trusting the other side. Both stakes go into escrow on the chain and the winner is paid from it.',
     ru: 'Игра с другим игроком на токены. Доска хранится на сервере, каждый ход проверяется по правилам, поэтому доверять сопернику не требуется. Обе ставки уходят в эскроу на цепочке, оттуда же выплачивается выигрыш.',
   },
+  'solo.play':   { en: 'Play the machine', ru: 'Играть с машиной' },
+  'solo.note': {
+    en: 'Free practice against a bot. Nothing is staked and nothing is paid out — it is '
+      + 'here so the games can be played when nobody else is.',
+    ru: 'Бесплатная тренировка против бота. Ставок нет и выплат тоже — это чтобы в игры '
+      + 'можно было играть, когда больше никого нет.',
+  },
+  'solo.bot':     { en: 'The machine', ru: 'Машина' },
+  'solo.quit':    { en: 'Give up', ru: 'Сдаться' },
+  'solo.youWon':  { en: 'You won', ru: 'Вы выиграли' },
+  'solo.youLost': { en: 'You lost', ru: 'Вы проиграли' },
+  'solo.draw':    { en: 'A draw', ru: 'Ничья' },
   'match.game': { en: 'Game', ru: 'Игра' },
   'match.g.chess': { en: 'Chess', ru: 'Шахматы' },
   'match.g.seabattle': { en: 'Sea Battle', ru: 'Морской бой' },

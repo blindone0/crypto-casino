@@ -86,7 +86,7 @@ const svgEl = (tag, attrs = {}) => {
 const state = {
   cfg: null, user: null, csrf: null,
   game: 'slots', feed: 'recent',
-  mines: null, crash: null, es: null, parallax: null,
+  mines: null, crash: null, es: null, parallax: null, solo: null,
   // Head-to-head matches: the lobby, the one being watched, its board and its poll.
   matchLobby: null, matchId: null, matchView: null, board: null, matchTimer: null,
   // Pictures the operator imported for the puzzle, keyed the same way the drawn ones are.
@@ -3215,6 +3215,15 @@ function paintLobby() {
       onclick: () => createChallenge(game.value, stake.value, Number(seatCount.value)),
     }, t('match.challenge')),
     el('p', { class: 'hint' }, t('match.intro')),
+    // Playing on your own, right beside the staked table rather than hidden elsewhere.
+    // A lobby with nobody in it is the first thing a new arrival sees, and "there is
+    // nobody here" is a worse answer than "play a hand against the machine".
+    el('div', { class: 'solo-box' },
+      el('button', {
+        class: 'big solo-start',
+        onclick: () => startSolo(game.value),
+      }, t('solo.play')),
+      el('p', { class: 'hint' }, t('solo.note'))),
     !info.pubkey
       ? el('button', { class: 'big', style: 'margin-top:8px', onclick: tokenModal }, t('tok.nav'))
       : null);
@@ -3340,6 +3349,93 @@ async function openMatch(id) {
   state.board = null;
   await refreshMatch(true);
   matchPoll(() => refreshMatch(false));
+}
+
+/**
+ * Playing on your own.
+ *
+ * The boards are the multiplayer ones, untouched. They render from `view` and `seat` and
+ * report through `onAct`, which is exactly the shape `/api/solo/*` returns — so this is
+ * almost entirely plumbing, and a board fixed for a match is fixed here too.
+ */
+async function startSolo(game) {
+  if (!requireLogin()) return;
+  try {
+    const out = await api('/api/solo/start', { method: 'POST', body: { game } });
+    state.solo = out;
+    state.matchId = null;
+    stopMatchPoll();
+    await buildSoloScreen(out);
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
+async function soloAct(payload) {
+  if (!state.solo) return;
+  try {
+    // One request carries the player's move and comes back with the opponents' replies
+    // already made, so there is nothing to poll for: nobody else is going to move while
+    // this page sits idle.
+    const out = await api('/api/solo/move', { method: 'POST', body: { game: state.solo.game, ...payload } });
+    state.solo = out;
+    paintSolo(out);
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
+async function buildSoloScreen(out) {
+  const mod = await MATCH_BOARDS[out.game]();
+  const host = el('div', { class: 'board-host' });
+  setKids($('#stage'),
+    el('div', { class: 'match-screen' },
+      el('div', { class: 'match-bar' },
+        el('span', { id: 'sTop' }, t('solo.bot')),
+        el('span', {}, '')),
+      host,
+      el('div', { class: 'match-bar' },
+        el('span', { id: 'sBottom' }, state.user?.username || ''),
+        el('button', { class: 'ghost tiny', onclick: quitSolo }, t('solo.quit')))));
+
+  state.board = mod.board(host, {
+    view: out.view,
+    seat: out.seat,
+    seats: out.seats,
+    myTurn: out.status === 'playing' && out.toMove === out.seat,
+    lang: getLocale(),
+    onAct: (action) => soloAct(action),
+  });
+  paintSolo(out);
+}
+
+function paintSolo(out) {
+  if (state.board) {
+    state.board.update({
+      view: out.view,
+      seat: out.seat,
+      myTurn: out.status === 'playing' && out.toMove === out.seat,
+    });
+  }
+  const top = $('#sTop');
+  if (top) {
+    top.textContent = out.status === 'done'
+      ? soloResult(out)
+      : `${t('solo.bot')}${out.toMove !== out.seat ? ' •' : ''}`;
+  }
+}
+
+/** Who won, in the player's own terms rather than a list of seat numbers. */
+function soloResult(out) {
+  const won = (out.winners || []).includes(out.seat);
+  const drawn = (out.winners || []).length > 1;
+  if (drawn) return t('solo.draw');
+  return won ? t('solo.youWon') : t('solo.youLost');
+}
+
+async function quitSolo() {
+  if (!state.solo) return;
+  const game = state.solo.game;
+  try { await api('/api/solo/quit', { method: 'POST', body: { game } }); } catch { /* it is gone either way */ }
+  state.solo = null;
+  state.board = null;
+  renderMatch();
 }
 
 async function refreshMatch(rebuild) {

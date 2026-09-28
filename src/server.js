@@ -15,6 +15,7 @@ const fair = require('./fair');
 const adminApi = require('./admin');
 const bankMod = require('./bank');
 const tokenchain = require('./tokenchain');
+const solo = require('./solo');
 const arcade = require('./arcade');
 // Named `matches`, not `match`: build() declares its own local `match(method, pathname)`
 // for route lookup, and a function declaration shadows the module import inside it.
@@ -463,6 +464,38 @@ function build(cfg) {
   add('GET', '/api/crash/mine', async (ctx) => {
     const user = requireUser(ctx);
     return { bet: crash.myBet(user) };
+  });
+
+  // ----------------------------------------------------------- singleplayer
+  //
+  // No stake, no escrow, no signature: these routes never touch a bank. That is the whole
+  // reason they are a handful of lines — the match framework's weight is all in protecting
+  // money, and there is none here.
+  add('POST', '/api/solo/start', async (ctx, req) => {
+    checkCsrf(req, ctx);
+    const user = requireUser(ctx);
+    const body = await U.readJsonBody(req);
+    return solo.start(db, cfg, user, String(body.game || ''));
+  });
+
+  add('GET', '/api/solo/current', async (ctx, req) => {
+    const user = requireUser(ctx);
+    const url = new URL(req.url, 'http://x');
+    return { game: solo.current(db, user.id, String(url.searchParams.get('game') || '')) };
+  });
+
+  add('POST', '/api/solo/move', async (ctx, req) => {
+    checkCsrf(req, ctx);
+    const user = requireUser(ctx);
+    const { game, ...payload } = await U.readJsonBody(req);
+    return solo.move(db, cfg, user, String(game || ''), payload);
+  });
+
+  add('POST', '/api/solo/quit', async (ctx, req) => {
+    checkCsrf(req, ctx);
+    const user = requireUser(ctx);
+    const body = await U.readJsonBody(req);
+    return solo.quit(db, user, String(body.game || ''));
   });
 
   // ------------------------------------------------------------ site token
