@@ -1484,7 +1484,9 @@ function setReelsSpinning(on) {
   }
   const lever = $('#slotLever');
   if (lever) lever.classList.toggle('pulled', on);
-  if (glReels) { if (on) glReels.start(); else glReels.stop(); }
+  if (glReels) {
+    if (on) { glReels.clearWins(); glReels.start(); } else glReels.stop();
+  }
 }
 
 /** Land each reel in turn, showing its final symbols as it stops. */
@@ -1512,7 +1514,8 @@ async function settleReels(screen, stops = null, started = 0) {
     reel.classList.add('landing');
     if (glReels) {
       const stop = stops && Number.isInteger(stops[i]) ? stops[i] : 0;
-      glReels.stopAt(i, stop % GL_PER_DRUM, GL_PER_DRUM);
+      glStops[i] = stop % GL_PER_DRUM;
+      glReels.stopAt(i, stop % GL_PER_DRUM);
     }
     audio.sfx('reelStop');
     const foot = reelFoot(reel);
@@ -1685,11 +1688,15 @@ function glStripFor(reel) {
 }
 
 /** Park the drums on a screen, using the real stops when the server sent them. */
+let glStops = [0, 0, 0, 0, 0];
+
 function glShow(stops) {
   if (!glReels) return;
+  glStops = Array.from({ length: 5 }, (_, i) => (
+    stops && Number.isInteger(stops[i]) ? stops[i] % GL_PER_DRUM : 0));
   for (let reel = 0; reel < 5; reel += 1) {
     const stop = stops && Number.isInteger(stops[reel]) ? stops[reel] : 0;
-    glReels.setStop(reel, stop % GL_PER_DRUM, GL_PER_DRUM);
+    glReels.setStop(reel, stop % GL_PER_DRUM);
   }
 }
 
@@ -1740,6 +1747,16 @@ function drawPaylines(wins) {
     const rows = slotInfo.paylines[w.line];
     const points = [];
     for (let reel = 0; reel < w.count; reel += 1) {
+      if (glReels) {
+        // The DOM faces are hidden and laid out by other rules when the drums are drawn
+        // in WebGL, so their boxes are not where the symbols are. Ask the renderer.
+        const pt = glReels.symbolPoint(reel, rows[reel]);
+        if (!pt) continue;
+        const gl = glReels.element.getBoundingClientRect();
+        points.push(`${(gl.left - base.left + pt[0]).toFixed(1)},${(gl.top - base.top + pt[1]).toFixed(1)}`);
+        glReels.setWin(reel, glStops[reel], rows[reel]);
+        continue;
+      }
       const cell = reels[reel]?.querySelector(`.face[data-row="${rows[reel]}"]`);
       if (!cell) continue;
       const r = cell.getBoundingClientRect();

@@ -38,6 +38,8 @@ const FRAG = `
 precision mediump float;
 uniform sampler2D uTex;
 uniform float uDim;
+uniform float uWinV;     // v at the centre of a winning symbol, or -1 for none
+uniform float uRowHalf;  // half a symbol, in v
 varying vec3 vNormal;
 varying vec2 vUV;
 void main() {
@@ -48,6 +50,13 @@ void main() {
   float spec = pow(max(dot(n, normalize(vec3(0.0, 0.35, 1.0))), 0.0), 22.0) * 0.5;
   vec4 tex = texture2D(uTex, vUV);
   vec3 lit = tex.rgb * (0.30 + 0.85 * d + fill) + spec;
+  // A winning symbol lights up on the drum itself. Wrapped distance, because the band
+  // can straddle the seam where v rolls over.
+  if (uWinV >= 0.0) {
+    float dv = abs(fract(vUV.y - uWinV + 0.5) - 0.5);
+    float band = smoothstep(uRowHalf, uRowHalf * 0.35, dv);
+    lit += tex.rgb * band * 1.25 + vec3(0.30, 0.24, 0.10) * band;
+  }
   gl_FragColor = vec4(lit * uDim, tex.a);
 }`;
 
@@ -244,6 +253,8 @@ export function createReels(host, opts = {}) {
     model: gl.getUniformLocation(prog, 'uModel'),
     tex: gl.getUniformLocation(prog, 'uTex'),
     dim: gl.getUniformLocation(prog, 'uDim'),
+    winV: gl.getUniformLocation(prog, 'uWinV'),
+    rowHalf: gl.getUniformLocation(prog, 'uRowHalf'),
   };
 
   // A drum wide enough that five sit side by side across the window with a small gap, and
@@ -282,7 +293,24 @@ export function createReels(host, opts = {}) {
     spin: 0,
     tex: null,
     dim: 1,
+    ease: null,
+    winRow: -1,
   }));
+
+  // Where the front of the barrel is, and how wide one symbol is, in the drum's own
+  // angular terms. a = 0 is the top of the cylinder, so the face pointing at the camera
+  // is a quarter turn round.
+  const FRONT = Math.PI / 2;
+  const STEP = (Math.PI * 2) / perDrum;
+
+  /**
+   * The angle that parks symbol `i` on the centre line.
+   *
+   * A symbol occupies v from i/N to (i+1)/N, so its middle is at (i + 0.5)/N, and that
+   * is what has to arrive at the front — not its leading edge. Leaving the half out puts
+   * every drum half a symbol off, which reads as the centre row showing the wrong one.
+   */
+  const angleFor = (i) => FRONT - ((i + 0.5) / perDrum) * Math.PI * 2;
 
   let raf = null;
   let running = false;
@@ -346,6 +374,8 @@ export function createReels(host, opts = {}) {
       gl.bindTexture(gl.TEXTURE_2D, d.tex);
       gl.uniform1i(loc.tex, 0);
       gl.uniform1f(loc.dim, d.dim);
+      gl.uniform1f(loc.winV, d.winRow >= 0 ? (d.winRow + 0.5) / perDrum : -1);
+      gl.uniform1f(loc.rowHalf, 0.5 / perDrum);
       gl.uniformMatrix4fv(loc.model, false, modelMatrix(d.x, d.angle, halfW));
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, mesh.count);
     }
@@ -357,18 +387,28 @@ export function createReels(host, opts = {}) {
     last = now;
     let moving = false;
     for (const d of drums) {
-      if (d.spin !== 0) {
+      if (d.ease) {
+        // Slowing into the stop, with a little overrun and settle at the end. A reel that
+        // simply assigns its final angle looks broken however good the rest of it is —
+        // the deceleration is most of what sells the machine as mechanical.
+        const k = Math.min(1, (now - d.ease.t0) / d.ease.dur);
+        const eased = 1 - (1 - k) ** 3;
+        const bounce = Math.sin(k * Math.PI) * STEP * 0.16;
+        d.angle = d.ease.from + (d.ease.to - d.ease.from) * eased - bounce;
+        if (k >= 1) { d.angle = d.ease.to; d.ease = null; }
+        moving = true;
+      } else if (d.spin !== 0) {
         d.angle += d.spin * dt;
         moving = true;
       }
     }
     draw();
-    if (moving && running) raf = requestAnimationFrame(frame);
-    else { raf = null; last = 0; }
+    if (moving) raf = requestAnimationFrame(frame);
+    else { raf = null; last = 0; running = false; }
   }
 
   function wake() {
-    if (raf === null && running) raf = requestAnimationFrame(frame);
+    if (raf === null) raf = requestAnimationFrame(frame);
   }
 
   return {
@@ -394,14 +434,52 @@ export function createReels(host, opts = {}) {
       draw();
     },
 
-    /** Park a drum so `stop` is the symbol on the centre line. */
-    setStop(index, stop, stripLength) {
+    /** Park a drum so the middle row shows the symbol at `stop` + 1, with no animation. */
+    setStop(index, stop) {
       const d = drums[index];
       if (!d) return;
       d.spin = 0;
-      // v runs one full turn over the strip, and the middle row sits at the front.
-      d.angle = -((stop + 1) / stripLength) * Math.PI * 2;
+      d.ease = null;
+      d.angle = angleFor(stop + 1);
       draw();
+    },
+
+    /** Light the symbol on one row of one drum, or pass -1 to clear it. */
+    setWin(index, stop, row) {
+      const d = drums[index];
+      if (!d) return;
+      d.winRow = row < 0 ? -1 : (((stop + row) % perDrum) + perDrum) % perDrum;
+      draw();
+    },
+
+    clearWins() {
+      for (const d of drums) d.winRow = -1;
+      draw();
+    },
+
+    /**
+     * Where a symbol actually lands on the canvas, in CSS pixels.
+     *
+     * The paylines used to be measured off the DOM faces, which are hidden when this is
+     * running and laid out by different rules anyway — so they were drawn somewhere the
+     * symbols no longer are. This projects the real thing.
+     */
+    symbolPoint(index, row) {
+      const d = drums[index];
+      if (!d) return null;
+      // Rows run down the screen, and down the screen is forward through the strip.
+      const a = FRONT + (row - 1) * STEP;
+      const y = Math.cos(a);
+      const z = Math.sin(a);
+      const depth = camZ - z;
+      if (depth <= 0.01) return null;
+      const f = 1 / Math.tan(FOVY / 2);
+      const aspect = canvas.width / Math.max(1, canvas.height);
+      const ndcX = (d.x * (f / aspect)) / depth;
+      const ndcY = (y * f) / depth;
+      const cssW = canvas.clientWidth || canvas.width;
+      const cssH = canvas.clientHeight || canvas.height;
+      return [(ndcX * 0.5 + 0.5) * cssW, (0.5 - ndcY * 0.5) * cssH];
     },
 
     start() {
@@ -410,13 +488,17 @@ export function createReels(host, opts = {}) {
       wake();
     },
 
-    stopAt(index, stop, stripLength) {
+    /** Bring a drum down to its stop, still turning the way it was going. */
+    stopAt(index, stop) {
       const d = drums[index];
       if (!d) return;
+      let to = angleFor(stop + 1);
+      // Keep going the way it was: wind the target back past the current angle so the
+      // last of the travel is in the same direction rather than a jerk backwards.
+      while (to > d.angle - Math.PI * 0.75) to -= Math.PI * 2;
       d.spin = 0;
-      d.angle = -((stop + 1) / stripLength) * Math.PI * 2;
-      if (!drums.some((x) => x.spin !== 0)) running = false;
-      draw();
+      d.ease = { from: d.angle, to, t0: performance.now(), dur: 620 };
+      wake();
     },
 
     stop() {
