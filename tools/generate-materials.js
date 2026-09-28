@@ -480,12 +480,12 @@ for si, suit in enumerate(SUITS):
                 suit_path(d, cx, cy, w * 0.20 if rank == "A" else r, colour, suit)
 
         # Then the index, top-left and again bottom-right upside down.
-        f = font_at(int(cell * 0.24) * SS)
+        f = font_at(int(cell * 0.19) * SS)
         for corner in (0, 1):
             layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
             dl = ImageDraw.Draw(layer)
-            dl.text((w * 0.07, h * 0.035), rank, font=f, fill=colour)
-            suit_path(dl, w * 0.115, h * 0.175, w * 0.040, colour, suit)
+            dl.text((w * 0.045, h * 0.018), rank, font=f, fill=colour)
+            suit_path(dl, w * 0.088, h * 0.142, w * 0.034, colour, suit)
             if corner:
                 layer = layer.rotate(180)
             face = Image.alpha_composite(face, layer)
