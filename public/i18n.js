@@ -229,6 +229,7 @@ const STRINGS = {
   'radio.silent': { en: 'Off the air', ru: 'Не в эфире' },
   'radio.sound': { en: 'Sound', ru: 'Звук' },
   'radio.music': { en: 'Music', ru: 'Музыка' },
+  'radio.vinyl': { en: 'Hiss', ru: 'Шум' },
   'radio.stations': { en: 'Stations', ru: 'Станции' },
   'radio.about': {
     en: 'Every piece is played live in your browser from oscillators and filtered noise. There are no audio files to download and nothing is streamed from anywhere.',

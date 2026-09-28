@@ -38,9 +38,14 @@ let reverb = null;
 let reverbGain = null;
 let vinyl = null;
 
+// The bed of vinyl surface noise under the music. It is a deliberate part of the sound,
+// but it is also a hiss that nobody asked for, so it gets its own switch.
+let vinylOn = true;
+
 try {
   enabled = localStorage.getItem('sound') !== 'off';
   musicOn = localStorage.getItem('music') !== 'off';
+  vinylOn = localStorage.getItem('vinyl') !== 'off';
 } catch { /* private mode */ }
 
 // ---------------------------------------------------------------- plumbing
@@ -569,7 +574,10 @@ function applyTrackTone(at) {
   if (!ctx || !track) return;
   const t = Math.max(at ?? ctx.currentTime, ctx.currentTime);
   if (reverbGain) reverbGain.gain.setTargetAtTime(0.25 + track.room * 0.55, t, 0.4);
-  if (vinyl) vinyl.level.setTargetAtTime(0.004 + track.vinyl * 0.018, t, 0.4);
+  // Roughly half what it was: audible as a texture under the music, not as a hiss beside
+  // it. The level is per-track, because a wide ballad wants less of it than a blues.
+  const surface = vinylOn ? 0.002 + track.vinyl * 0.009 : 0;
+  if (vinyl) vinyl.level.setTargetAtTime(surface, t, 0.4);
 }
 
 function selectTrack(id, at) {
@@ -592,10 +600,10 @@ function stationBreak(time) {
   musicGain.gain.setTargetAtTime(0.02, time, 0.25);
   musicGain.gain.setTargetAtTime(0.16, time + 1.15, 0.5);
   noise({
-    start: time + 0.1, dur: 0.8, gain: 0.045, type: 'bandpass', freq: 800, q: 1.2,
+    start: time + 0.1, dur: 0.8, gain: 0.022, type: 'bandpass', freq: 800, q: 1.2,
     sweepTo: 2600, dest: master,
   });
-  noise({ start: time + 0.55, dur: 0.45, gain: 0.022, type: 'highpass', freq: 3200, dest: master });
+  noise({ start: time + 0.55, dur: 0.45, gain: 0.011, type: 'highpass', freq: 3200, dest: master });
 }
 
 function advance(dir, at) {
@@ -813,6 +821,16 @@ function setEnabled(on) {
   return enabled;
 }
 
+/** Turn the surface noise on or off without touching the music. */
+function setVinyl(on) {
+  vinylOn = !!on;
+  try { localStorage.setItem('vinyl', vinylOn ? 'on' : 'off'); } catch { /* private mode */ }
+  applyTrackTone();
+  return vinylOn;
+}
+
+const isVinylOn = () => vinylOn;
+
 function setMusic(on) {
   musicOn = !!on;
   try { localStorage.setItem('music', musicOn ? 'on' : 'off'); } catch { /* ignore */ }
@@ -840,5 +858,5 @@ function armOnFirstGesture() {
 
 export {
   sfx, setEnabled, setMusic, isEnabled, isMusicOn, startMusic, stopMusic, armOnFirstGesture,
-  stations, nowPlaying, setStation, skip, onRadio,
+  stations, nowPlaying, setStation, skip, onRadio, setVinyl, isVinylOn,
 };

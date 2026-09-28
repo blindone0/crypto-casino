@@ -18,7 +18,7 @@ const el = (tag, attrs = {}, ...kids) => {
   }
   for (const kid of kids.flat()) {
     if (kid == null || kid === false) continue;
-    n.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+    addKids(n, kid.nodeType ? kid : document.createTextNode(String(kid)));
   }
   return n;
 };
@@ -28,6 +28,16 @@ const el = (tag, attrs = {}, ...kids) => {
  * The native call stringifies them, so a `cond ? el(...) : null` child renders the literal
  * word "null" on the page. It did, in the arcade panel.
  */
+/**
+ * append that drops null and false, the way el() already does with its children.
+ * The native call stringifies them, so `cond ? el(...) : null` rendered the literal word
+ * "null" on the page. It did, twice, in the middle of the sign-in form.
+ */
+const addKids = (node, ...kids) => {
+  node.append(...kids.flat().filter((k) => k != null && k !== false));
+  return node;
+};
+
 const setKids = (node, ...kids) => {
   // This one call stays as node.replaceChildren: it is the DOM method, not this helper.
   // (replaceChildren lives on Element, not on Node, so reaching for it through a prototype
@@ -91,7 +101,7 @@ async function api(path, { method = 'GET', body } = {}) {
 
 function toast(msg, kind = '') {
   const node = el('div', { class: `toast ${kind}` }, msg);
-  $('#toasts').append(node);
+  addKids($('#toasts'), node);
   setTimeout(() => {
     node.style.opacity = '0';
     setTimeout(() => node.remove(), 200);
@@ -131,14 +141,14 @@ function openModal(title, buildBody, { tabs } = {}) {
           applyAll(body);
         },
       }, tab.label);
-      bar.append(b);
+      addKids(bar, b);
     });
-    modal.append(bar);
+    addKids(modal, bar);
     tabs[0].build(body);
   } else {
     buildBody(body);
   }
-  modal.append(body);
+  addKids(modal, body);
   const back = el('div', {
     class: 'modal-back',
     onclick: (e) => { if (e.target === back) closeModal(); },
@@ -199,6 +209,7 @@ function radioModal(onSettingsChange) {
       el('button', { onclick: () => paint(audio.skip(-1)) }, '‹‹'),
       toggle(t('radio.sound'), audio.isEnabled, (on) => audio.setEnabled(on)),
       toggle(t('radio.music'), audio.isMusicOn, (on) => audio.setMusic(on)),
+      toggle(t('radio.vinyl'), audio.isVinylOn, (on) => audio.setVinyl(on)),
       el('button', { onclick: () => paint(audio.skip(1)) }, '››')),
     el('h3', { style: 'margin-top:16px' }, t('radio.stations')),
     el('div', { class: 'stations' }, ...audio.stations().map((st) => el('button', {
@@ -252,7 +263,7 @@ function authModal(mode = 'login') {
       }
     };
 
-    body.append(
+    addKids(body, 
       el('label', { class: 'field' }, el('span', { 'data-i18n': 'auth.username' }), u),
       el('label', { class: 'field' }, el('span', { 'data-i18n': 'auth.password' }), p),
       mode === 'register'
@@ -631,7 +642,7 @@ function paintMines() {
     const isGem = picks.has(i);
     const isMine = mines.has(i);
     const done = !live || isGem;
-    grid.append(el('button', {
+    addKids(grid, el('button', {
       class: `tile ${isGem ? 'gem' : ''} ${isMine ? 'mine' : ''} ${done && !isGem && !isMine ? 'dim' : ''}`,
       disabled: (!live || isGem) ? 'disabled' : false,
       onclick: () => revealTile(i),
@@ -738,7 +749,7 @@ function crashCurve() {
   p.setAttribute('fill', 'none');
   p.setAttribute('stroke', 'var(--accent)');
   p.setAttribute('stroke-width', '2');
-  svg.append(p);
+  addKids(svg, p);
   return svg;
 }
 
@@ -1009,7 +1020,7 @@ async function walletModal() {
 // --------------------------------------------------------------- fairness
 async function fairModal() {
   if (!requireLogin()) return;
-  const body = openModal(t('fair.title'), (b) => b.append(el('p', { class: 'hint' }, t('common.loading'))));
+  const body = openModal(t('fair.title'), (b) => addKids(b, el('p', { class: 'hint' }, t('common.loading'))));
   try {
     const f = await api('/api/fair/seed');
     const seedInput = el('input', { class: 'mono', value: f.clientSeed, maxlength: '64' });
@@ -1063,7 +1074,7 @@ async function fairModal() {
 // -------------------------------------------------------------- affiliate
 async function affiliateModal() {
   if (!requireLogin()) return;
-  const body = openModal(t('nav.affiliate'), (b) => b.append(el('p', { class: 'hint' }, t('common.loading'))));
+  const body = openModal(t('nav.affiliate'), (b) => addKids(b, el('p', { class: 'hint' }, t('common.loading'))));
   try {
     const a = await api('/api/me/affiliate');
     const me = await api('/api/me');
@@ -1127,7 +1138,7 @@ async function affiliateModal() {
 // ----------------------------------------------------------------- limits
 async function limitsModal() {
   if (!requireLogin()) return;
-  const body = openModal(t('limits.title'), (b) => b.append(el('p', { class: 'hint' }, t('common.loading'))));
+  const body = openModal(t('limits.title'), (b) => addKids(b, el('p', { class: 'hint' }, t('common.loading'))));
   try {
     const me = await api('/api/me');
     const maxBet = el('input', {
@@ -1434,7 +1445,7 @@ async function showSlotResult(out) {
 function slotPaytableModal() {
   ensureSymbolDefs();
   openModal(t('slots.paytable'), (body) => {
-    if (!slotInfo) { body.append(el('p', { class: 'hint' }, t('common.loading'))); return; }
+    if (!slotInfo) { addKids(body, el('p', { class: 'hint' }, t('common.loading'))); return; }
     const symCell = (key) => {
       const d = el('div', { class: 'sym' });
       d.innerHTML = symbolSvg(key, slotTheme);
@@ -1446,7 +1457,7 @@ function slotPaytableModal() {
       rows.push(symCell(sym));
       for (const p of pays) rows.push(el('div', { class: 'n' }, p.toFixed(2)));
     }
-    body.append(
+    addKids(body, 
       el('p', { class: 'hint' }, t('slots.perLineBet')),
       el('div', { class: 'paytable-grid' }, ...rows),
       el('h3', { style: 'margin-top:18px' }, t('slots.scatterPays')),
@@ -1579,7 +1590,7 @@ function paintPuzzle() {
     if (g.state === 'active' && !open) {
       piece.addEventListener('click', () => revealPiece(i));
     }
-    grid.append(piece);
+    addKids(grid, piece);
   }
 
   const status = g.state === 'lost' ? t('puzzle.cracked')
@@ -2039,7 +2050,7 @@ let tokenKey = null;
 
 async function tokenModal() {
   if (!requireLogin()) return;
-  const body = openModal(t('tok.title'), (b) => b.append(el('p', { class: 'hint' }, t('common.loading'))));
+  const body = openModal(t('tok.title'), (b) => addKids(b, el('p', { class: 'hint' }, t('common.loading'))));
 
   if (!(await tokenKeys.supported())) {
     setKids(body, el('div', { class: 'banner' }, t('tok.unsupported')));
@@ -2057,7 +2068,7 @@ async function tokenModal() {
   }
 
   setKids(body);
-  body.append(el('p', { class: 'hint' }, t('tok.what')));
+  addKids(body, el('p', { class: 'hint' }, t('tok.what')));
 
   if (!info.pubkey) {
     renderTokenSetup(body, info);
@@ -2102,7 +2113,7 @@ function renderTokenSetup(body, info) {
   });
 
   const restore = el('input', { class: 'mono', placeholder: t('tok.enterPhrase') });
-  body.append(
+  addKids(body, 
     create,
     el('h3', { style: 'margin-top:18px' }, t('tok.restore')),
     el('div', { class: 'input-row' }, restore,
@@ -2123,7 +2134,7 @@ function renderTokenSetup(body, info) {
 function renderTokenWallet(body, info) {
   const unlocked = tokenKey && tokenKey.publicKey === info.pubkey;
 
-  body.append(
+  addKids(body, 
     el('div', { class: 'stat-grid' },
       el('div', { class: 'stat-card' },
         el('div', { class: 'k' }, t('tok.balance')),
@@ -2137,7 +2148,7 @@ function renderTokenWallet(body, info) {
 
   if (!unlocked) {
     const phrase = el('input', { class: 'mono', placeholder: t('tok.enterPhrase') });
-    body.append(
+    addKids(body, 
       el('p', { class: 'hint' }, t('tok.locked')),
       el('div', { class: 'input-row' }, phrase,
         el('button', {
@@ -2156,7 +2167,7 @@ function renderTokenWallet(body, info) {
   } else {
     const to = el('input', { class: 'mono', placeholder: '64 hex characters' });
     const amount = el('input', { class: 'mono', value: '100', inputmode: 'numeric' });
-    body.append(
+    addKids(body, 
       el('h3', { style: 'margin-top:16px' }, t('tok.send')),
       el('label', { class: 'field' }, el('span', {}, t('tok.to')), to),
       el('label', { class: 'field' }, el('span', {}, t('tok.amount')), amount),
@@ -2198,7 +2209,7 @@ function renderTokenWallet(body, info) {
     pinNote.className = `hint ${cmp.status === 'ok' ? 'pos' : 'neg'}`;
   }
 
-  body.append(
+  addKids(body, 
     el('h3', { style: 'margin-top:20px' }, t('tok.verify')),
     el('div', { class: 'addr', style: 'font-size:11px' }, info.head || '-'),
     progress,
@@ -2449,7 +2460,7 @@ function renderBanners() {
   if (!box) return;
   setKids(box);
   if (state.wallet === 'demo') {
-    box.append(el('div', { class: 'banner practice' },
+    addKids(box, el('div', { class: 'banner practice' },
       t('demo.banner'), ' ',
       el('button', {
         class: 'tiny', style: 'margin-left:8px',
@@ -2463,7 +2474,7 @@ function renderBanners() {
         },
       }, t('demo.topUp'))));
   }
-  if (state.cfg?.wallet?.isMock) box.append(el('div', { class: 'banner' }, t('wallet.mockWarning')));
+  if (state.cfg?.wallet?.isMock) addKids(box, el('div', { class: 'banner' }, t('wallet.mockWarning')));
 }
 
 async function boot() {
