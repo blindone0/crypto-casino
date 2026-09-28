@@ -2,6 +2,7 @@
   "name": "crypto-casino",
   "version": "1.0.0",
   "private": true,
+  "license": "AGPL-3.0-or-later",
   "description": "Self-hosted provably-fair crypto casino. Zero npm dependencies.",
   "type": "commonjs",
   "main": "src/server.js",

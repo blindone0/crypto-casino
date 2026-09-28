@@ -1,6 +1,6 @@
 # Crypto casino
 
-A self-hosted, provably-fair crypto casino. Six games, a real double-entry ledger,
+A self-hosted, provably-fair crypto casino. Ten games, a real double-entry ledger,
 crypto deposits and withdrawals, an operator panel, and English/Russian interfaces.
 
 **Zero npm dependencies.** It runs on Node 22.5+ using only built-in modules:
