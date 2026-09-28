@@ -1318,6 +1318,12 @@ async function renderSlots() {
   };
   amount.input.addEventListener('input', recalc);
   spin.addEventListener('click', () => doSpin(amount, spin));
+  // The arm is drawn later, with the cabinet. Wiring it here keeps one code path: it
+  // presses the same button rather than having its own idea of what a spin costs.
+  setTimeout(() => {
+    const lever = $('#slotLever');
+    if (lever) lever.addEventListener('click', () => { if (!spin.disabled) spin.click(); });
+  }, 0);
 
   setKids(panel, 
     amount.node,
@@ -1348,10 +1354,16 @@ async function renderSlots() {
   setKids($('#stage'),
     el('div', { class: 'slot-banner', id: 'slotBanner' }, ''),
     el('div', { class: 'slot-cabinet' },
-      el('div', { class: 'slot-machine-row' },
-        valveWheel('valveL'),
-        el('div', { class: 'reels', id: 'reels' }),
-        valveWheel('valveR'))),
+      el('div', { class: 'slot-marquee' },
+        el('span', { class: 'mq-top' }, 'CASINO'),
+        el('span', { class: 'mq-main' }, (state.cfg?.siteName || 'NULLSTAKE').toUpperCase()),
+        el('span', { class: 'mq-sub' }, 'BAR · 7 · WINS')),
+      el('div', { class: 'slot-body' },
+        el('div', { class: 'slot-window' },
+          el('div', { class: 'reels', id: 'reels' })),
+        slotLever()),
+      el('div', { class: 'slot-base' },
+        el('div', { class: 'slot-tray' }))),
   );
 
   if (!slotInfo) {
@@ -1367,38 +1379,42 @@ async function renderSlots() {
 }
 
 /**
- * The wheel on the end of the drum shaft.
+ * The arm.
  *
- * Dressing, and the point of it: five cylinders turning behind glass could be anything,
- * but a hand-wheel on a shaft says the thing has ends and an axle and is being driven.
- * Drawn rather than loaded, like the rest of the artwork -- the policy forbids remote
- * images, and a wheel is a circle and some spokes.
+ * The thing every photograph of a slot machine has and every web slot leaves out, which
+ * is most of why they look like spreadsheets that pay money. It swings when the reels go,
+ * and it is a real control: pulling it spins.
  */
-function valveWheel(id) {
-  const box = el('div', { class: 'slot-valve', id });
-  const spokes = Array.from({ length: 6 }, (_, i) =>
-    `<rect x="46" y="14" width="8" height="34" rx="4" fill="url(#vg)"
-           transform="rotate(${i * 60} 50 50)"/>`).join('');
+function slotLever() {
+  const box = el('div', { class: 'slot-lever', id: 'slotLever' });
   box.innerHTML = `
-    <svg viewBox="0 0 100 100" aria-hidden="true">
+    <svg viewBox="0 0 40 200" aria-hidden="true">
       <defs>
-        <linearGradient id="vg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stop-color="#9fb0bd"/>
-          <stop offset=".5" stop-color="#5c6a76"/>
-          <stop offset="1" stop-color="#2b333b"/>
+        <linearGradient id="lvGold" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#8a6a24"/>
+          <stop offset=".35" stop-color="#f0d68a"/>
+          <stop offset=".6" stop-color="#d9b45a"/>
+          <stop offset="1" stop-color="#6d5119"/>
         </linearGradient>
-        <radialGradient id="vh" cx=".35" cy=".3">
-          <stop offset="0" stop-color="#d8e2ea"/>
-          <stop offset=".6" stop-color="#6b7986"/>
-          <stop offset="1" stop-color="#232a31"/>
+        <radialGradient id="lvBall" cx=".34" cy=".3">
+          <stop offset="0" stop-color="#ff9a8f"/>
+          <stop offset=".45" stop-color="#d92d20"/>
+          <stop offset="1" stop-color="#5e0f08"/>
+        </radialGradient>
+        <radialGradient id="lvPivot" cx=".35" cy=".32">
+          <stop offset="0" stop-color="#f4e6b4"/>
+          <stop offset="1" stop-color="#7a5c1f"/>
         </radialGradient>
       </defs>
-      <circle cx="50" cy="50" r="44" fill="none" stroke="url(#vg)" stroke-width="9"/>
-      <circle cx="50" cy="50" r="44" fill="none" stroke="rgba(255,255,255,.18)" stroke-width="2"/>
-      ${spokes}
-      <circle cx="50" cy="50" r="13" fill="url(#vh)"/>
-      <circle cx="50" cy="50" r="4" fill="#11161b"/>
+      <g class="lever-arm">
+        <rect x="16" y="30" width="8" height="120" rx="4" fill="url(#lvGold)"/>
+        <circle cx="20" cy="26" r="13" fill="url(#lvBall)"/>
+        <ellipse cx="16" cy="21" rx="4" ry="3" fill="#fff" fill-opacity=".45"/>
+      </g>
+      <circle cx="20" cy="152" r="11" fill="url(#lvPivot)"/>
+      <circle cx="20" cy="152" r="4" fill="#2a1f08"/>
     </svg>`;
+  box.title = 'Pull';
   return box;
 }
 
@@ -1441,9 +1457,8 @@ function setReelsSpinning(on) {
     r.classList.toggle('spinning', on);
     if (!on) r.classList.remove('landing');
   }
-  for (const v of document.querySelectorAll('.slot-valve')) {
-    v.classList.toggle('turning', on);
-  }
+  const lever = $('#slotLever');
+  if (lever) lever.classList.toggle('pulled', on);
 }
 
 /** Land each reel in turn, showing its final symbols as it stops. */

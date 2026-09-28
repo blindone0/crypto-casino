@@ -401,18 +401,112 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
 /* The cabinet: a dark inset well with a gold bezel, sitting on felt. */
 .slot-cabinet {
   position: relative;
-  padding: 16px;
-  border-radius: 14px;
+  max-width: 660px; margin: 0 auto; width: 100%;
+  padding: 0 0 10px;
+  border-radius: 18px 18px 12px 12px;
+  /* The striped body of every one of these machines ever made. */
   background:
-    radial-gradient(520px 200px at 50% 0%, rgba(217, 180, 90, .10), transparent 70%),
-    linear-gradient(180deg, var(--felt-hi) 0%, var(--felt) 60%, #081d17 100%);
-  border: 1px solid var(--gold-line);
+    repeating-linear-gradient(90deg,
+      #241a14 0 14px, #1b120d 14px 28px),
+    linear-gradient(180deg, #2a1f17, #140d09);
+  border: 2px solid #8a6a24;
   box-shadow:
-    0 0 0 1px rgba(0, 0, 0, .6) inset,
-    0 18px 48px rgba(0, 0, 0, .55),
-    inset 0 1px 0 rgba(255, 255, 255, .06);
-  max-width: 620px; margin: 0 auto; width: 100%;
+    0 0 0 1px rgba(0,0,0,.8) inset,
+    0 26px 60px rgba(0,0,0,.65),
+    inset 0 2px 0 rgba(255,255,255,.08);
 }
+
+/* ------------------------------------------------------------ the marquee */
+.slot-marquee {
+  position: relative;
+  padding: 12px 16px 10px;
+  text-align: center;
+  border-radius: 16px 16px 0 0;
+  /* The arch. A slot machine is recognisable from its silhouette before anything
+     printed on it is legible, and the curved top is the silhouette. */
+  background:
+    radial-gradient(120% 100% at 50% 100%, rgba(255,230,168,.16), transparent 60%),
+    linear-gradient(180deg, #3a2a14 0%, #241a0e 100%);
+  border-bottom: 2px solid #8a6a24;
+  clip-path: ellipse(140% 100% at 50% 100%);
+}
+.slot-marquee .mq-top,
+.slot-marquee .mq-sub {
+  display: block;
+  font: 700 10px/1.4 var(--sans, system-ui);
+  letter-spacing: .34em;
+  color: #c8a24a;
+}
+.slot-marquee .mq-main {
+  display: block;
+  font: 800 25px/1.15 var(--serif, Georgia, serif);
+  letter-spacing: .07em;
+  background: linear-gradient(180deg, #fff3cd 0%, #e2bd63 48%, #9a7526 100%);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+  text-shadow: 0 2px 0 rgba(0,0,0,.45);
+}
+
+/* --------------------------------------------------------------- the body */
+.slot-body {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 12px 12px;
+}
+/* The window the drums sit behind: a deep gold bezel around a dark recess. */
+.slot-window {
+  flex: 1 1 auto; min-width: 0;
+  padding: 9px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #0a0605, #060403);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  box-shadow:
+    0 0 0 3px #8a6a24,
+    0 0 0 4px #4a3712,
+    0 0 0 6px rgba(255, 228, 160, .22),
+    inset 0 10px 26px rgba(0,0,0,.9);
+}
+.slot-window > .reels { flex: 1 1 auto; min-width: 0; }
+
+/* ---------------------------------------------------------------- the arm */
+.slot-lever {
+  flex: 0 0 auto;
+  width: 34px; height: 190px;
+  cursor: pointer;
+  /* Hangs off the side of the cabinet, the way the real one is bolted on. */
+  margin-right: -14px;
+}
+.slot-lever svg { width: 100%; height: 100%; display: block; overflow: visible; }
+/* The arm swings about its pivot, which is the circle at the bottom. */
+.slot-lever .lever-arm {
+  transform-origin: 20px 152px;
+  transition: transform .18s cubic-bezier(.3, 1.6, .5, 1);
+}
+.slot-lever:hover .lever-arm { transform: rotate(6deg); }
+.slot-lever.pulled .lever-arm { transform: rotate(74deg); }
+
+/* --------------------------------------------------------------- the base */
+.slot-base {
+  margin: 0 12px;
+  padding: 8px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #2a1f17, #140d09);
+  border-top: 2px solid #8a6a24;
+}
+/* The payout tray: a dark slot you would fish coins out of. */
+.slot-tray {
+  height: 16px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #050302 0%, #0d0806 60%, #1a120c 100%);
+  box-shadow: inset 0 4px 10px rgba(0,0,0,.95), 0 1px 0 rgba(255,255,255,.05);
+}
+
+@media (max-width: 560px) {
+  .slot-marquee .mq-main { font-size: 19px; }
+  .slot-lever { width: 24px; height: 140px; margin-right: -10px; }
+  .slot-body { gap: 6px; padding: 10px 8px 8px; }
+}
+
 .reels {
   position: relative;
   display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;
@@ -507,41 +601,42 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
       rgba(0,0,0,.20) 75%, rgba(0,0,0,.58) 87%, rgba(0,0,0,.90) 95%, rgba(0,0,0,.99) 100%);
   box-shadow: inset 0 0 18px rgba(0, 0, 0, .7);
 }
-/* The wheel on each end of the drum.
+/* The axle the drums are keyed to.
  *
- * A flat strip down the side said "edge". This says "wheel": a spoked disc seen almost
- * edge-on, squashed into an ellipse by the same perspective the drum is under, turning
- * with the reel. It is the single thing that makes five cylinders read as machinery
- * rather than as five scrolling lists. */
+ * A tall ellipse down each side read as a blade rather than a wheel, so this is what is
+ * actually visible on the real machine: a narrow dark divider between the reels, with the
+ * end of the shaft showing at the centre line. The roundness comes from the drum itself;
+ * the hub only has to say there is a shaft through it.
+ */
 .reel-cap {
-  position: absolute; top: 50%; width: 22px; height: 78%;
-  transform: translateY(-50%);
+  position: absolute; top: 0; bottom: 0; width: 6px;
   z-index: 6; pointer-events: none;
-  border-radius: 50%;
-  background:
-    radial-gradient(ellipse at 40% 34%, rgba(255,255,255,.55), rgba(255,255,255,0) 58%),
-    conic-gradient(from 0deg,
-      #8d9aa6 0deg, #39434d 26deg, #7f8c98 52deg, #2b333b 78deg,
-      #8d9aa6 104deg, #39434d 130deg, #7f8c98 156deg, #2b333b 182deg,
-      #8d9aa6 208deg, #39434d 234deg, #7f8c98 260deg, #2b333b 286deg,
-      #8d9aa6 312deg, #39434d 338deg, #8d9aa6 360deg);
-  box-shadow: inset 0 0 0 2px rgba(12,16,20,.9), 0 0 10px rgba(0,0,0,.7);
+  background: linear-gradient(90deg, rgba(0,0,0,.92), rgba(28,34,40,.95) 50%, rgba(0,0,0,.92));
 }
-.reel-cap.l { left: -9px; }
-.reel-cap.r { right: -9px; }
-/* The hub and the axle stub. */
+.reel-cap.l { left: -3px; }
+.reel-cap.r { right: -3px; }
+/* The shaft end: a machined boss on the centre line, lit from the top left like
+   everything else on the cabinet. */
 .reel-cap::after {
   content: ''; position: absolute; left: 50%; top: 50%;
-  width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px;
+  width: 12px; height: 12px; margin: -6px 0 0 -6px;
   border-radius: 50%;
-  background: radial-gradient(circle at 34% 32%, #e6eef5, #6d7a86 55%, #141a20);
-  box-shadow: 0 0 6px rgba(0,0,0,.8);
+  background:
+    radial-gradient(circle at 34% 30%, #f2f7fb, #94a3b0 42%, #47535e 68%, #10161b);
+  box-shadow: 0 0 5px rgba(0,0,0,.9), inset 0 0 0 1px rgba(0,0,0,.5);
 }
-/* The wheels turn with the drum they are bolted to. */
-.reel.spinning .reel-cap { animation: wheelturn .62s linear infinite; }
-@keyframes wheelturn {
-  from { transform: translateY(-50%) rotate(0deg); }
-  to   { transform: translateY(-50%) rotate(-360deg); }
+/* A slot cut across the boss, so it reads as turned metal rather than a bead. */
+.reel-cap::before {
+  content: ''; position: absolute; left: 50%; top: 50%;
+  width: 12px; height: 2px; margin: -1px 0 0 -6px;
+  z-index: 1;
+  background: rgba(10,14,18,.75);
+  border-radius: 1px;
+}
+.reel.spinning .reel-cap::before { animation: hubturn .62s linear infinite; }
+@keyframes hubturn {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(-360deg); }
 }
 
 /* Spinning and landing are rotations of the drum, not slides of a strip. Down, because
@@ -562,21 +657,6 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
 
 /* The valve: the wheel on the side of the cabinet that turns while the drums do. It is
    dressing, and it is the part that says this is a machine and not a table. */
-.slot-machine-row { display: flex; align-items: center; gap: 10px; }
-/* The reels are a grid whose columns are fractions of its own width, so inside a flex row
-   it has to be told to take the space. Without this it resolves to nothing and the drums
-   come out zero pixels wide. */
-.slot-machine-row > .reels { flex: 1 1 auto; min-width: 0; }
-.slot-valve { flex: 0 0 auto; width: 46px; height: 46px; opacity: .85; }
-.slot-valve svg { width: 100%; height: 100%; display: block; }
-.slot-valve.turning svg { animation: valveturn 1.1s linear infinite; transform-origin: 50% 50%; }
-@keyframes valveturn {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
-}
-@media (max-width: 560px) {
-  .slot-valve { width: 30px; height: 30px; }
-}
 
 /* The effects canvas. Above the drums and their glass, below nothing: it is the top of
    the machine and it never takes a click. */
