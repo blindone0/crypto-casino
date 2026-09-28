@@ -101,6 +101,8 @@ const STRINGS = {
   'slots.theme.classic': { en: 'Golden Vault', ru: 'Золотой сейф' },
   'slots.theme.afterdark': { en: 'After Dark', ru: 'После полуночи' },
   'slots.theme.russian': { en: 'Golden Ring', ru: 'Золотое кольцо' },
+  'slots.theme.noir': { en: 'Knife and Smoke', ru: 'Нож и дым' },
+  'slots.theme.couch': { en: 'The Couch', ru: 'Кушетка' },
 
   // ---- puzzle
   'game.puzzle': { en: 'Puzzle', ru: 'Пазл' },

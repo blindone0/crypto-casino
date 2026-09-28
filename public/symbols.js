@@ -96,6 +96,46 @@ const DEFS = `
     <stop offset="70%" stop-color="#e6bf63" stop-opacity=".18"/>
     <stop offset="100%" stop-color="#e6bf63" stop-opacity="0"/>
   </radialGradient>
+  <linearGradient id="sgSmoke" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#d7dee7"/>
+    <stop offset="55%" stop-color="#8d98a6"/>
+    <stop offset="100%" stop-color="#4b535e"/>
+  </linearGradient>
+  <linearGradient id="sgSteel" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0%" stop-color="#ffffff"/>
+    <stop offset="35%" stop-color="#c3ccd6"/>
+    <stop offset="70%" stop-color="#7c8894"/>
+    <stop offset="100%" stop-color="#d9e2ea"/>
+  </linearGradient>
+  <linearGradient id="sgWhisky" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#f0b95e"/>
+    <stop offset="55%" stop-color="#c2761f"/>
+    <stop offset="100%" stop-color="#7a3f0d"/>
+  </linearGradient>
+  <radialGradient id="sgLamp" cx="50%" cy="38%" r="62%">
+    <stop offset="0%" stop-color="#ffdca3" stop-opacity=".85"/>
+    <stop offset="60%" stop-color="#b98a3f" stop-opacity=".22"/>
+    <stop offset="100%" stop-color="#0a0a0c" stop-opacity="0"/>
+  </radialGradient>
+  <linearGradient id="sgNight" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#5f7ec9"/>
+    <stop offset="50%" stop-color="#2b3a74"/>
+    <stop offset="100%" stop-color="#111737"/>
+  </linearGradient>
+  <linearGradient id="sgAmberGlass" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#e8b06a"/>
+    <stop offset="55%" stop-color="#b9762c"/>
+    <stop offset="100%" stop-color="#6d3f12"/>
+  </linearGradient>
+  <linearGradient id="sgBlot" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#a8b8de"/>
+    <stop offset="55%" stop-color="#5d6d9b"/>
+    <stop offset="100%" stop-color="#2c3555"/>
+  </linearGradient>
+  <radialGradient id="sgStarField" cx="50%" cy="45%" r="60%">
+    <stop offset="0%" stop-color="#7f9ae0" stop-opacity=".45"/>
+    <stop offset="100%" stop-color="#0a0d1a" stop-opacity="0"/>
+  </radialGradient>
 </defs>`;
 
 /** Inject the shared gradients once per document. */
@@ -370,7 +410,196 @@ function lacquerRank(letter, fill) {
           font-size="${letter.length > 1 ? 36 : 44}" font-weight="700" fill="${fill}">${letter}</text>`);
 }
 
-const THEMES = { classic: CLASSIC, afterdark: AFTER_DARK, russian: RUSSIAN };
+
+/** A cigarette-card rank: plain board stock, a hairline rule, a serif letter. */
+function smokeRank(letter, fill) {
+  return wrap(`
+    <rect x="14" y="12" width="72" height="76" rx="6" fill="#14161a" stroke="#3a4048" stroke-width="2"/>
+    <rect x="19" y="17" width="62" height="66" rx="3" fill="none" stroke="#5a626d" stroke-width="1"/>
+    <text x="50" y="64" text-anchor="middle"
+          font-family="Hoefler Text, Baskerville, Georgia, serif"
+          font-size="${letter.length > 1 ? 36 : 44}" font-weight="700" fill="${fill}">${letter}</text>`);
+}
+
+/**
+ * Knife and Smoke.
+ *
+ * A hard-luck story told in objects: the last cigarette, the glass that went with it, the
+ * ring that is still on, the knife, and the person at home who does not know yet. It is
+ * noir iconography, which is to say it is about consequences.
+ */
+const NOIR = {
+  T: () => smokeRank('10', 'url(#sgSmoke)'),
+  J: () => smokeRank('J', 'url(#sgSmoke)'),
+  Q: () => smokeRank('Q', 'url(#sgSilver)'),
+  K: () => smokeRank('K', 'url(#sgSilver)'),
+  A: () => smokeRank('A', 'url(#sgGold)'),
+
+  // mid value: a cigarette burning down, which is the whole theme in one object
+  BELL: () => wrap(`
+    <path d="M14 52c-8-9 7-11 0-21s9-12 2-20" fill="none" stroke="url(#sgSmoke)"
+          stroke-width="3" stroke-linecap="round" opacity=".55"/>
+    <path d="M26 50c-7-8 6-10 0-18" fill="none" stroke="url(#sgSmoke)"
+          stroke-width="2.4" stroke-linecap="round" opacity=".35"/>
+    <rect x="18" y="60" width="48" height="11" rx="3" fill="#efe7d6" stroke="#b6ad98" stroke-width="1.6"/>
+    <rect x="62" y="60" width="18" height="11" rx="3" fill="#c98b4a" stroke="#8a5b28" stroke-width="1.6"/>
+    <path d="M66 60v11M71 60v11M76 60v11" stroke="#8a5b28" stroke-width="1" opacity=".5"/>
+    <circle cx="19" cy="65.5" r="5" fill="#ff7a3c"/>
+    <circle cx="19" cy="65.5" r="2.4" fill="#ffd9a8"/>
+  `),
+
+  // high value: the glass it was smoked over
+  GEM: () => wrap(`
+    <ellipse cx="50" cy="50" rx="42" ry="42" fill="url(#sgLamp)"/>
+    <path d="M30 30h40l-5 50H35z" fill="rgba(210,228,245,.14)"
+          stroke="url(#sgSteel)" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M33 50h34l-3 28H36z" fill="url(#sgWhisky)"/>
+    <path d="M33 50h34l-1 6H34z" fill="#f4c877" opacity=".7"/>
+    <rect x="40" y="53" width="13" height="11" rx="2" fill="#dceaf5" opacity=".55"
+          transform="rotate(-12 46 58)"/>
+    <path d="M35 34v42" stroke="#ffffff" stroke-width="2" opacity=".28"/>
+    <ellipse cx="50" cy="82" rx="18" ry="3" fill="#000" opacity=".45"/>
+  `),
+
+  // higher value: the ring, still worn
+  CROWN: () => wrap(`
+    <ellipse cx="50" cy="58" rx="42" ry="42" fill="url(#sgLamp)"/>
+    <ellipse cx="50" cy="60" rx="22" ry="22" fill="none" stroke="url(#sgGold)" stroke-width="7"/>
+    <ellipse cx="50" cy="60" rx="22" ry="22" fill="none" stroke="#6b5220" stroke-width="1.4"/>
+    <path d="M50 20l7 11-7 9-7-9z" fill="url(#sgSilver)" stroke="#7d8793" stroke-width="1.4"/>
+    <path d="M43 31h14" stroke="#ffffff" stroke-width="1.2" opacity=".6"/>
+    <path d="M36 48a20 20 0 0 1 12-9" fill="none" stroke="#fff6dc" stroke-width="2" opacity=".5"/>
+  `),
+
+  // wild: the switchblade
+  WILD: () => wrap(`
+    <path d="M46 62 L88 44 L90 54 L48 72 Z" fill="url(#sgSteel)" stroke="#5c6672" stroke-width="1.6"/>
+    <path d="M48 66 L86 50" stroke="#ffffff" stroke-width="1.4" opacity=".55"/>
+    <rect x="12" y="58" width="38" height="14" rx="6" fill="#23262b" stroke="#585d66" stroke-width="2"/>
+    <circle cx="21" cy="65" r="2.4" fill="#8b929c"/>
+    <circle cx="41" cy="65" r="2.4" fill="#8b929c"/>
+    <path d="M27 58v14" stroke="#3a3e45" stroke-width="1.2"/>
+    <text x="50" y="30" text-anchor="middle" font-family="Hoefler Text, Georgia, serif"
+          font-size="19" font-weight="700" fill="url(#sgSilver)" letter-spacing="3">WILD</text>
+  `),
+
+  // scatter: someone waiting up, and the reason the rest of it matters.
+  //
+  // Drawn in profile and lit from behind, because a silhouette says it without the symbol
+  // needing to be a picture of a person. The bright pane is doing the work: the figure was
+  // a dark shape on a dark window before, and read as nothing at all.
+  SCATTER: () => wrap(`
+    <rect x="16" y="12" width="68" height="76" rx="4" fill="#0e1117" stroke="#3b434e" stroke-width="2"/>
+    <rect x="22" y="18" width="56" height="50" rx="2" fill="#40538c"/>
+    <rect x="22" y="18" width="56" height="50" rx="2" fill="url(#sgLamp)"/>
+    <path d="M50 18v50M22 43h56" stroke="#20262f" stroke-width="3"/>
+    <circle cx="46" cy="37" r="9.5" fill="#0c0e13"/>
+    <path d="M55 32a5 5 0 1 1-.1 0z" fill="#0c0e13"/>
+    <path d="M52 45c6 8 7 20 6 33H34c-7-10-6-24 4-33z" fill="#0c0e13"/>
+    <path d="M44 55c-5 3-9 9-9 16" fill="none" stroke="#0c0e13"
+          stroke-width="5" stroke-linecap="round"/>
+    <rect x="22" y="68" width="56" height="4" fill="#4a525d"/>
+    <path d="M22 72h56" stroke="#2a3038" stroke-width="2"/>
+  `),
+};
+
+/** A tarot-ish rank: night blue, a star in each corner. */
+function couchRank(letter, fill) {
+  return wrap(`
+    <rect x="14" y="12" width="72" height="76" rx="8" fill="#0d1120" stroke="#2f3a63" stroke-width="2"/>
+    <rect x="19" y="17" width="62" height="66" rx="5" fill="none" stroke="url(#sgNight)" stroke-width="1.6"/>
+    <path d="M25 24l1.6 3.4 3.4 1.6-3.4 1.6L25 34l-1.6-3.4L20 29l3.4-1.6z" fill="#8fa6e8" opacity=".8"/>
+    <path d="M75 66l1.6 3.4L80 71l-3.4 1.6L75 76l-1.6-3.4L70 71l3.4-1.6z" fill="#8fa6e8" opacity=".8"/>
+    <text x="50" y="64" text-anchor="middle"
+          font-family="Hoefler Text, Baskerville, Georgia, serif"
+          font-size="${letter.length > 1 ? 36 : 44}" font-weight="700" fill="${fill}">${letter}</text>`);
+}
+
+/**
+ * The Couch.
+ *
+ * Drink, cards, the zodiac and the consulting room: four different ways of being told what
+ * is going to happen to you, none of which is any better than the others at it. That joke
+ * is the theme, and a casino is a reasonable place to make it.
+ */
+const COUCH = {
+  T: () => couchRank('10', 'url(#sgSilver)'),
+  J: () => couchRank('J', 'url(#sgSilver)'),
+  Q: () => couchRank('Q', 'url(#sgNight)'),
+  K: () => couchRank('K', 'url(#sgNight)'),
+  A: () => couchRank('A', 'url(#sgGold)'),
+
+  // mid value: the bottle and the glass beside it
+  BELL: () => wrap(`
+    <ellipse cx="50" cy="52" rx="42" ry="42" fill="url(#sgStarField)"/>
+    <path d="M40 18h12v14l7 12v38a4 4 0 0 1-4 4H37a4 4 0 0 1-4-4V44l7-12z"
+          fill="url(#sgAmberGlass)" stroke="#5c3510" stroke-width="2" stroke-linejoin="round"/>
+    <rect x="38" y="14" width="16" height="7" rx="2" fill="#3a2a16" stroke="#6b5027" stroke-width="1.4"/>
+    <rect x="35" y="54" width="22" height="18" rx="2" fill="#f0e4c8" stroke="#a89572" stroke-width="1.4"/>
+    <path d="M39 60h14M39 65h10" stroke="#8a7a58" stroke-width="1.4"/>
+    <path d="M66 58h16l-2 24H68z" fill="rgba(220,235,250,.18)" stroke="#9fb1c4" stroke-width="1.6"/>
+    <path d="M67 70h14l-1 11H68z" fill="url(#sgWhisky)"/>
+  `),
+
+  // high value: a zodiac wheel, which is a paytable with better marketing
+  GEM: () => wrap(`
+    <ellipse cx="50" cy="50" rx="42" ry="42" fill="url(#sgStarField)"/>
+    <circle cx="50" cy="50" r="34" fill="#0c1024" stroke="url(#sgGold)" stroke-width="2"/>
+    <circle cx="50" cy="50" r="24" fill="none" stroke="url(#sgNight)" stroke-width="1.6"/>
+    <circle cx="50" cy="50" r="9" fill="none" stroke="url(#sgGold)" stroke-width="1.6"/>
+    <path d="M50 16v68M16 50h68M26 26l48 48M74 26L26 74" stroke="url(#sgGold)"
+          stroke-width="1.1" opacity=".5"/>
+    <circle cx="50" cy="26" r="2.6" fill="#ffe6a6"/>
+    <circle cx="74" cy="50" r="2.6" fill="#ffe6a6"/>
+    <circle cx="50" cy="74" r="2.6" fill="#ffe6a6"/>
+    <circle cx="26" cy="50" r="2.6" fill="#ffe6a6"/>
+    <circle cx="50" cy="50" r="3.4" fill="url(#sgGold)"/>
+  `),
+
+  // higher value: the moon everything is blamed on
+  CROWN: () => wrap(`
+    <ellipse cx="50" cy="50" rx="42" ry="42" fill="url(#sgStarField)"/>
+    <path d="M62 20a32 32 0 1 0 0 60 26 26 0 0 1 0-60z" fill="url(#sgSilver)"/>
+    <circle cx="44" cy="38" r="4" fill="#b9c2d0" opacity=".5"/>
+    <circle cx="38" cy="56" r="5.5" fill="#b9c2d0" opacity=".4"/>
+    <circle cx="50" cy="64" r="3" fill="#b9c2d0" opacity=".45"/>
+    <path d="M76 26l2 4.6 4.6 2-4.6 2L76 39l-2-4.4-4.6-2 4.6-2z" fill="#ffe6a6"/>
+    <path d="M22 62l1.6 3.4L27 67l-3.4 1.6L22 72l-1.6-3.4L17 67l3.4-1.6z" fill="#ffe6a6" opacity=".8"/>
+  `),
+
+  // wild: an inkblot, which is whatever you decide it is, which is the point
+  WILD: () => wrap(`
+    <g fill="url(#sgBlot)" stroke="#1b2133" stroke-width="1.2">
+      <path d="M50 16c6 0 9 6 8 12s-6 9-4 14 9 5 12 11-1 13-6 16-12 1-14 6-1 9-1 9h-5z"/>
+      <path d="M50 16c-6 0-9 6-8 12s6 9 4 14-9 5-12 11 1 13 6 16 12 1 14 6 1 9 1 9h5z"/>
+      <ellipse cx="30" cy="46" rx="6" ry="4.5" transform="rotate(-25 30 46)"/>
+      <ellipse cx="70" cy="46" rx="6" ry="4.5" transform="rotate(25 70 46)"/>
+      <circle cx="24" cy="66" r="3"/>
+      <circle cx="76" cy="66" r="3"/>
+    </g>
+    <path d="M50 16v68" stroke="#0a0d16" stroke-width="0.8" opacity=".35"/>
+    <text x="50" y="96" text-anchor="middle" font-family="Hoefler Text, Georgia, serif"
+          font-size="13" font-weight="700" fill="url(#sgSilver)" letter-spacing="3">WILD</text>
+  `),
+
+  // scatter: the prescription that follows the consultation
+  SCATTER: () => wrap(`
+    <ellipse cx="50" cy="52" rx="42" ry="42" fill="url(#sgStarField)"/>
+    <rect x="32" y="16" width="30" height="10" rx="3" fill="#dfe6ee" stroke="#9aa6b5" stroke-width="1.6"/>
+    <rect x="34" y="26" width="26" height="46" rx="4" fill="url(#sgAmberGlass)"
+          stroke="#5c3510" stroke-width="2"/>
+    <rect x="38" y="36" width="18" height="22" rx="2" fill="#f2ecdd" opacity=".9"/>
+    <path d="M45 40v6h-5v4h5v6h4v-6h5v-4h-5v-6z" fill="#b03c3c"/>
+    <ellipse cx="72" cy="70" rx="9" ry="6" fill="#eef2f7" stroke="#9aa6b5" stroke-width="1.4"
+             transform="rotate(-18 72 70)"/>
+    <path d="M65 71.5a9 6 0 0 0 14-3" fill="none" stroke="#9aa6b5" stroke-width="1.4"
+          transform="rotate(-18 72 70)"/>
+    <ellipse cx="24" cy="76" rx="9" ry="6" fill="#dbe6f2" stroke="#9aa6b5" stroke-width="1.4"
+             transform="rotate(14 24 76)"/>
+  `),
+};
+
+const THEMES = { classic: CLASSIC, afterdark: AFTER_DARK, russian: RUSSIAN, noir: NOIR, couch: COUCH };
 
 export const THEME_KEYS = Object.keys(THEMES);
 

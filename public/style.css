@@ -713,6 +713,52 @@ body.russian .bigwin {
 body.russian .bigwin .label { color: #e8a83c; }
 body.russian .bigwin .amount { color: #ffe0a8; text-shadow: 0 0 44px rgba(232, 168, 60, .55); }
 
+/* Knife and Smoke: lamplight in a grey room. Almost no colour, which is the point. */
+body.noir .slot-cabinet {
+  background:
+    radial-gradient(520px 210px at 50% 0%, rgba(214, 226, 240, .10), transparent 72%),
+    linear-gradient(180deg, #16191e 0%, #0e1115 62%, #06080a 100%);
+  border-color: rgba(158, 172, 188, .26);
+}
+body.noir .reels { background: linear-gradient(180deg, #0c0e12, #05070a); }
+body.noir .cell { background: linear-gradient(180deg, #171b21 0%, #0d1014 100%); border-color: #2c333c; }
+body.noir .cell.win {
+  border-color: #cfd8e4;
+  box-shadow: 0 0 22px rgba(207, 216, 228, .32), inset 0 0 18px rgba(255, 122, 60, .16);
+}
+body.noir .payline-layer path {
+  stroke: #cfd8e4; filter: drop-shadow(0 0 6px rgba(207, 216, 228, .5));
+}
+body.noir .slot-banner.free { color: #ffb184; text-shadow: 0 0 22px rgba(255, 122, 60, .4); }
+body.noir .bigwin {
+  background: radial-gradient(circle at 50% 45%, rgba(207, 216, 228, .2), rgba(5, 7, 10, .94) 68%);
+}
+body.noir .bigwin .label { color: #cfd8e4; }
+body.noir .bigwin .amount { color: #f2f6fb; text-shadow: 0 0 44px rgba(207, 216, 228, .45); }
+
+/* The Couch: a night sky seen through a consulting-room window. */
+body.couch .slot-cabinet {
+  background:
+    radial-gradient(520px 210px at 50% 0%, rgba(143, 166, 232, .16), transparent 72%),
+    linear-gradient(180deg, #131a33 0%, #0b1022 60%, #05070f 100%);
+  border-color: rgba(143, 166, 232, .3);
+}
+body.couch .reels { background: linear-gradient(180deg, #0a0e1c, #05070f); }
+body.couch .cell { background: linear-gradient(180deg, #141a2e 0%, #0a0e1a 100%); border-color: #2c3556; }
+body.couch .cell.win {
+  border-color: #8fa6e8;
+  box-shadow: 0 0 22px rgba(143, 166, 232, .42), inset 0 0 18px rgba(255, 230, 166, .18);
+}
+body.couch .payline-layer path {
+  stroke: #8fa6e8; filter: drop-shadow(0 0 6px rgba(143, 166, 232, .6));
+}
+body.couch .slot-banner.free { color: #ffe6a6; text-shadow: 0 0 22px rgba(255, 230, 166, .4); }
+body.couch .bigwin {
+  background: radial-gradient(circle at 50% 45%, rgba(143, 166, 232, .24), rgba(5, 7, 15, .93) 68%);
+}
+body.couch .bigwin .label { color: #8fa6e8; }
+body.couch .bigwin .amount { color: #e8eeff; text-shadow: 0 0 44px rgba(143, 166, 232, .55); }
+
 /* ------------------------------------------------------------ site token */
 .phrase-box {
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
