@@ -15,6 +15,7 @@
     "admin-token": "node tools/admin-token.js",
     "treasury": "node tools/treasury-setup.js",
     "token-reset": "node tools/token-reset.js",
-    "migrate": "node tools/migrate.js"
+    "migrate": "node tools/migrate.js",
+    "doctor": "node tools/doctor.js"
   }
 }

@@ -284,16 +284,43 @@ Copy `backups/` off the machine on a schedule. `config.json` holds the admin tok
 the treasury whitelist, so treat it as a secret.
 
 Restoring is `systemctl stop casino`, copy the file to `data/casino.db`, start again.
-Because the ledger is append-only, the admin panel will tell you immediately whether the
+Because the ledger is append-only, `npm run doctor` will tell you immediately whether the
 restored books balance.
+
+### Upgrading
+
+The schema is versioned, and starting the server applies whatever migrations the database
+has not had. Before a deploy that changes storage, back up first and look at what is
+waiting:
+
+```bash
+npm run migrate          # what version this database is at, and what is pending
+npm run migrate -- --run # apply it now rather than on the next start
+```
+
+Each step runs in its own transaction, so a step that fails leaves the database at the
+version before it rather than half changed. The version is `PRAGMA user_version` if you
+ever want to read it yourself.
 
 ---
 
 ## 8. Checks before you take real money
 
 ```bash
-npm test                      # all 88 must pass
+npm test                      # every test must pass
+npm run doctor                # the books, the chain, the supply cap, escrow
 curl -sI https://example.com  # HSTS present, no Server header
+```
+
+`npm run doctor` is the one to remember. It checks, in a single pass and without writing
+anything, that account balances equal the ledger, that every block of the token chain
+links and verifies, that the supply cap holds and nothing was minted after genesis, that
+the house holds at least the stakes of every live table, that no table has been stranded
+by a sweeper that is not running, and that no rows are orphaned. It exits non-zero, so
+put it in cron and hear about a problem rather than finding one:
+
+```
+0 * * * * cd /home/casino/casino && npm run --silent doctor || mail -s 'casino' you@example.com
 ```
 
 - [ ] `trustProxy: true` and `secureCookies: true`
@@ -304,7 +331,7 @@ curl -sI https://example.com  # HSTS present, no Server header
 - [ ] Crash multiplier animates smoothly through the proxy (SSE not buffered)
 - [ ] A test deposit credits, and a test withdrawal actually arrives
 - [ ] Backups running and a restore rehearsed at least once
-- [ ] Books-balance indicator green in the admin panel
+- [ ] `npm run doctor` green, and in cron
 - [ ] Preferans calibration current: `node tools/calibrate-preferans.js` if the bot changed
 - [ ] Treasury whitelist set, hot wallet holding only what it needs
 

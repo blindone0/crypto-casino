@@ -26,6 +26,7 @@ start and saved to `config.json`.
 node src/server.js                  # start; first run writes config.json
 node tools/admin-token.js           # show the operator token
 npm test                            # the whole suite
+npm run doctor                      # is this site sound? books, chain, escrow
 node tools/simulate.js              # will this actually make money?
 ```
 
@@ -467,6 +468,7 @@ src/
   server.js        HTTP server, router, every endpoint
   config.js        all tuning: edge, risk, referrals, wallet, geo, treasury
   db.js            SQLite schema and the synchronous transaction helper
+  migrate.js       numbered schema steps, so a live database can change
   util.js          integer money math, crypto helpers, HTTP plumbing
   fair.js          provably-fair engine (the one source of outcome truth)
   ledger.js        accounts, transfers, risk caps, settlement, reporting
@@ -476,9 +478,13 @@ src/
   treasury.js      operator profit withdrawal to cold storage
   addrcheck.js     bech32 / base58check address validation
   geo.js           jurisdiction filter
+  doctor.js        every invariant a running site must hold, in one pass
   tokenchain.js    the site token: signed, hash-linked, fixed supply
   arcade.js        token-operated cabinets; scores, never money
   match.js         staked head-to-head games: lobby, escrow, clocks, settlement
+  matchgames.js    the rules plugged into it: chess, poker, durak, balda, sea battle
+  poker.js         Hold'em as a sit-and-go; holdem.js scores the hands
+  durak.js         Дурак переводной, including the rule that ends a cycle
   chess.js         a complete rules engine, verified with perft
   seabattle.js     Морской бой: fleet validation and shooting
   balda.js         Балда: the grid, and the search for a word's path
@@ -492,6 +498,8 @@ public/            the site: casino, /admin panel, /verify verifier, i18n
   games/           canvas cabinets and the match boards
 test/              the suite; run it with `npm test`
 tools/             simulator, calibration, treasury setup, admin token, token reset
+  doctor.js        npm run doctor: the health check, safe against production
+  migrate.js       npm run migrate: what a deploy will do to a live database
 ```
 
 See `DEPLOY.md` for putting this on a real server, and `GROWTH.md` for launching and promoting it.
