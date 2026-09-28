@@ -37,6 +37,7 @@ const chess = require('./chess');
 const seabattle = require('./seabattle');
 const balda = require('./balda');
 const durak = require('./durak');
+const poker = require('./poker');
 const wordsRu = require('./words-ru');
 
 /** The other seat, at a table of two. */
@@ -472,8 +473,87 @@ function playableFor(state, seat, hand) {
   return [];
 }
 
+
+// -------------------------------------------------------------------- poker
+/**
+ * Texas Hold'em, as a sit-and-go for two to six.
+ *
+ * Everyone buys in for the stake, gets the same chips, and plays until one person holds
+ * all of them. That shape is what makes poker fit a staked match at all: chips never
+ * leave the table, so the escrow only ever has to know about one buy-in per seat, and the
+ * pot at the end is exactly what was put in.
+ *
+ * It is not a cash game and deliberately so. A cash game means players moving money on
+ * and off the table mid-session, which is a different and much larger problem.
+ */
+const POKER = {
+  key: 'poker',
+  name: 'Poker',
+  seats: { min: 2, max: 6, default: 2 },
+  clockMs: 5 * 60 * 1000,
+  incrementMs: 12 * 1000,
+
+  create(cfg, seats) {
+    return poker.create(seats);
+  },
+
+  toMove(state) {
+    if (state.finished) return null;
+    // Between hands nobody is on the clock in the poker sense, but somebody has to be, or
+    // a table where one player walks away never resolves. The next dealer carries it.
+    if (state.street === 'showdown') return poker.alive(state)[0] ?? null;
+    return state.toAct >= 0 ? state.toAct : null;
+  },
+
+  canAct(state, seat) {
+    if (state.finished) return false;
+    // Anyone still holding chips may ask for the next hand once a showdown is finished.
+    if (state.street === 'showdown') return state.chips[seat] > 0;
+    return state.toAct === seat;
+  },
+
+  act(state, seat, payload) {
+    if (state.street === 'showdown') {
+      if (payload.play !== 'next') throw new U.BadRequest('the hand is over; deal the next one');
+      const dealt = poker.nextHand(state);
+      return finishOrContinue(dealt, 'deal');
+    }
+    const move = String(payload.play || '');
+    const next = poker.act(state, seat, move, payload.amount);
+    return finishOrContinue(next, move);
+  },
+
+  view(state, seat, seats) {
+    return { ...poker.view(state, seat), seats };
+  },
+
+  resultOnTimeout(state, seat, seats) {
+    // Timing out folds you out of the tournament. If that leaves one player, they have
+    // won it; otherwise the table carries on and this is not a result at all, so the
+    // framework is told the survivors are everyone else.
+    return allBut(seat, seats);
+  },
+
+  /**
+   * Leaving surrenders your chips to the table rather than ending it.
+   * Four people should not lose their tournament because one of them closed the tab.
+   */
+  onQuit(state, seat, seats) {
+    const next = poker.quit(state, seat);
+    if (!next.finished) return { state: next };
+    return { winners: [next.winner], reason: 'last-standing' };
+  },
+};
+
+/** A tournament that has a winner is over; anything else carries on. */
+function finishOrContinue(state, note) {
+  if (!state.finished) return { state, note };
+  return { state, note, winners: [state.winner], reason: 'last-standing' };
+}
+
 const GAMES = {
   chess: CHESS,
+  poker: POKER,
   durak: DURAK,
   balda: BALDA,
   seabattle: SEABATTLE,

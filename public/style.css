@@ -1098,3 +1098,34 @@ body.couch .bigwin .amount { color: #e8eeff; text-shadow: 0 0 44px rgba(143, 166
 .card.playable:hover { transform: translateY(-4px); }
 .card.picked { box-shadow: 0 0 0 2px var(--gold); transform: translateY(-6px); }
 .card.trump-card { transform: rotate(90deg) scale(.8); }
+
+/* ---------------------------------------------------------------- poker */
+.poker { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; }
+.poker-head { display: flex; gap: 14px; align-items: baseline; font-size: 11px; color: var(--text-dim); }
+.poker-head .v { font: 600 15px/1 ui-monospace, monospace; color: var(--gold); }
+
+.poker-seats { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.poker-seat {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 6px 12px; min-width: 74px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+}
+.poker-seat.acting { border-color: var(--gold); box-shadow: 0 0 12px rgba(217,180,90,.25); }
+.poker-seat.out { opacity: .4; }
+.poker-seat .chips { font: 600 16px/1 ui-monospace, monospace; }
+.poker-seat .bet { font-size: 11px; color: var(--gold); }
+
+.poker-board { display: flex; gap: 6px; justify-content: center; }
+.poker-hole { display: flex; gap: 6px; justify-content: center; }
+.poker-showdown { display: flex; flex-direction: column; gap: 4px; align-items: center; font-size: 12px; }
+.poker-showdown .row { align-items: center; gap: 6px; }
+.poker-actions { flex-wrap: wrap; gap: 6px; justify-content: center; max-width: min(92vw, 560px); }
+.poker-slider { width: 130px; }
+
+.card.back {
+  background: repeating-linear-gradient(45deg, #2a3242 0 4px, #222a38 4px 8px);
+  border-color: #3a4457;
+}
+.card.small { width: 32px; height: 46px; }
+.card.small .r { font-size: 12px; }
+.card.small .s { font-size: 11px; }

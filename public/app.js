@@ -2589,6 +2589,7 @@ const MATCH_BOARDS = {
   seabattle: () => import('./games/seabattleboard.js'),
   balda: () => import('./games/baldaboard.js'),
   durak: () => import('./games/durakboard.js'),
+  poker: () => import('./games/pokerboard.js'),
 };
 
 /** Poll while a match is live. Matches are turn-based, so a socket would be overkill. */

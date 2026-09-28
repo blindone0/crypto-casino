@@ -237,6 +237,8 @@ const STRINGS = {
   'match.g.seabattle': { en: 'Sea Battle', ru: 'Морской бой' },
   'match.g.balda': { en: 'Balda', ru: 'Балда' },
   'match.g.durak': { en: 'Durak', ru: 'Дурак переводной' },
+  'match.g.poker': { en: 'Poker', ru: 'Покер' },
+  'match.why.last-standing': { en: 'took every chip', ru: 'забрал все фишки' },
   'match.why.fool': { en: 'the fool was found', ru: 'дурак найден' },
   'match.why.no-fool': { en: 'nobody was left holding cards', ru: 'никто не остался с картами' },
   'durak.attack': { en: 'led', ru: 'ходит' },
