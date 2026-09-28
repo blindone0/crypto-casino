@@ -2613,12 +2613,36 @@ async function renderMatch() {
   paintLobby();
 }
 
+/**
+ * A match has no house edge, so it cannot use the ordinary panel: houseEdge has no entry
+ * for it and `undefined * 100` printed "NaN%", the same way the arcade once did.
+ *
+ * The distinction is real and worth showing plainly. In every other game the player is
+ * betting against the bankroll, so the edge and the maximum the bankroll will pay both
+ * mean something. Here the players bet against each other, the prize is their own escrowed
+ * stakes, and the only thing the house takes is a rake off the pot.
+ */
+function matchInfoPanel(info) {
+  const p = $('#infoPanel');
+  setKids(p,
+    el('h3', {}, t('match.title')),
+    el('div', { class: 'stat-row' },
+      el('span', { class: 'k' }, t('match.rake')),
+      el('span', { class: 'v' }, `${(info.rake * 100).toFixed(1)}%`)),
+    el('div', { class: 'stat-row' },
+      el('span', { class: 'k' }, t('match.minStake')),
+      el('span', { class: 'v' }, `${fmt(info.minStake)} ${info.symbol}`)),
+    el('p', { class: 'hint' }, t('match.noEdge')));
+  applyAll(p);
+}
+
 function paintLobby() {
   const info = state.matchLobby;
   const stake = el('input', {
     class: 'mono', inputmode: 'decimal', value: fmt(info.minStake, 2),
   });
-  const game = el('select', {}, ...info.games.map((g) => el('option', { value: g.key }, g.name)));
+  const game = el('select', {}, ...info.games.map(
+    (g) => el('option', { value: g.key }, t(`match.g.${g.key}`))));
   const seatCount = el('select', {});
   const paintSeats = () => {
     const chosen = info.games.find((g) => g.key === game.value) || info.games[0];
@@ -2697,7 +2721,7 @@ function paintLobby() {
     others.length
       ? el('div', { class: 'challenges' }, ...others.map((m) => row(m, false)))
       : el('p', { class: 'hint' }, t('match.noneOpen')));
-  infoPanel();
+  matchInfoPanel(info);
 }
 
 /**

@@ -23,6 +23,12 @@ const LOCAL = {
   'v.mines': { en: 'Mine count', ru: 'Количество мин' },
   'v.picks': { en: 'Safe tiles revealed', ru: 'Открыто безопасных плиток' },
   'v.result': { en: 'Result', ru: 'Результат' },
+  'v.chance': { en: 'win chance', ru: 'шанс выигрыша' },
+  'v.mult': { en: 'multiplier', ru: 'множитель' },
+  'v.verdict': { en: 'verdict', ru: 'итог' },
+  'v.crashAt': { en: 'crash point', ru: 'точка краша' },
+  'v.minePos': { en: 'mine positions (0-24)', ru: 'позиции мин (0-24)' },
+  'v.safeProb': { en: 'safe probability', ru: 'вероятность безопасного хода' },
   'v.hashOf': { en: 'sha256 of that server seed', ru: 'sha256 этого серверного сида' },
   'v.hashNote': {
     en: 'Compare this with the hash the site published before you bet. If it matches, the seed was not swapped.',
@@ -53,6 +59,13 @@ async function hmacBytes(serverSeed, msg) {
   );
   return new Uint8Array(await crypto.subtle.sign('HMAC', key, enc.encode(msg)));
 }
+
+/**
+ * This page keeps its own strings: they are only ever shown here, and the shared table is
+ * for the site. Reach for them through this, never through the imported t() -- that looks
+ * in the shared table, does not find them, and falls back to printing the key itself.
+ */
+const local = (key) => LOCAL[key][getLocale()] ?? LOCAL[key].en;
 
 const toHex = (bytes) => [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
 
@@ -94,10 +107,10 @@ async function verify({ game, serverSeed, clientSeed, nonce, edge, target, mode,
     return {
       rows: [
         ['float', f.toFixed(12)],
-        [t('v.result'), (roll / 100).toFixed(2)],
-        ['win chance', `${(chance * 100).toFixed(2)}%`],
-        ['multiplier', `${floor2((1 - edge) / chance).toFixed(2)}x`],
-        ['verdict', won ? t('v.win') : t('v.lose')],
+        [local('v.result'), (roll / 100).toFixed(2)],
+        [local('v.chance'), `${(chance * 100).toFixed(2)}%`],
+        [local('v.mult'), `${floor2((1 - edge) / chance).toFixed(2)}x`],
+        [local('v.verdict'), won ? local('v.win') : local('v.lose')],
       ],
       won,
     };
@@ -111,7 +124,7 @@ async function verify({ game, serverSeed, clientSeed, nonce, edge, target, mode,
       rows: [
         ['float', f.toFixed(12)],
         ['raw 1/(1-f)', raw.toFixed(6)],
-        [game === 'crash' ? 'crash point' : t('v.result'), `${m.toFixed(2)}x`],
+        [game === 'crash' ? local('v.crashAt') : local('v.result'), `${m.toFixed(2)}x`],
       ],
       won: null,
     };
@@ -127,9 +140,9 @@ async function verify({ game, serverSeed, clientSeed, nonce, edge, target, mode,
   const p = picks > 0 ? choose(25 - mineCount, picks) / choose(25, picks) : 1;
   return {
     rows: [
-      ['mine positions (0-24)', mines.join(', ')],
-      ['safe probability', picks > 0 ? p.toFixed(8) : '1'],
-      ['multiplier', picks > 0 ? `${floor2((1 - edge) / p).toFixed(2)}x` : '-'],
+      [local('v.minePos'), mines.join(', ')],
+      [local('v.safeProb'), picks > 0 ? p.toFixed(8) : '1'],
+      [local('v.mult'), picks > 0 ? `${floor2((1 - edge) / p).toFixed(2)}x` : '-'],
     ],
     won: null,
   };
@@ -137,7 +150,7 @@ async function verify({ game, serverSeed, clientSeed, nonce, edge, target, mode,
 
 // --------------------------------------------------------------------- ui
 function localise() {
-  const L = (id, key) => { const n = $(id); if (n) n.textContent = LOCAL[key][getLocale()] ?? LOCAL[key].en; };
+  const L = (id, key) => { const n = $(id); if (n) n.textContent = local(key); };
   L('hTitle', 'v.title'); L('hIntro', 'v.intro'); L('lGame', 'v.game');
   L('lServer', 'v.server'); L('lClient', 'v.client'); L('lNonce', 'v.nonce');
   L('lEdge', 'v.edge'); L('run', 'v.run'); L('lChain', 'v.chain');
@@ -149,8 +162,7 @@ function localise() {
 function buildOpts() {
   const box = $('gameOpts');
   const g = $('game').value;
-  const lang = getLocale();
-  const lbl = (key) => LOCAL[key][lang] ?? LOCAL[key].en;
+  const lbl = local;
   box.innerHTML = '';
   const field = (labelKey, inputHtml) => {
     const w = document.createElement('label');
@@ -175,7 +187,7 @@ async function run() {
   const out = $('out');
   out.hidden = false;
   if (!/^[0-9a-fA-F]+$/.test(serverSeed)) {
-    out.innerHTML = `<p class="hint neg">${LOCAL['v.badSeed'][getLocale()] ?? LOCAL['v.badSeed'].en}</p>`;
+    out.innerHTML = `<p class="hint neg">${local('v.badSeed')}</p>`;
     return;
   }
   const game = $('game').value;
@@ -191,32 +203,30 @@ async function run() {
     picks: Number($('picks')?.value ?? 0),
   });
   const hash = await sha256hex(serverSeed);
-  const lang = getLocale();
   const rows = res.rows.map(([k, v]) =>
     `<div class="stat-row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join('');
   out.innerHTML = `
-    <h3>${LOCAL['v.result'][lang] ?? LOCAL['v.result'].en}</h3>
+    <h3>${local('v.result')}</h3>
     ${rows}
-    <h3 style="margin-top:16px">${LOCAL['v.hashOf'][lang] ?? LOCAL['v.hashOf'].en}</h3>
+    <h3 style="margin-top:16px">${local('v.hashOf')}</h3>
     <div class="addr">${hash}</div>
-    <p class="hint">${LOCAL['v.hashNote'][lang] ?? LOCAL['v.hashNote'].en}</p>`;
+    <p class="hint">${local('v.hashNote')}</p>`;
 }
 
 async function runChain() {
-  const lang = getLocale();
   const seed = $('chainSeed').value.trim();
   const expect = $('chainExpect').value.trim().toLowerCase();
   const out = $('chainOut');
   if (!seed || !expect) {
-    out.textContent = LOCAL['v.needBoth'][lang] ?? LOCAL['v.needBoth'].en;
+    out.textContent = local('v.needBoth');
     out.className = 'hint';
     return;
   }
   const h = await sha256hex(seed);
   const ok = h === expect;
   out.textContent = `${h} -> ${ok
-    ? (LOCAL['v.match'][lang] ?? LOCAL['v.match'].en)
-    : (LOCAL['v.noMatch'][lang] ?? LOCAL['v.noMatch'].en)}`;
+    ? (local('v.match'))
+    : (local('v.noMatch'))}`;
   out.className = `hint ${ok ? 'pos' : 'neg'}`;
 }
 

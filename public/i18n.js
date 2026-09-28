@@ -263,6 +263,13 @@ const STRINGS = {
   'match.nPlayers': { en: '{n} players', ru: '{n} игрока' },
   'match.seated': { en: 'Seated. Waiting for {n} of {of}.', ru: 'Вы за столом. Ждём: {n} из {of}.' },
   'match.rake': { en: 'House cut', ru: 'Комиссия' },
+  'match.minStake': { en: 'Smallest stake', ru: 'Минимальная ставка' },
+  'match.noEdge': {
+    en: 'No house edge here: you are playing the other players, not the bankroll. The prize '
+      + 'is the stakes everyone escrowed, less the cut above.',
+    ru: 'Здесь нет преимущества казино: вы играете против других игроков, а не против банка. '
+      + 'Приз — это ставки, которые все внесли в эскроу, за вычетом комиссии выше.',
+  },
   'match.youWin': { en: 'Winner takes', ru: 'Победитель получает' },
   'match.challenge': { en: 'Post a challenge', ru: 'Бросить вызов' },
   'match.yours': { en: 'Your games', ru: 'Ваши игры' },
