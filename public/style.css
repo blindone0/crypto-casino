@@ -437,7 +437,7 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
   aspect-ratio: 1 / 3;
   overflow: hidden;
   border-radius: 8px;
-  perspective: calc(var(--cell, 60px) * 3.1);
+  perspective: calc(var(--cell, 60px) * 2.15);
   perspective-origin: 50% 50%;
   background: linear-gradient(180deg, #05080a 0%, #0c1116 22%, #131a20 50%, #0c1116 78%, #05080a 100%);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .05);
@@ -501,23 +501,47 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
     linear-gradient(90deg, rgba(0,0,0,.55) 0%, rgba(0,0,0,0) 14%,
                            rgba(0,0,0,0) 86%, rgba(0,0,0,.55) 100%),
     linear-gradient(180deg,
-      rgba(0,0,0,.96) 0%, rgba(0,0,0,.78) 7%, rgba(0,0,0,.34) 18%, rgba(0,0,0,.08) 30%,
-      rgba(255,255,255,.09) 42%, rgba(255,255,255,.19) 50%, rgba(255,255,255,.07) 58%,
-      rgba(0,0,0,.08) 70%, rgba(0,0,0,.34) 82%, rgba(0,0,0,.78) 93%, rgba(0,0,0,.96) 100%);
+      rgba(0,0,0,.99) 0%, rgba(0,0,0,.90) 5%, rgba(0,0,0,.58) 13%, rgba(0,0,0,.20) 25%,
+      rgba(255,255,255,.06) 38%, rgba(255,255,255,.13) 45%, rgba(255,255,255,.28) 50%,
+      rgba(255,255,255,.11) 55%, rgba(255,255,255,.04) 62%,
+      rgba(0,0,0,.20) 75%, rgba(0,0,0,.58) 87%, rgba(0,0,0,.90) 95%, rgba(0,0,0,.99) 100%);
   box-shadow: inset 0 0 18px rgba(0, 0, 0, .7);
 }
-/* The end caps: a machined boss at each side of the barrel, so it has ends. */
+/* The wheel on each end of the drum.
+ *
+ * A flat strip down the side said "edge". This says "wheel": a spoked disc seen almost
+ * edge-on, squashed into an ellipse by the same perspective the drum is under, turning
+ * with the reel. It is the single thing that makes five cylinders read as machinery
+ * rather than as five scrolling lists. */
 .reel-cap {
-  position: absolute; top: 0; bottom: 0; width: 7px;
+  position: absolute; top: 50%; width: 22px; height: 78%;
+  transform: translateY(-50%);
   z-index: 6; pointer-events: none;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at 40% 34%, rgba(255,255,255,.55), rgba(255,255,255,0) 58%),
+    conic-gradient(from 0deg,
+      #8d9aa6 0deg, #39434d 26deg, #7f8c98 52deg, #2b333b 78deg,
+      #8d9aa6 104deg, #39434d 130deg, #7f8c98 156deg, #2b333b 182deg,
+      #8d9aa6 208deg, #39434d 234deg, #7f8c98 260deg, #2b333b 286deg,
+      #8d9aa6 312deg, #39434d 338deg, #8d9aa6 360deg);
+  box-shadow: inset 0 0 0 2px rgba(12,16,20,.9), 0 0 10px rgba(0,0,0,.7);
 }
-.reel-cap.l { left: 0; background: linear-gradient(90deg, #4a5560, #232a31 55%, #0c1014); }
-.reel-cap.r { right: 0; background: linear-gradient(270deg, #4a5560, #232a31 55%, #0c1014); }
+.reel-cap.l { left: -9px; }
+.reel-cap.r { right: -9px; }
+/* The hub and the axle stub. */
 .reel-cap::after {
   content: ''; position: absolute; left: 50%; top: 50%;
-  width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px;
+  width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, #cdd6de, #5d6a75 60%, #1b2026);
+  background: radial-gradient(circle at 34% 32%, #e6eef5, #6d7a86 55%, #141a20);
+  box-shadow: 0 0 6px rgba(0,0,0,.8);
+}
+/* The wheels turn with the drum they are bolted to. */
+.reel.spinning .reel-cap { animation: wheelturn .62s linear infinite; }
+@keyframes wheelturn {
+  from { transform: translateY(-50%) rotate(0deg); }
+  to   { transform: translateY(-50%) rotate(-360deg); }
 }
 
 /* Spinning and landing are rotations of the drum, not slides of a strip. Down, because
@@ -552,6 +576,14 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
 }
 @media (max-width: 560px) {
   .slot-valve { width: 30px; height: 30px; }
+}
+
+/* The effects canvas. Above the drums and their glass, below nothing: it is the top of
+   the machine and it never takes a click. */
+.slot-fx {
+  position: absolute; inset: 0;
+  z-index: 8;
+  pointer-events: none;
 }
 
 /* SVG overlay that draws the winning paylines across the reels. */

@@ -5,6 +5,7 @@ import { createCut } from './jigsaw.js';
 import * as audio from './audio.js';
 import * as tokenKeys from './tokenkeys.js';
 import { verifyChain, compareHeads } from './chainverify.js';
+import { createSparks } from './slotfx.js';
 
 // ---------------------------------------------------------------- plumbing
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1469,6 +1470,10 @@ async function settleReels(screen, stops = null, started = 0) {
     // The class goes on after the rebuild, or the browser keeps the old animation.
     reel.classList.add('landing');
     audio.sfx('reelStop');
+    const foot = reelFoot(reel);
+    if (slotFx && foot) {
+      slotFx.burst(foot[0], foot[1], { count: 14, speed: 0.2, spread: 2.1, flash: 30 });
+    }
     await new Promise((r) => setTimeout(r, 130));
   }
 }
@@ -1552,7 +1557,7 @@ function sizeDrums() {
 let drumResize = null;
 function watchDrums() {
   if (drumResize || typeof ResizeObserver !== 'function') return;
-  drumResize = new ResizeObserver(() => sizeDrums());
+  drumResize = new ResizeObserver(() => { sizeDrums(); if (slotFx) slotFx.resize(); });
   const box = $('#reels');
   if (box) drumResize.observe(box);
 }
@@ -1578,6 +1583,20 @@ function paintReels(screen, wins = [], stops = null) {
   }));
   sizeDrums();
   watchDrums();
+  // setKids emptied the box, so the effects canvas went with it.
+  if (slotFx) slotFx.stop();
+  slotFx = createSparks(box);
+}
+
+let slotFx = null;
+
+/** Where a reel meets the deck, in the effects canvas's own coordinates. */
+function reelFoot(reel) {
+  const box = $('#reels');
+  if (!box || !reel) return null;
+  const b = box.getBoundingClientRect();
+  const r = reel.getBoundingClientRect();
+  return [r.left - b.left + r.width / 2, r.top - b.top + r.height * 0.86];
 }
 
 function clearPaylines() {
@@ -1616,6 +1635,7 @@ function drawPaylines(wins) {
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', `M${points.join(' L')}`);
     svg.appendChild(path);
+    if (slotFx) slotFx.line(points.map((pt) => pt.split(',').map(Number)));
   }
   box.appendChild(svg);
 }
@@ -1634,6 +1654,7 @@ function showBigWin(profit, multiplier) {
     el('div', { class: 'label' }, `${multiplier.toFixed(2)}x`));
   node.addEventListener('click', removeBigWin);
   stage.appendChild(node);
+  if (slotFx) slotFx.bigWin();
   setTimeout(removeBigWin, 2600);
 }
 
