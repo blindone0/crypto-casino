@@ -375,3 +375,24 @@ test('the served policy really does forbid inline style', () => {
   assert.ok(!/style-src 'self'[^;]*unsafe-inline/.test(head),
     "style-src has gained 'unsafe-inline'");
 });
+
+test('signing a stake survives a request with no body at all', () => {
+  // Revealing a tile and cashing out are continuations of a round that was already paid
+  // for, so they POST to /api/bet/... with no body. The wallet gate signs every request on
+  // that prefix, and reading `.amount` off `undefined` threw
+  // "Cannot read properties of undefined" — which is what cashing out of mines or the
+  // puzzle did, silently, until somebody hit it.
+  //
+  // Checked in the source rather than by running it, because the function reaches for
+  // IndexedDB and WebCrypto that do not exist here. The guard has to come before the first
+  // property read, which is the whole of the bug.
+  const src = read(path.join(PUBLIC, 'app.js'));
+  const fn = src.slice(src.indexOf('async function signStakeFor'));
+  const body = fn.slice(0, fn.indexOf('\n}'));
+
+  const guard = body.indexOf('if (!payload) return undefined;');
+  const firstRead = body.indexOf('payload.amount');
+  assert.ok(guard > -1, 'signStakeFor must refuse a missing payload rather than read it');
+  assert.ok(guard < firstRead,
+    'the guard has to come before the first property read, or it does not guard anything');
+});

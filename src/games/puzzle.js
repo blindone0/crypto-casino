@@ -25,15 +25,27 @@ const now = () => Math.floor(Date.now() / 1000);
  * Difficulty tiers. `broken` is tuned so each tier has a recognisably different feel:
  * easy is a gentle climb, expert is a genuine gamble on the very first tap.
  */
-// Grids are kept deliberately small. On a big grid the full-clear multiplier runs into
-// the millions, and advertising a prize the bankroll cap can never pay is a lie told in
-// numbers. These four top out at roughly 36x, 218x, 1351x and 7927x: rare, exciting, and
-// actually payable.
+// Big grids only. A nine-tile puzzle is not a puzzle, it is a decision, so the smallest
+// board here is sixteen tiles and the largest is thirty-six.
+//
+// The warning this comment replaced was right and is kept, because it still binds: a full
+// clear on a large grid runs into the millions, and advertising a prize that cannot be
+// paid is a lie told in numbers. It binds harder now than when it was written — the house
+// holds a float against a *fixed* 21,000,000 supply, so an unpayable prize is not merely
+// improbable, it is arithmetic `capPayout` would silently truncate.
+//
+// What makes big grids work anyway is that the multiplier is symmetric in `broken`: a
+// 6x6 with four broken tiles pays 58,315x, but with three it pays 7,068x. Fewer broken
+// tiles on a bigger board is both busier to look at and cheaper to cover, so the two
+// constraints pull the same way rather than against each other.
+//
+// These four top out at roughly 554x, 4,796x, 12,523x and 7,068x — rare, exciting, and
+// actually payable. Run tools/puzzle-ladder.js after touching any of them.
 const TIERS = {
-  easy: { cols: 3, rows: 3, broken: 2, label: 'Easy' },
-  medium: { cols: 4, rows: 3, broken: 3, label: 'Medium' },
-  hard: { cols: 5, rows: 3, broken: 4, label: 'Hard' },
-  expert: { cols: 4, rows: 4, broken: 6, label: 'Expert' },
+  easy: { cols: 4, rows: 4, broken: 3, label: 'Easy' },
+  medium: { cols: 5, rows: 4, broken: 4, label: 'Medium' },
+  hard: { cols: 5, rows: 5, broken: 4, label: 'Hard' },
+  expert: { cols: 6, rows: 6, broken: 3, label: 'Expert' },
 };
 
 /** Original artwork revealed underneath, drawn in the client. Keys only here. */

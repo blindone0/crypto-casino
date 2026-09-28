@@ -490,6 +490,13 @@ function applyWallet() {
  * signature: the stake went in when the round opened.
  */
 async function signStakeFor(payload) {
+  // A bodyless POST is a continuation, not a stake: revealing a tile and cashing out both
+  // belong to a round that was already paid for when it opened. They arrive here because
+  // they sit under /api/bet/, and reading `.amount` off `undefined` threw
+  // "Cannot read properties of undefined" instead of quietly signing nothing — which is
+  // what cashing out of mines or the puzzle did after the wallet gate became
+  // unconditional.
+  if (!payload) return undefined;
   const amount = payload.amount ?? payload.wager;
   if (amount === undefined || amount === null || amount === '') return undefined;
   const units = Math.round(Number(amount) * UNIT);
