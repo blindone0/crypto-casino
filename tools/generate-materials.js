@@ -53,6 +53,26 @@ const SIZE = 1024;
 const OUT_EDGE = 512;
 const JPEG_QUALITY = 88;
 
+/**
+ * The roughness maps get their own, lower quality, and they are the larger files.
+ *
+ * A roughness map here is built from local contrast — a blur subtracted from the image,
+ * auto-contrasted. That is a high-frequency noise field, which is the worst possible
+ * input for JPEG: there is no smooth area for the DCT to spend few bits on, so at q88 a
+ * single-channel 512x512 map cost MORE than the full-colour map beside it. dice-bone was
+ * 104KB of roughness against 37KB of colour.
+ *
+ * The detail is also the part nobody looks at. The map is blended 0.55 into a mid grey
+ * and then only modulates a specular term, so an error in it moves a highlight slightly
+ * rather than changing anything anyone can point at. Measured across all six maps, q70
+ * shifts the specular response by under 8/255 and at 2x zoom is indistinguishable from
+ * q88 — while cutting the six from 686KB to 400KB.
+ *
+ * q55 would save another 49KB and still looked fine, but the margin over "fine" is worth
+ * more than the bytes on a file this small.
+ */
+const ROUGH_QUALITY = 70;
+
 const NEGATIVE = [
   'dice, die, cube, object, product shot, text, numbers, dots, logo, watermark, signature',
   'vignette, shadow, drop shadow, specular highlight, reflection, glare, spotlight',
@@ -218,8 +238,8 @@ function process_(pngPath, colourOut, roughOut) {
 import sys
 from PIL import Image, ImageChops, ImageFilter, ImageOps
 
-src, colour_out, rough_out, edge, q = sys.argv[1:6]
-edge, q = int(edge), int(q)
+src, colour_out, rough_out, edge, q, rough_q = sys.argv[1:7]
+edge, q, rough_q = int(edge), int(q), int(rough_q)
 
 im = Image.open(src).convert("RGB")
 w, h = im.size
@@ -277,12 +297,14 @@ detail = ImageOps.autocontrast(detail, cutoff=1)
 # Biased to the middle: a black roughness map is a mirror, which no real surface is, and
 # a white one is chalk.
 rough = Image.blend(Image.new("L", detail.size, 150), detail, 0.55)
-rough.save(rough_out, "JPEG", quality=q, optimize=True)
+# Its own quality: see ROUGH_QUALITY above for why this is not q.
+rough.save(rough_out, "JPEG", quality=rough_q, optimize=True)
 
 print(f"{tiled.size[0]}x{tiled.size[1]}")
 `;
   return execFileSync(python(), ['-c', script, pngPath, colourOut, roughOut,
-    String(OUT_EDGE), String(JPEG_QUALITY)], { encoding: 'utf8' }).trim();
+    String(OUT_EDGE), String(JPEG_QUALITY), String(ROUGH_QUALITY)],
+    { encoding: 'utf8' }).trim();
 }
 
 /**
