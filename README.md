@@ -166,7 +166,34 @@ A second, separate currency on a hash-linked ledger that any player can verify i
 own browser. Balances are controlled by an Ed25519 key derived from a sixteen-word phrase
 the player holds, and the private half never reaches the server.
 
-What that buys, stated precisely:
+### The supply is fixed, and you can check that it is
+
+Every tugrik that will ever exist is created once, in the first block of the chain, and
+paid into a treasury. Nothing afterwards creates any. A welcome grant is a transfer out of
+that treasury, not new money, and when the treasury is empty the grants stop rather than
+resuming from nothing.
+
+This matters because the obvious version does not work. If registering a wallet minted its
+own grant, then unlimited accounts would mean unlimited tokens, and a tugrik would be worth
+whatever it costs to sign up again.
+
+The cap is enforced where it can be checked rather than where it must be believed: the
+chain verifier **rejects any chain that mints outside block zero**. Anyone replaying the
+ledger sees a single creation event and its amount. An operator who quietly minted itself a
+fortune in block nine hundred would produce a chain that fails verification in every
+browser that looks at it.
+
+It also cannot be revised later. `token.maxSupply` in the config decides the number the
+first time the server starts and never again: the genesis block is signed and hashed, and
+every later block links to it. Changing the config on a running system does nothing at all.
+That is deliberate, and it is why `npm run token-reset` exists for development, where you
+may genuinely want to start over. It destroys every token, block and wallet, and refuses to
+do anything without `--yes`.
+
+Tokens burned to play an arcade cabinet are gone. Nothing reissues them, so the circulating
+supply only ever falls.
+
+What the ledger buys you, stated precisely:
 
 1. **The operator cannot move your tokens.** A transfer needs your signature, and the
    server can check one without being able to produce one. A test signs a theft with the

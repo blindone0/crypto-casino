@@ -380,7 +380,10 @@ test('tokens are conserved across a run of matches', (t) => {
   const { cfg, db, users, keys } = setup();
   t.after(() => cleanup(cfg, db));
 
-  const minted = cfg.token.welcomeGrant * 3;
+  // Every tugrik that exists was minted once, at genesis. Nothing a match does may
+  // change that total: stakes move into escrow and out again, and the rake is a balance
+  // like any other.
+  const minted = cfg.token.maxSupply;
   let rakeTaken = 0;
 
   // A decisive game, a resignation, and a cancelled challenge.

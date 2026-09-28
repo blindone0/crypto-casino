@@ -71,7 +71,21 @@ const DEFAULTS = {
     // here, because this is a play token and must never be mistaken for a national currency.
     symbol: 'TUG',
     name: 'Tugrik',
-    welcomeGrant: 1000,   // minted on-chain the first time a player registers a key
+
+    // THE SUPPLY IS FIXED. Every tugrik that will ever exist is minted once, into the
+    // treasury, in the genesis block. Nothing afterwards creates any: a welcome grant is
+    // a transfer out of the treasury, not a mint, and the chain verifier refuses a mint
+    // in any block but the first. That makes the cap something a player can check by
+    // replaying the chain rather than something the operator promises.
+    //
+    // Changing this number on a chain that already exists does nothing. The genesis block
+    // is signed and hashed, and every later block links to it, so the supply is settled
+    // the first time the server starts and cannot be revised afterwards.
+    maxSupply: 21000000,
+
+    // Paid out of the treasury to each new wallet, first come first served. When the
+    // treasury runs dry the grants stop; they do not resume by inventing more.
+    welcomeGrant: 1000,
   },
 
   // ---- ARCADE -----------------------------------------------------------

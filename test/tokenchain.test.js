@@ -13,8 +13,8 @@ const crypto = require('node:crypto');
 const { testConfig, openTestDb, cleanup } = require('./helpers');
 const tc = require('../src/tokenchain');
 
-function setup() {
-  const cfg = testConfig();
+function setup(overrides = {}) {
+  const cfg = testConfig(overrides);
   const db = openTestDb(cfg);
   const mk = (id, name) => db.run(
     `INSERT INTO users(id,username,username_lower,password_hash,client_seed,referral_code,created_at)
@@ -55,15 +55,18 @@ test('a phrase seed always produces the same key', () => {
   assert.notStrictEqual(a, other);
 });
 
-test('registering a key mints the welcome grant on-chain', (t) => {
+test('registering a key pays the welcome grant out of the treasury', (t) => {
   const { cfg, db } = setup();
   t.after(() => cleanup(cfg, db));
   const A = makeKey();
 
   const out = db.tx(() => tc.registerKey(db, 1, A.pub, cfg));
   assert.strictEqual(out.balance, cfg.token.welcomeGrant);
-  // The grant is a block, not a database poke: the chain explains where it came from.
-  assert.strictEqual(db.get('SELECT COUNT(*) AS n FROM token_blocks').n, 1);
+  // Two blocks: the genesis mint of the whole supply, and a transfer out of it. The grant
+  // is a block rather than a database poke, so the chain explains where it came from.
+  assert.strictEqual(db.get('SELECT COUNT(*) AS n FROM token_blocks').n, 2);
+  const grantBlock = JSON.parse(db.get('SELECT txs FROM token_blocks WHERE height=1').txs);
+  assert.strictEqual(grantBlock[0].type, 'transfer', 'a grant is a transfer, never a mint');
   assert.ok(tc.verifyChain(db).ok);
 });
 
@@ -258,4 +261,126 @@ test('the chain slice exposes what a verifier needs and nothing secret', (t) => 
   // The operator private key must never appear anywhere in the response.
   const stored = db.kvGet('token.serverKey');
   assert.ok(!JSON.stringify(slice).includes(stored.privatePkcs8), 'the private key leaked');
+});
+
+// ------------------------------------------------------------- fixed supply
+// The point of a capped token is that the cap is checkable, not promised. Every tugrik is
+// minted once, into the treasury, in the genesis block; everything afterwards moves what
+// already exists. These tests exist because the first version did not work that way: a
+// new wallet minted its own grant, so unlimited accounts meant unlimited tugriks and the
+// token was worth whatever it cost to register another one.
+
+test('the whole supply is minted once, at genesis, into the treasury', (t) => {
+  const { cfg, db } = setup();
+  t.after(() => cleanup(cfg, db));
+
+  assert.strictEqual(tc.ensureGenesis(db, cfg), true, 'the first call creates it');
+  assert.strictEqual(tc.ensureGenesis(db, cfg), false, 'a second call does nothing');
+
+  const treasury = tc.treasuryKey(db).publicRaw;
+  assert.strictEqual(tc.balanceOf(db, treasury), cfg.token.maxSupply);
+  assert.strictEqual(db.get('SELECT COUNT(*) AS n FROM token_blocks').n, 1);
+
+  const info = tc.supply(db);
+  assert.strictEqual(info.minted, cfg.token.maxSupply);
+  assert.strictEqual(info.circulating, cfg.token.maxSupply);
+  assert.strictEqual(info.treasury, cfg.token.maxSupply);
+});
+
+test('the supply does not grow however many wallets register', (t) => {
+  const { cfg, db } = setup();
+  t.after(() => cleanup(cfg, db));
+  for (let i = 1; i <= 8; i += 1) {
+    db.run(
+      `INSERT OR IGNORE INTO users(id,username,username_lower,password_hash,client_seed,referral_code,created_at)
+       VALUES(?,?,?,'x','s',?,0)`, i, `u${i}`, `u${i}`, `r${i}`,
+    );
+    db.tx(() => tc.registerKey(db, i, makeKey().pub, cfg));
+  }
+  const info = tc.supply(db);
+  assert.strictEqual(info.minted, cfg.token.maxSupply, 'nothing was created');
+  assert.strictEqual(
+    info.treasury, cfg.token.maxSupply - 8 * cfg.token.welcomeGrant,
+    'the grants came out of the treasury',
+  );
+  assert.ok(tc.verifyChain(db).ok);
+});
+
+test('when the treasury runs dry the grants stop rather than inventing more', (t) => {
+  // A supply of exactly two grants. The third wallet gets a key and nothing else.
+  const { cfg, db } = setup({ token: { maxSupply: 2000, welcomeGrant: 1000 } });
+  t.after(() => cleanup(cfg, db));
+  for (let i = 1; i <= 3; i += 1) {
+    db.run(
+      `INSERT OR IGNORE INTO users(id,username,username_lower,password_hash,client_seed,referral_code,created_at)
+       VALUES(?,?,?,'x','s',?,0)`, i, `u${i}`, `u${i}`, `r${i}`,
+    );
+  }
+  const first = db.tx(() => tc.registerKey(db, 1, makeKey().pub, cfg));
+  const second = db.tx(() => tc.registerKey(db, 2, makeKey().pub, cfg));
+  const third = db.tx(() => tc.registerKey(db, 3, makeKey().pub, cfg));
+
+  assert.strictEqual(first.balance, 1000);
+  assert.strictEqual(second.balance, 1000);
+  assert.strictEqual(third.balance, 0, 'the faucet is empty, and stays empty');
+  assert.strictEqual(third.granted, false);
+  assert.strictEqual(tc.supply(db).minted, 2000);
+  assert.ok(tc.verifyChain(db).ok);
+});
+
+test('a mint after the genesis block is refused by the verifier', (t) => {
+  const { cfg, db } = setup();
+  t.after(() => cleanup(cfg, db));
+  db.tx(() => tc.registerKey(db, 1, makeKey().pub, cfg));
+  assert.ok(tc.verifyChain(db).ok, 'sound to begin with');
+
+  // Forge a second mint the way a dishonest operator would: a properly signed, properly
+  // linked block that simply creates tokens. The chain stays internally consistent; the
+  // supply rule is what catches it.
+  const victim = makeKey();
+  db.tx(() => tc.appendBlock(db, [{ type: 'mint', to: victim.pub, amount: 5000, memo: 'oops' }]));
+
+  const check = tc.verifyChain(db);
+  assert.strictEqual(check.ok, false);
+  assert.match(check.reason, /only the genesis block may/);
+});
+
+test('raising maxSupply later does not create anything', (t) => {
+  const { cfg, db } = setup({ token: { maxSupply: 5000 } });
+  t.after(() => cleanup(cfg, db));
+  tc.ensureGenesis(db, cfg);
+  assert.strictEqual(tc.supply(db).minted, 5000);
+
+  // The operator edits the config and restarts. The chain already exists, so the genesis
+  // block is settled and signed, and nothing about it changes.
+  const greedy = { ...cfg, token: { ...cfg.token, maxSupply: 999999999 } };
+  assert.strictEqual(tc.ensureGenesis(db, greedy), false);
+  assert.strictEqual(tc.supply(db).minted, 5000);
+  assert.ok(tc.verifyChain(db).ok);
+});
+
+test('an impossible supply is refused rather than quietly rounded', (t) => {
+  for (const bad of [0, -1, 1.5, NaN, 'lots', null]) {
+    const { cfg, db } = setup({ token: { maxSupply: bad } });
+    assert.throws(() => tc.ensureGenesis(db, cfg), /positive whole number/, `accepted ${bad}`);
+    cleanup(cfg, db);
+  }
+});
+
+test('burning takes tokens out of circulation for good', (t) => {
+  const { cfg, db } = setup();
+  t.after(() => cleanup(cfg, db));
+  const A = makeKey();
+  db.tx(() => tc.registerKey(db, 1, A.pub, cfg));
+
+  const before = tc.supply(db);
+  db.tx(() => tc.appendBlock(db, [{ type: 'burn', from: A.pub, amount: 250, memo: 'arcade' }]));
+  const after = tc.supply(db);
+
+  assert.strictEqual(after.minted, before.minted, 'burning does not change what was minted');
+  assert.strictEqual(after.burned, 250);
+  assert.strictEqual(after.circulating, before.circulating - 250);
+  // And it is gone: nothing re-mints it.
+  assert.ok(after.circulating < cfg.token.maxSupply);
+  assert.ok(tc.verifyChain(db).ok);
 });

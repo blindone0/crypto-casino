@@ -13,6 +13,7 @@
     "test": "node --test test/*.test.js",
     "simulate": "node tools/simulate.js",
     "admin-token": "node tools/admin-token.js",
-    "treasury": "node tools/treasury-setup.js"
+    "treasury": "node tools/treasury-setup.js",
+    "token-reset": "node tools/token-reset.js"
   }
 }

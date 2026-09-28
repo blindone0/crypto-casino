@@ -498,6 +498,11 @@ function build(cfg) {
       nextNonce: key ? tokenchain.nextNonce(db, key.pubkey) : 0,
       height: tip ? tip.height : -1,
       head: tip ? tip.hash : null,
+      // Read off the chain, not off the config, so what a player is shown is what the
+      // ledger actually says. The cap is checkable: every token was minted in block zero
+      // and the verifier refuses a chain that mints anywhere else.
+      supply: tokenchain.supply(db),
+      maxSupply: cfg.token.maxSupply,
     };
   });
 

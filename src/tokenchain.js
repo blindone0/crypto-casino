@@ -94,6 +94,33 @@ function serverKey(db) {
   };
 }
 
+/**
+ * The treasury: the account that holds every tugrik nobody else does yet.
+ *
+ * Separate from the block-signing key and from the house escrow key, because the three
+ * are different jobs. This one exists so the supply can be minted exactly once, at
+ * genesis, and handed out afterwards by transfer.
+ */
+function treasuryKey(db) {
+  let stored = db.kvGet('token.treasuryKey');
+  if (!stored) {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+    stored = {
+      publicRaw: rawPublicKey(publicKey),
+      privatePkcs8: privateKey.export({ format: 'der', type: 'pkcs8' }).toString('hex'),
+      createdAt: Math.floor(Date.now() / 1000),
+    };
+    db.kvSet('token.treasuryKey', stored);
+    db.audit('system', 'token.treasuryKey.created', { publicKey: stored.publicRaw });
+  }
+  return {
+    publicRaw: stored.publicRaw,
+    private: crypto.createPrivateKey({
+      key: Buffer.from(stored.privatePkcs8, 'hex'), format: 'der', type: 'pkcs8',
+    }),
+  };
+}
+
 // -------------------------------------------------------------- the chain
 /** Everything a block commits to. The signature covers exactly this, hashed. */
 const blockPayload = (b) => ({
@@ -109,6 +136,63 @@ const blockHash = (b) => sha256(canonical(blockPayload(b)));
 function head(db) {
   const row = db.get('SELECT * FROM token_blocks ORDER BY height DESC LIMIT 1');
   return row || null;
+}
+
+/**
+ * Mint the entire supply, once, into the treasury.
+ *
+ * This is the only mint that will ever be accepted: verifyChain refuses a mint anywhere
+ * but block zero. Everything after it is a transfer or a burn, which can move tokens and
+ * destroy them but cannot bring any into existence.
+ *
+ * Called on the first use of the chain. If a chain already exists, this does nothing at
+ * all, so the supply of a running system cannot be revised by editing the config.
+ */
+function ensureGenesis(db, cfg) {
+  if (head(db)) return false;
+  const supply = Number(cfg?.token?.maxSupply ?? 0);
+  if (!Number.isSafeInteger(supply) || supply <= 0) {
+    throw new Error('token.maxSupply must be a positive whole number');
+  }
+  const treasury = treasuryKey(db);
+  appendBlock(db, [{
+    type: 'mint', to: treasury.publicRaw, amount: supply, memo: 'genesis',
+  }]);
+  db.audit('system', 'token.genesis', { supply, treasury: treasury.publicRaw });
+  return true;
+}
+
+/** A transfer signed by the treasury. Used to pay grants out of the fixed supply. */
+function treasuryTransfer(db, to, amount) {
+  const key = treasuryKey(db);
+  const tx = {
+    type: 'transfer', from: key.publicRaw, to, amount, nonce: nextNonce(db, key.publicRaw),
+  };
+  tx.sig = crypto.sign(
+    null, Buffer.from(canonical(transferPayload(tx))), key.private,
+  ).toString('hex');
+  db.run('INSERT INTO token_nonces(pubkey, nonce, created_at) VALUES(?,?,?)',
+    key.publicRaw, tx.nonce, Math.floor(Date.now() / 1000));
+  return tx;
+}
+
+/** What the supply actually is, read off the chain rather than off the config. */
+function supply(db) {
+  let minted = 0;
+  let burned = 0;
+  for (const row of db.all('SELECT txs FROM token_blocks ORDER BY height')) {
+    for (const tx of JSON.parse(row.txs)) {
+      if (tx.type === 'mint') minted += tx.amount;
+      else if (tx.type === 'burn') burned += tx.amount;
+    }
+  }
+  const treasury = db.kvGet('token.treasuryKey');
+  return {
+    minted,
+    burned,
+    circulating: minted - burned,
+    treasury: treasury ? balanceOf(db, treasury.publicRaw) : 0,
+  };
 }
 
 /** What a transfer signature covers. The chain id stops a signature being replayed. */
@@ -225,6 +309,12 @@ function verifyChain(db) {
     if (!sigOk) return fail(`block ${i} is not signed by the operator key`);
 
     for (const tx of txs) {
+      // The supply is fixed by refusing to accept a chain that creates tokens anywhere but
+      // in its first block. A verifier that skipped this check would happily confirm a
+      // ledger where the operator minted itself a fortune in block nine hundred.
+      if (tx.type === 'mint' && i !== 0) {
+        return fail(`block ${i} mints tokens; only the genesis block may do that`);
+      }
       if (tx.type === 'transfer') {
         if (!verifyTransferSignature(tx)) return fail(`block ${i} contains an unsigned transfer`);
         const nonceKey = `${tx.from}:${tx.nonce}`;
@@ -255,7 +345,13 @@ function verifyChain(db) {
     }
   }
 
-  return { ok: true, blocks: blocks.length, accounts: balances.size, head: prevHash };
+  let minted = 0;
+  for (const tx of JSON.parse(blocks[0]?.txs || '[]')) {
+    if (tx.type === 'mint') minted += tx.amount;
+  }
+  return {
+    ok: true, blocks: blocks.length, accounts: balances.size, head: prevHash, minted,
+  };
   function fail(reason) { return { ok: false, reason, blocks: blocks.length }; }
 }
 
@@ -273,16 +369,26 @@ function registerKey(db, userId, pubkey, cfg) {
     const owner = db.get('SELECT user_id FROM token_keys WHERE pubkey=?', key);
     if (owner && owner.user_id !== userId) throw new U.BadRequest('that key belongs to another account');
 
+    ensureGenesis(db, cfg);
+
     if (!existing) {
       db.run('INSERT INTO token_keys(user_id, pubkey, created_at) VALUES(?,?,?)',
         userId, key, Math.floor(Date.now() / 1000));
-      // A new key gets the welcome grant once, minted on-chain like everything else.
-      const grant = cfg.token?.welcomeGrant ?? 0;
-      if (grant > 0) {
-        appendBlock(db, [{ type: 'mint', to: key, amount: grant, memo: 'welcome' }]);
+      // The grant is paid out of the treasury, not minted. That is the whole point: if a
+      // new account could mint, then unlimited accounts would mean unlimited tugriks and
+      // the token would be worth exactly what it costs to register.
+      const grant = Number(cfg.token?.welcomeGrant ?? 0);
+      const treasury = treasuryKey(db).publicRaw;
+      if (grant > 0 && balanceOf(db, treasury) >= grant) {
+        appendBlock(db, [treasuryTransfer(db, key, grant)]);
       }
     }
-    return { pubkey: key, balance: balanceOf(db, key) };
+    return {
+      pubkey: key,
+      balance: balanceOf(db, key),
+      // Told plainly rather than left to be discovered: the faucet is finite.
+      granted: !existing && balanceOf(db, key) > 0,
+    };
   });
 }
 
@@ -358,6 +464,7 @@ module.exports = {
   CHAIN_ID, GENESIS_PREV,
   canonical, sha256, blockHash, transferPayload,
   publicKeyFromRaw, privateKeyFromSeed, rawPublicKey,
-  serverKey, appendBlock, head, balanceOf, verifyChain, verifyTransferSignature,
+  serverKey, treasuryKey, ensureGenesis, treasuryTransfer, supply,
+  appendBlock, head, balanceOf, verifyChain, verifyTransferSignature,
   registerKey, submitTransfer, chainSlice, keyFor, nextNonce,
 };
