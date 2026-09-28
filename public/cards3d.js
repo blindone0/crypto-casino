@@ -265,6 +265,22 @@ export function createTable(host, opts = {}) {
       'uCards', 'uCardCount'],
   });
 
+  /**
+   * Scratch buffers, filled in place rather than reallocated every frame.
+   *
+   * `eye` and `KEY_DIR` are constants and were boxed into a fresh Float32Array twice each
+   * per frame; `uArtRect` allocated twice per card, one of them for the literal
+   * [0, 0, 1, 1]. With six cards on the table that was about ninety allocations a frame,
+   * five thousand a second, all of them immediately garbage. It does not lower the average
+   * frame rate — it produces a hitch every few hundred frames, which is the artefact a
+   * player actually notices.
+   */
+  const EYE = new Float32Array(3);
+  const KEY = new Float32Array(KEY_DIR);
+  const CARD_XYZ = new Float32Array(24);
+  const ART = new Float32Array(4);
+  const BACK_RECT = new Float32Array([0, 0, 1, 1]);
+
   const mesh = cardMesh(gl);
   const base = opts.textures || '/textures/';
   let raf = null;
@@ -330,17 +346,24 @@ export function createTable(host, opts = {}) {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, texFeltRough);
     gl.uniform1i(T.u.uFeltRough, 1);
-    gl.uniform3fv(T.u.uEye, new Float32Array(eye));
-    gl.uniform3fv(T.u.uKey, new Float32Array(KEY_DIR));
+    EYE.set(eye);
+    gl.uniform3fv(T.u.uEye, EYE);
+    gl.uniform3fv(T.u.uKey, KEY);
 
-    const shadowed = cards.slice(0, 8);
-    const flat = new Float32Array(24);
-    shadowed.forEach((c, i) => {
-      const p = placeOf(c);
-      flat[i * 3] = p[0]; flat[i * 3 + 1] = p[1]; flat[i * 3 + 2] = p[2];
-    });
-    gl.uniform3fv(T.u.uCards, flat);
-    gl.uniform1f(T.u.uCardCount, shadowed.length);
+    // Reused across frames, so it must be cleared: the previous frame's card positions
+    // are still in it, and a frame with fewer cards than the last one would otherwise
+    // leave a shadow lying on the felt under a card that is no longer there. The old code
+    // allocated a fresh zeroed array each frame and got this for free.
+    CARD_XYZ.fill(0);
+    const shadowCount = Math.min(cards.length, 8);
+    for (let i = 0; i < shadowCount; i += 1) {
+      const p = placeOf(cards[i]);
+      CARD_XYZ[i * 3] = p[0];
+      CARD_XYZ[i * 3 + 1] = p[1];
+      CARD_XYZ[i * 3 + 2] = p[2];
+    }
+    gl.uniform3fv(T.u.uCards, CARD_XYZ);
+    gl.uniform1f(T.u.uCardCount, shadowCount);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
     // --- cards
@@ -358,8 +381,8 @@ export function createTable(host, opts = {}) {
 
     gl.uniformMatrix4fv(L.u.uProj, false, proj);
     gl.uniformMatrix4fv(L.u.uView, false, view);
-    gl.uniform3fv(L.u.uEye, new Float32Array(eye));
-    gl.uniform3fv(L.u.uKey, new Float32Array(KEY_DIR));
+    gl.uniform3fv(L.u.uEye, EYE);
+    gl.uniform3fv(L.u.uKey, KEY);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, texStock);
     gl.uniform1i(L.u.uStock, 0);
@@ -380,13 +403,14 @@ export function createTable(host, opts = {}) {
       if (c.card) {
         gl.bindTexture(gl.TEXTURE_2D, texFaces);
         gl.uniform1i(L.u.uArt, 1);
-        gl.uniform4fv(L.u.uArtRect, new Float32Array(artRect(c.card)));
+        ART.set(artRect(c.card));
+        gl.uniform4fv(L.u.uArtRect, ART);
         gl.uniform1f(L.u.uIsBack, 0);
         gl.drawElements(gl.TRIANGLES, mesh.frontCount, gl.UNSIGNED_SHORT, 0);
       }
       gl.bindTexture(gl.TEXTURE_2D, texBack);
       gl.uniform1i(L.u.uArt, 1);
-      gl.uniform4fv(L.u.uArtRect, new Float32Array([0, 0, 1, 1]));
+      gl.uniform4fv(L.u.uArtRect, BACK_RECT);
       gl.uniform1f(L.u.uIsBack, 1);
       // A hidden card shows its back to the room; a face-up one shows it downwards.
       if (c.card) {

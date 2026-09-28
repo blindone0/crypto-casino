@@ -46,6 +46,8 @@ const KEY_DIR = (() => {
   return [v[0] / l, v[1] / l, v[2] / l];
 })();
 
+import { locations } from './gl.js';
+
 const VERT = `
 attribute vec3 aPos;
 attribute vec3 aNormal;
@@ -713,6 +715,40 @@ export function createDice(host, opts = {}) {
     return null;
   }
 
+  /**
+   * Every attribute and uniform location, looked up once.
+   *
+   * `draw()` used to call `getAttribLocation`/`getUniformLocation` twenty-five times per
+   * frame — thirteen uniforms and six attributes for the dice, six more for the table.
+   * They cannot change while the program lives, so at 60fps that was 1,500 lookups a
+   * second for answers that were already known. In Chrome's multi-process model these can
+   * force a synchronous hop to the GPU process, so they are not merely a hash lookup.
+   */
+  const D = locations(gl, progDice, {
+    attrs: ['aPos', 'aNormal', 'aUV', 'aFace'],
+    uniforms: ['uProj', 'uView', 'uEye', 'uKey', 'uBody', 'uRough', 'uPips',
+      'uModel', 'uNormalMat', 'uTint', 'uWear', 'uGrain'],
+  });
+  const T = locations(gl, progTable, {
+    attrs: ['aPos', 'aUV'],
+    uniforms: ['uProj', 'uView', 'uFelt', 'uFeltRough', 'uEye', 'uKey', 'uDice'],
+  });
+
+  /**
+   * Scratch buffers, filled in place rather than reallocated.
+   *
+   * `draw()` allocated about thirty Float32Arrays a frame — eighteen hundred a second —
+   * including the camera position and the light direction, which are constants, boxed
+   * fresh twice each per frame. Short-lived garbage on a 16ms budget does not lower the
+   * average frame rate; it produces a hitch every few hundred frames, which is exactly
+   * what reads as "the dice stutter".
+   */
+  const EYE = new Float32Array(3);
+  const KEY = new Float32Array(KEY_DIR);
+  const DICE_XZ = new Float32Array(6);
+  const TINT = new Float32Array(3);
+  const GRAIN = new Float32Array(2);
+
   const box = roundedBox(gl);
   const base = opts.textures || '/textures/';
   const material = opts.material === 'resin' ? 'dice-resin' : 'dice-bone';
@@ -1013,37 +1049,39 @@ export function createDice(host, opts = {}) {
     // --- the table first, so the dice draw over it.
     gl.useProgram(progTable);
     gl.bindBuffer(gl.ARRAY_BUFFER, tableBuf);
-    const tPos = gl.getAttribLocation(progTable, 'aPos');
-    const tUV = gl.getAttribLocation(progTable, 'aUV');
+    const tPos = T.a.aPos;
+    const tUV = T.a.aUV;
     gl.enableVertexAttribArray(tPos);
     gl.vertexAttribPointer(tPos, 3, gl.FLOAT, false, 20, 0);
     gl.enableVertexAttribArray(tUV);
     gl.vertexAttribPointer(tUV, 2, gl.FLOAT, false, 20, 12);
-    gl.uniformMatrix4fv(gl.getUniformLocation(progTable, 'uProj'), false, proj);
-    gl.uniformMatrix4fv(gl.getUniformLocation(progTable, 'uView'), false, view);
+    gl.uniformMatrix4fv(T.u.uProj, false, proj);
+    gl.uniformMatrix4fv(T.u.uView, false, view);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, texFelt);
-    gl.uniform1i(gl.getUniformLocation(progTable, 'uFelt'), 0);
+    gl.uniform1i(T.u.uFelt, 0);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, texFeltRough);
-    gl.uniform1i(gl.getUniformLocation(progTable, 'uFeltRough'), 1);
-    gl.uniform3fv(gl.getUniformLocation(progTable, 'uEye'), new Float32Array(eye));
+    gl.uniform1i(T.u.uFeltRough, 1);
+    EYE.set(eye);
+    gl.uniform3fv(T.u.uEye, EYE);
     // The same key direction the dice are lit by, so the shadows fall the way the
     // highlights say they should. Two shaders disagreeing about where the light is is
     // the sort of thing nobody can name but everybody can see.
-    gl.uniform3fv(gl.getUniformLocation(progTable, 'uKey'), new Float32Array(KEY_DIR));
-    gl.uniform3fv(gl.getUniformLocation(progTable, 'uDice'), new Float32Array([
-      dice[0].pos[0], dice[0].pos[1] - FLOOR, dice[0].pos[2],
-      dice[1].pos[0], dice[1].pos[1] - FLOOR, dice[1].pos[2],
-    ]));
+    gl.uniform3fv(T.u.uKey, KEY);
+    DICE_XZ[0] = dice[0].pos[0]; DICE_XZ[1] = dice[0].pos[1] - FLOOR;
+    DICE_XZ[2] = dice[0].pos[2];
+    DICE_XZ[3] = dice[1].pos[0]; DICE_XZ[4] = dice[1].pos[1] - FLOOR;
+    DICE_XZ[5] = dice[1].pos[2];
+    gl.uniform3fv(T.u.uDice, DICE_XZ);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
     // --- the dice.
     gl.useProgram(progDice);
-    const aPos = gl.getAttribLocation(progDice, 'aPos');
-    const aNormal = gl.getAttribLocation(progDice, 'aNormal');
-    const aUV = gl.getAttribLocation(progDice, 'aUV');
-    const aFace = gl.getAttribLocation(progDice, 'aFace');
+    const aPos = D.a.aPos;
+    const aNormal = D.a.aNormal;
+    const aUV = D.a.aUV;
+    const aFace = D.a.aFace;
 
     gl.bindBuffer(gl.ARRAY_BUFFER, box.pos);
     gl.enableVertexAttribArray(aPos);
@@ -1059,26 +1097,26 @@ export function createDice(host, opts = {}) {
     gl.vertexAttribPointer(aFace, 1, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, box.idx);
 
-    gl.uniformMatrix4fv(gl.getUniformLocation(progDice, 'uProj'), false, proj);
-    gl.uniformMatrix4fv(gl.getUniformLocation(progDice, 'uView'), false, view);
-    gl.uniform3fv(gl.getUniformLocation(progDice, 'uEye'), new Float32Array(eye));
-    gl.uniform3fv(gl.getUniformLocation(progDice, 'uKey'), new Float32Array(KEY_DIR));
+    gl.uniformMatrix4fv(D.u.uProj, false, proj);
+    gl.uniformMatrix4fv(D.u.uView, false, view);
+    gl.uniform3fv(D.u.uEye, EYE);
+    gl.uniform3fv(D.u.uKey, KEY);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, texBody);
-    gl.uniform1i(gl.getUniformLocation(progDice, 'uBody'), 0);
+    gl.uniform1i(D.u.uBody, 0);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, texRough);
-    gl.uniform1i(gl.getUniformLocation(progDice, 'uRough'), 1);
+    gl.uniform1i(D.u.uRough, 1);
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, texPips);
-    gl.uniform1i(gl.getUniformLocation(progDice, 'uPips'), 2);
+    gl.uniform1i(D.u.uPips, 2);
 
-    const uModel = gl.getUniformLocation(progDice, 'uModel');
-    const uNormalMat = gl.getUniformLocation(progDice, 'uNormalMat');
+    const uModel = D.u.uModel;
+    const uNormalMat = D.u.uNormalMat;
 
-    const uTint = gl.getUniformLocation(progDice, 'uTint');
-    const uWear = gl.getUniformLocation(progDice, 'uWear');
-    const uGrain = gl.getUniformLocation(progDice, 'uGrain');
+    const uTint = D.u.uTint;
+    const uWear = D.u.uWear;
+    const uGrain = D.u.uGrain;
 
     for (const d of dice) {
       // Each die is its own object, not two copies of one.
@@ -1087,9 +1125,11 @@ export function createDice(host, opts = {}) {
       // One reads a different corner of the material, one is slightly warmer, and one is
       // more worn — small enough that nobody would name any of it, large enough that the
       // two stop looking like the same mesh drawn twice.
-      gl.uniform3fv(uTint, new Float32Array(d.tint));
+      TINT.set(d.tint);
+      gl.uniform3fv(uTint, TINT);
       gl.uniform1f(uWear, d.wear);
-      gl.uniform2fv(uGrain, new Float32Array(d.grain));
+      GRAIN.set(d.grain);
+      gl.uniform2fv(uGrain, GRAIN);
 
       const model = multiply(
         translation(d.pos[0], d.pos[1], d.pos[2]),

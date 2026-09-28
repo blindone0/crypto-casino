@@ -27,8 +27,18 @@ const load = (async () => {
   );
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dice3d-'));
   const file = path.join(dir, 'dice3d.mjs');
-  // The one import it has is a sibling module it does not need for the geometry.
+  // Its sibling imports have to come along, or the temp copy cannot resolve them.
+  // This broke the moment dice3d started importing `gl.js` instead of carrying its
+  // own copy of the helpers: the loader had been written for exactly one import and
+  // silently had two. Copying whatever it actually imports is the version that does
+  // not need updating the next time.
   fs.writeFileSync(file, src);
+  for (const m of src.matchAll(/from '\.\/([a-z0-9]+)\.js'/g)) {
+    const sibling = path.join(__dirname, '..', 'public', `${m[1]}.js`);
+    if (fs.existsSync(sibling)) {
+      fs.writeFileSync(path.join(dir, `${m[1]}.js`), fs.readFileSync(sibling));
+    }
+  }
   return import(`file://${file.replace(/\\/g, '/')}`);
 })();
 
