@@ -11,12 +11,24 @@
 const { DatabaseSync } = require('node:sqlite');
 const fs = require('node:fs');
 const path = require('node:path');
+const migrate = require('./migrate');
 
-const SCHEMA = `
+/**
+ * Connection settings, applied on every open.
+ *
+ * These are not schema and must not live in a migration. journal_mode is stored in the
+ * file, but foreign_keys and synchronous are per-connection: set them once inside a
+ * migration that only ever runs on a fresh database and every later connection quietly
+ * opens with foreign keys off. They also cannot run inside a transaction, which is how
+ * this was found.
+ */
+const PRAGMAS = `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 PRAGMA synchronous = FULL;
+`;
 
+const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id                  INTEGER PRIMARY KEY,
   username            TEXT NOT NULL UNIQUE,
@@ -471,7 +483,12 @@ CREATE TABLE IF NOT EXISTS kv (
 function open(dbPath) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);
-  db.exec(SCHEMA);
+  // Settings first, and every time: two of them are per-connection.
+  db.exec(PRAGMAS);
+  // Then the schema, through the migration runner rather than straight to exec, so that a
+  // database which already has rows gets the steps it is missing instead of silently
+  // skipping them.
+  migrate.run(db, { schema: SCHEMA });
   return wrap(db);
 }
 
@@ -537,4 +554,4 @@ function wrap(db) {
   return api;
 }
 
-module.exports = { open, SCHEMA };
+module.exports = { open, SCHEMA, PRAGMAS, migrate };
