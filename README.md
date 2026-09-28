@@ -498,6 +498,7 @@ public/            the site: casino, /admin panel, /verify verifier, i18n
   games/           canvas cabinets and the match boards
 test/              the suite; run it with `npm test`
 tools/             simulator, calibration, treasury setup, admin token, token reset
+  puzzle-import.js your own pictures behind the jigsaw; see PICTURES.md
   doctor.js        npm run doctor: the health check, safe against production
   migrate.js       npm run migrate: what a deploy will do to a live database
 ```

@@ -75,6 +75,10 @@ function main() {
     if (fs.existsSync(out)) fs.unlinkSync(out);
     console.log(`Removed ${out}.`);
     console.log('The drawn pictures are unaffected; they live in public/pictures.js.');
+    // The server holds the imported pictures in memory, so deleting the file is not the
+    // same as taking them off the site. Saying so here because not saying it looks like
+    // the clear did not work.
+    console.log('Restart the server; until you do it will keep serving the old ones.');
     return;
   }
 
