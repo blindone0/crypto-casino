@@ -102,7 +102,10 @@ const FLIPPERS = [
  * Start a game on a canvas.
  * Returns { stop() }. `onScore` and `onEnd` report upward to the cabinet shell.
  */
-export function start(canvas, { onScore, onEnd, onBall } = {}) {
+export function start(canvas, { onScore, onEnd, onBall, sound } = {}) {
+  // A callback rather than an import, so the table has no dependency on the audio engine
+  // and the headless tests do not have to stub one.
+  const say = (name) => { if (sound) sound(name); };
   const ctx = canvas.getContext('2d');
   canvas.width = W;
   canvas.height = H;
@@ -198,6 +201,7 @@ export function start(canvas, { onScore, onEnd, onBall } = {}) {
       if (plungerReleased) {
         const power = Math.max(0.25, Math.min(1, plunger / 60));
         ball.vel = v(0, -(LAUNCH_MIN + power * LAUNCH_SPAN));
+        say('cue');
         plunger = 0;
         plungerReleased = false;
         inLane = false;
@@ -216,7 +220,7 @@ export function start(canvas, { onScore, onEnd, onBall } = {}) {
     if (ball.vel.y > 0) for (const [a, b] of GATES) hitSegment(a, b, 0.2, null);
 
     for (const bump of BUMPERS) {
-      if (hitCircle(bump.pos, bump.r, 0.5, 260)) award(bump.points);
+      if (hitCircle(bump.pos, bump.r, 0.5, 260)) { say('clack'); award(bump.points); }
     }
 
     // Rollovers score on the way past and do not touch the ball's path.
@@ -257,6 +261,7 @@ export function start(canvas, { onScore, onEnd, onBall } = {}) {
     // Drain.
     if (ball.pos.y > H + 40) {
       ballsLeft -= 1;
+      say('lose');
       if (onBall) onBall(ballsLeft);
       if (ballsLeft <= 0) {
         running = false;

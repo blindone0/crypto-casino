@@ -46,7 +46,10 @@ function rng(seed) {
   };
 }
 
-export function start(canvas, { onScore, onEnd, onBall, seed } = {}) {
+export function start(canvas, { onScore, onEnd, onBall, seed, sound } = {}) {
+  // A callback rather than an import: the cabinet stays free of the audio engine, and the
+  // headless tests do not have to stub one.
+  const say = (name) => { if (sound) sound(name); };
   const ctx = canvas.getContext('2d');
   canvas.width = W;
   canvas.height = H;
@@ -110,6 +113,7 @@ export function start(canvas, { onScore, onEnd, onBall, seed } = {}) {
 
   function loseLife() {
     lives -= 1;
+    say('lose');
     if (onBall) onBall(lives);
     shot = null;
     bombs.length = 0;
@@ -135,7 +139,7 @@ export function start(canvas, { onScore, onEnd, onBall, seed } = {}) {
     if (left) shipX -= SHIP_SPEED * dt;
     if (right) shipX += SHIP_SPEED * dt;
     shipX = Math.max(SHIP_W / 2, Math.min(W - SHIP_W / 2, shipX));
-    if (firing && !shot) shot = { x: shipX, y: SHIP_Y };
+    if (firing && !shot) { shot = { x: shipX, y: SHIP_Y }; say('laser'); }
 
     // --- our shot
     if (shot) {
@@ -188,6 +192,7 @@ export function start(canvas, { onScore, onEnd, onBall, seed } = {}) {
         if (!hit(shot.x - 1.5, shot.y - 8, 3, 10, r.x, r.y, RAIDER_W, RAIDER_H)) continue;
         r.alive = false;
         shot = null;
+        say('boom');
         award(ROW_POINTS[r.row] * wave);
         break;
       }
@@ -213,6 +218,7 @@ export function start(canvas, { onScore, onEnd, onBall, seed } = {}) {
     // --- the wave
     if (alive().length === 0) {
       wave += 1;
+      say('wave');
       award(500 * wave);
       message = `Wave ${wave}`;
       messageFor = 1.6;

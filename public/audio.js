@@ -821,6 +821,82 @@ const EFFECTS = {
   /** Crash multiplier ticking upward. */
   tick: (t) => tone({ freq: 1200, start: t, dur: 0.02, type: 'square', gain: 0.04 }),
 
+  // ---- the arcade cabinets and the two-player boards.
+  // All short and all quiet. A game room is meant to be busy, not loud, and these fire
+  // often enough that a generous one would wear through in a minute.
+
+  /** Cue on ball: a hard click over a low thump. */
+  cue: (t) => {
+    noise({ start: t, dur: 0.035, gain: 0.16, type: 'highpass', freq: 2600 });
+    tone({ freq: 190, start: t, dur: 0.09, type: 'triangle', gain: 0.14, glideTo: 110 });
+  },
+
+  /** Ball on ball: the click on its own, higher and shorter. */
+  clack: (t) => {
+    noise({ start: t, dur: 0.018, gain: 0.1, type: 'bandpass', freq: 4200, q: 3 });
+    tone({ freq: 880, start: t, dur: 0.03, type: 'sine', gain: 0.07, glideTo: 620 });
+  },
+
+  /** A ball dropping into a pocket: the click, then it falling away. */
+  pocket: (t) => {
+    noise({ start: t, dur: 0.05, gain: 0.12, type: 'lowpass', freq: 1200 });
+    tone({ freq: 320, start: t + 0.02, dur: 0.26, type: 'triangle', gain: 0.13, glideTo: 90 });
+  },
+
+  /** The ship firing. Deliberately thin: it happens constantly. */
+  laser: (t) => {
+    tone({ freq: 980, start: t, dur: 0.09, type: 'square', gain: 0.05, glideTo: 2100 });
+    noise({ start: t, dur: 0.04, gain: 0.03, type: 'highpass', freq: 3000 });
+  },
+
+  /** A raider going up. */
+  boom: (t) => {
+    noise({ start: t, dur: 0.18, gain: 0.14, type: 'lowpass', freq: 1500, sweepTo: 300 });
+    tone({ freq: 160, start: t, dur: 0.2, type: 'sawtooth', gain: 0.08, glideTo: 60 });
+  },
+
+  /** A wave cleared. */
+  wave: (t) => {
+    [0, 5, 9, 12].forEach((n, i) => tone({
+      freq: midi(69 + n), start: t + i * 0.065, dur: 0.24, type: 'square', gain: 0.07,
+    }));
+  },
+
+  /** A shot into open water. */
+  splash: (t) => noise({
+    start: t, dur: 0.3, gain: 0.09, type: 'bandpass', freq: 1400, q: 0.7, sweepTo: 320,
+  }),
+
+  /** A shot into a hull. */
+  strike: (t) => {
+    noise({ start: t, dur: 0.12, gain: 0.16, type: 'lowpass', freq: 1800, sweepTo: 500 });
+    tone({ freq: 240, start: t, dur: 0.14, type: 'square', gain: 0.09, glideTo: 120 });
+  },
+
+  /** A ship going down. */
+  sunk: (t) => {
+    noise({ start: t, dur: 0.5, gain: 0.13, type: 'lowpass', freq: 1400, sweepTo: 180 });
+    [0, -3, -5, -8].forEach((n, i) => tone({
+      freq: midi(57 + n), start: t + i * 0.09, dur: 0.3, type: 'triangle', gain: 0.08,
+    }));
+  },
+
+  /** A word claimed on the board, scored by its length. */
+  word: (t) => {
+    [0, 4, 7].forEach((n, i) => tone({
+      freq: midi(72 + n), start: t + i * 0.05, dur: 0.2, type: 'sine', gain: 0.1,
+    }));
+  },
+
+  /** A piece taken. Heavier than an ordinary move. */
+  capture: (t) => {
+    noise({ start: t, dur: 0.06, gain: 0.14, type: 'lowpass', freq: 2000 });
+    tone({ freq: 210, start: t, dur: 0.12, type: 'triangle', gain: 0.12, glideTo: 120 });
+  },
+
+  /** Check. A single nudge, not a fanfare. */
+  check: (t) => tone({ freq: 660, start: t, dur: 0.16, type: 'triangle', gain: 0.12, glideTo: 880 }),
+
   /** Cashing out in time. */
   cashout: (t) => {
     [0, 5, 9].forEach((n, i) => tone({

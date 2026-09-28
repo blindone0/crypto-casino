@@ -2410,6 +2410,7 @@ async function startCabinet(game, play) {
     onScore: (s) => { scoreOut.textContent = String(s); },
     onBall: (n) => { ballsOut.textContent = String(Math.max(0, n)); },
     onEnd: finish,
+    sound: (name) => audio.sfx(name),
   });
   canvas.focus?.();
 }
@@ -2740,14 +2741,40 @@ const SEA_LETTERS = '\u0410\u0411\u0412\u0413\u0414\u0415\u0416\u0417\u0418\u041
 const cellName = (cell, size) => `${SEA_LETTERS[cell % size] || '?'}${Math.floor(cell / size) + 1}`;
 
 /**
+ * Which sound a finished move deserves.
+ *
+ * Decided here rather than in the boards, because only the answer from the server says
+ * what actually happened: whether a shot hit, whether a piece was taken, whether the move
+ * gave check. A board that guessed would sometimes play the wrong one.
+ */
+function moveSound(game, before, after) {
+  if (game === 'seabattle') {
+    const last = after.view.log?.at(-1);
+    if (!last || last.cell === undefined) return 'click';
+    return { hit: 'strike', sunk: 'sunk', miss: 'splash' }[last.outcome] || 'click';
+  }
+  if (game === 'balda') {
+    const last = after.view.log?.at(-1);
+    return last && last.word ? 'word' : 'click';
+  }
+  // Chess. A capture is a piece leaving the board, which is the one thing the position
+  // before and after can be compared on without re-implementing the rules here.
+  const count = (fen) => (fen || '').split(' ')[0].replace(/[^a-zA-Z]/g, '').length;
+  if (count(after.view.fen) < count(before?.view?.fen)) return 'capture';
+  if (after.view.check) return 'check';
+  return 'card';
+}
+
+/**
  * Send one action. Whatever the board handed back goes straight through: the server is
  * the thing that decides whether it was allowed, and it will say so if it was not.
  */
 async function sendAction(action) {
+  const before = state.matchView;
   try {
     await api('/api/match/move', { method: 'POST', body: { id: state.matchId, ...action } });
-    audio.sfx('card');
     await refreshMatch(false);
+    audio.sfx(moveSound(before?.game, before, state.matchView));
   } catch (e) {
     toast(e.message, 'bad');
     await refreshMatch(false);

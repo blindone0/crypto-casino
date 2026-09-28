@@ -49,7 +49,10 @@ const len = (x, y) => Math.hypot(x, y);
  * Start a game on a canvas.
  * Returns { stop() }. `onScore` and `onEnd` report upward to the cabinet shell.
  */
-export function start(canvas, { onScore, onEnd, onBall } = {}) {
+export function start(canvas, { onScore, onEnd, onBall, sound } = {}) {
+  // Sound arrives as a callback rather than an import, so the cabinet has no dependency
+  // on the audio engine and the headless tests do not have to stub one.
+  const say = (name) => { if (sound) sound(name); };
   const ctx = canvas.getContext('2d');
   canvas.width = W;
   canvas.height = H;
@@ -120,6 +123,8 @@ export function start(canvas, { onScore, onEnd, onBall } = {}) {
     const impulse = rel * 0.98; // a touch of energy lost to the cloth
     a.vx += impulse * nx; a.vy += impulse * ny;
     b.vx -= impulse * nx; b.vy -= impulse * ny;
+    // Only a solid contact is worth a click. A graze at walking pace is not a noise.
+    if (rel < -60) say('clack');
     return true;
   }
 
@@ -146,6 +151,7 @@ export function start(canvas, { onScore, onEnd, onBall } = {}) {
         } else {
           b.potted = true;
           award(1000);
+          say('pocket');
           message = `Potted — ${remaining()} left`;
         }
         break;
@@ -203,6 +209,7 @@ export function start(canvas, { onScore, onEnd, onBall } = {}) {
     cue().vy = Math.sin(angle) * MAX_POWER * p;
     shots -= 1;
     message = '';
+    say('cue');
     if (onBall) onBall(shots);
   }
 
