@@ -66,11 +66,15 @@ test('a round starts scrambled, and the scramble replays from the seed', (t) => 
   t.after(() => cleanup(cfg, db));
 
   const g = open(cfg, db, priv, pub, user, 'easy');
-  assert.strictEqual(g.pieces, 16);
-  assert.strictEqual(g.scramble.length, 16);
+  // Read the size from the board rather than pinning a number here: the boards are a
+  // product decision that has already changed once, and a test that breaks when they are
+  // retuned is testing the wrong thing.
+  const easy = jigsaw.boardOf('easy');
+  assert.strictEqual(g.pieces, easy.pieces);
+  assert.strictEqual(g.scramble.length, easy.pieces);
   // Every piece appears exactly once — a scramble that lost or duplicated one would be
   // unsolvable, and the player would have paid for it.
-  assert.deepStrictEqual([...g.scramble].sort((a, b) => a - b), solved(16));
+  assert.deepStrictEqual([...g.scramble].sort((a, b) => a - b), solved(easy.pieces));
   assert.ok(g.scramble.some((piece, slot) => piece !== slot), 'it must not start solved');
 
   const row = db.get('SELECT * FROM jigsaw_games WHERE id=?', g.id);
@@ -96,7 +100,7 @@ test('an unfinished board is refused and the round stays open', (t) => {
   t.after(() => cleanup(cfg, db));
 
   const g = open(cfg, db, priv, pub, user, 'easy');
-  const wrong = solved(16);
+  const wrong = solved(g.pieces);
   [wrong[0], wrong[1]] = [wrong[1], wrong[0]];
 
   assert.throws(

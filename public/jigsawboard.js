@@ -59,7 +59,9 @@ export function board(host, {
   scramble.forEach((piece, slot) => { slotOf[piece] = slot; });
 
   const svg = svgEl('svg', {
-    class: 'jig-board',
+    // Past roughly a hundred pieces the outlines start to dominate the picture, so the
+    // stylesheet thins them. Decided here because only this knows the piece count.
+    class: `jig-board${pieces > 80 ? ' dense' : ''}`,
     viewBox: `0 0 ${BOARD} ${boardH}`,
     preserveAspectRatio: 'xMidYMid meet',
   });
@@ -83,6 +85,28 @@ export function board(host, {
     }));
   }
 
+  // The picture is declared ONCE and every piece references it.
+  //
+  // This matters more than it looks. The picture arrives as a data URI of roughly 170KB,
+  // and the obvious implementation — an <image> inside each piece — puts a copy of that
+  // string in the document per piece. At sixteen pieces that is careless; at four hundred
+  // it is 68MB of markup and the tab stops responding. A <defs> declaration plus a <use>
+  // per piece is one copy and four hundred references.
+  const ART_ID = `jigart-${cutSeed}`;
+  if (picture) {
+    defs.appendChild(svgEl('image', {
+      id: ART_ID,
+      href: picture,
+      x: 0, y: 0, width: BOARD, height: boardH,
+      preserveAspectRatio: 'xMidYMid slice',
+    }));
+  } else {
+    // No picture for this round: the cut shapes are the puzzle either way.
+    defs.appendChild(svgEl('rect', {
+      id: ART_ID, x: 0, y: 0, width: BOARD, height: boardH, class: 'jig-blank',
+    }));
+  }
+
   const nodes = [];
   for (let piece = 0; piece < pieces; piece += 1) {
     const col = piece % cols;
@@ -97,20 +121,7 @@ export function board(host, {
     // the outline is drawn on top so an assembled picture still shows its seams.
     const g = svgEl('g', { class: 'jig-piece', 'data-piece': String(piece) });
     const art = svgEl('g', { 'clip-path': `url(#${clipId})` });
-
-    if (picture) {
-      art.appendChild(svgEl('image', {
-        href: picture,
-        x: 0, y: 0, width: BOARD, height: boardH,
-        preserveAspectRatio: 'xMidYMid slice',
-      }));
-    } else {
-      // No imported picture for this round: a flat fill still gives something to assemble,
-      // and the piece shapes are the puzzle either way.
-      art.appendChild(svgEl('rect', {
-        x: 0, y: 0, width: BOARD, height: boardH, class: 'jig-blank',
-      }));
-    }
+    art.appendChild(svgEl('use', { href: `#${ART_ID}` }));
     g.appendChild(art);
     g.appendChild(svgEl('path', { d: cut.path(col, row), class: 'jig-edge' }));
     svg.appendChild(g);

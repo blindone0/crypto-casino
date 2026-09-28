@@ -397,11 +397,20 @@ header.top nav#navGames button.on::after { opacity: 1; }
   touch-action: none;
   user-select: none;
 }
+/* The empty bed a piece has been lifted from.
+ *
+ * It was near-black, which on a dark picture read as the piece having failed to load
+ * rather than as a hole waiting to be filled. A lighter, warmer recess says "something
+ * goes here", and the inset edge makes it look cut rather than painted. */
 .jig-slot {
-  fill: rgba(0, 0, 0, .34);
-  stroke: rgba(255, 255, 255, .05);
+  fill: rgba(255, 255, 255, .045);
+  stroke: rgba(255, 255, 255, .10);
   stroke-width: 1.5;
 }
+/* On the big boards the outline is most of what you see of a piece, so it thins out as
+   the pieces shrink — a 2px stroke on a 28px piece is a cartoon. */
+.jig-board.dense .jig-edge { stroke-width: 1; }
+.jig-board.dense .jig-slot { stroke-width: .75; }
 .jig-blank { fill: #2a2420; }
 
 .jig-piece { cursor: grab; }

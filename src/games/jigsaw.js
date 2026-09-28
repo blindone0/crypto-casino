@@ -40,16 +40,27 @@ const now = () => Math.floor(Date.now() / 1000);
 /**
  * Board sizes. Only big ones — a nine-piece jigsaw is not a jigsaw.
  *
- * `par` is the time in seconds that pays the full multiplier, and it is per piece rather
- * than per board so a 6x6 is not simply four times harder than a 4x4 for the same money.
- * `floor` is the fastest a human could plausibly be; anything under it is a script.
+ * `par` is seconds *per piece*, not per board, so a 400-piece jigsaw is not simply
+ * twenty-five times harder than a 36-piece one for the same money.
+ *
+ * It falls as boards grow, which is deliberate and not a discount: a big picture gives far
+ * more context per piece than a small one — more edges to match, more obvious neighbours —
+ * so people genuinely place them faster once they are going. A flat rate per piece would
+ * make the big boards trivially winnable.
  */
 const BOARDS = {
-  easy: { cols: 4, rows: 4, par: 4.5, label: 'Easy' },
-  medium: { cols: 5, rows: 4, par: 4.0, label: 'Medium' },
-  hard: { cols: 5, rows: 5, par: 3.6, label: 'Hard' },
-  expert: { cols: 6, rows: 6, par: 3.2, label: 'Expert' },
+  easy: { cols: 6, rows: 6, par: 3.4, label: 'Easy' },
+  medium: { cols: 10, rows: 10, par: 2.6, label: 'Medium' },
+  hard: { cols: 14, rows: 14, par: 2.1, label: 'Hard' },
+  expert: { cols: 20, rows: 20, par: 1.7, label: 'Expert' },
 };
+
+/**
+ * Below this many pixels a piece is not draggable with a finger, so the boards that would
+ * land under it are offered but marked. 400 pieces across a 390px phone is 16px, which is
+ * a desktop board whatever the interface claims.
+ */
+const TOUCH_FLOOR_PX = 24;
 
 /** The fastest believable seconds per piece. Below this, nobody is dragging anything. */
 const HUMAN_FLOOR_PER_PIECE = 0.45;
@@ -139,6 +150,8 @@ function view(db, cfg, g) {
     wager: g.wager,
     elapsed,
     par: Math.round(board.par * board.pieces),
+    cols: board.cols,
+    rows: board.rows,
     payTable: payTable(g.board, cfg.houseEdge.jigsaw),
     multiplier: g.multiplier ?? null,
     payout: g.payout ?? null,
