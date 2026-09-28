@@ -280,34 +280,97 @@ input[type=range] { padding: 0; accent-color: var(--gold); }
 .hint { font-size: 12px; color: var(--text-faint); margin: 8px 0 0; line-height: 1.6; }
 
 /* ------------------------------------------------------------------ dice */
-.dice-readout { text-align: center; padding: 26px 0 18px; }
-.dice-readout .roll {
-  font-family: var(--mono); font-size: 62px; font-weight: 700; line-height: 1;
+/* ---------------------------------------------------------------- Кости ---
+   Two dice on a felt table. The canvas draws the dice and the table; everything here
+   frames it and prints the numbers underneath. */
+.bones-board {
+  position: relative;
+  width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0b0e0c;
+  box-shadow: inset 0 2px 14px rgba(0, 0, 0, .6);
+}
+.dice-canvas { display: block; width: 100%; }
+
+/* The fallback, for a browser with no WebGL. Two big glyph dice. The game is identical;
+   only the tumble is missing, and saying so is better than showing an empty box. */
+.bones-flat {
+  display: flex; justify-content: center; gap: 18px;
+  padding: 26px 0 8px;
+  font-size: 84px; line-height: 1;
+  color: var(--gold-bright);
+  text-shadow: 0 0 30px var(--gold-glow);
+}
+
+/* The call: eleven totals, 2 through 12. Touch targets are 44px because a phone is the
+   target and a 28px button is a miss waiting to happen. */
+.bones-call {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
+  gap: 6px;
+  margin: 6px 0 10px;
+}
+.bones-num {
+  min-height: 44px;
+  font-family: var(--mono);
   font-variant-numeric: tabular-nums;
-  color: var(--gold-bright); text-shadow: 0 0 34px var(--gold-glow);
 }
-.dice-readout .roll.win { color: var(--win); text-shadow: 0 0 34px rgba(53, 217, 160, .4); }
-.dice-readout .roll.lose { color: var(--danger); text-shadow: none; }
-.dice-readout .verdict { margin-top: 10px; font-size: 13px; color: var(--text-dim); }
-.dice-track {
-  position: relative; height: 10px; border-radius: 5px; margin: 22px 0 8px;
-  background: linear-gradient(90deg, var(--felt-hi) 0%, var(--felt-hi) var(--win, 50%),
-    #241f1b var(--win, 50%), #241f1b 100%);
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, .6);
+/* Inside the call. The two ends are brighter, so a range reads as a span with edges
+   rather than as an undifferentiated block. */
+.bones-num.on {
+  background: linear-gradient(180deg, hsl(118 26% 26%), hsl(118 24% 18%));
+  border-color: hsl(118 30% 38%);
+  color: var(--text);
 }
-.dice-track.over {
-  background: linear-gradient(90deg, #241f1b 0%, #241f1b var(--win, 50%),
-    var(--felt-hi) var(--win, 50%), var(--felt-hi) 100%);
+.bones-num.edge {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px var(--gold-glow);
 }
-.dice-track .marker {
-  position: absolute; top: -6px; width: 3px; height: 22px; border-radius: 2px;
-  background: var(--gold-bright); box-shadow: 0 0 10px var(--gold-glow);
-  transform: translateX(-50%); transition: left .2s cubic-bezier(.22, 1, .36, 1);
+.bones-callout {
+  font-family: var(--mono);
+  font-size: 18px;
+  color: var(--gold-bright);
+  font-variant-numeric: tabular-nums;
 }
-.dice-scale {
-  display: flex; justify-content: space-between;
-  font-family: var(--mono); font-size: 10px; color: var(--text-faint);
+
+/* A multiplier the house cannot pay in full is struck through in the panel, never hidden:
+   the smaller true number is shown, and the reason sits beside it. */
+.capped { color: var(--warn); }
+.bones-hint.warn { color: var(--warn); }
+
+.bones-verdict {
+  text-align: center;
+  padding: 14px 0 6px;
+  font-family: var(--mono);
+  font-size: 15px;
+  color: var(--text-dim);
 }
+.bones-verdict.win { color: var(--win); }
+.bones-verdict.lose { color: var(--danger); }
+
+/* The whole board, priced, so the offer is legible before it is taken. */
+.bones-paytable {
+  display: grid;
+  gap: 2px;
+  margin-top: 10px;
+  font-size: 12px;
+}
+.bones-th, .bones-tr {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 5px;
+}
+.bones-th {
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  font-size: 10px;
+}
+.bones-tr:nth-child(odd) { background: rgba(255, 255, 255, .025); }
+.bones-tr .dim { color: var(--text-faint); }
 
 /* ----------------------------------------------------------------- limbo */
 .limbo-readout { text-align: center; padding: 42px 0; }
@@ -987,7 +1050,8 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
   .crash-mult, .limbo-readout .mult { font-size: 48px; }
-  .dice-readout .roll { font-size: 44px; }
+  /* The glyph dice, when WebGL is unavailable; the canvas scales itself. */
+  .bones-flat { font-size: 60px; }
   .bigwin .amount { font-size: 38px; }
   header.top { gap: 8px; padding: 5px 12px; }
   /* On a phone the brand word goes before the bar is allowed to take a second line. */

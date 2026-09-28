@@ -36,7 +36,7 @@ const VERT = `
 attribute vec3 aPos;
 attribute vec3 aNormal;
 attribute vec2 aUV;
-attribute float aFace;
+attribute float aFace;   // which sixth of the pip atlas this face shows
 uniform mat4 uProj;
 uniform mat4 uView;
 uniform mat4 uModel;
@@ -79,13 +79,18 @@ uniform sampler2D uRough;     // roughness, derived from the material's own cont
 uniform sampler2D uPips;      // six faces in a row, transparent
 uniform vec3 uEye;
 uniform vec3 uTint;
-uniform float uPipShown[6];   // which pip face each cube face carries, as 0..5
 
 void main() {
-  // The pip atlas is six faces across. Each cube face was given a face index at build
-  // time, and that picks the sixth of the atlas to sample.
-  float idx = uPipShown[int(vFace)];
-  vec2 pipUV = vec2((vUV.x + idx) / 6.0, vUV.y);
+  // The pip atlas is six faces across, and vFace is already the slot to sample.
+  //
+  // It arrives as a per-vertex attribute rather than as a lookup into a uniform array,
+  // and that is not a style choice: GLSL ES 1.0 permits only a constant or a loop index
+  // inside [], so uPipShown[int(vFace)] is rejected by the compiler --
+  // "Index expression can only contain const or loop symbols". The program then fails to
+  // link, createDice returns null, and the whole game silently falls back to glyph
+  // dice. Baking the slot into the geometry sidesteps the rule entirely, and costs one
+  // float per vertex on a mesh that has a few thousand.
+  vec2 pipUV = vec2((vUV.x + vFace) / 6.0, vUV.y);
   vec4 pip = texture2D(uPips, pipUV);
 
   vec3 body = texture2D(uBody, vUV).rgb * uTint;
@@ -335,7 +340,9 @@ function roundedBox(gl, radius = 0.18, seg = 10) {
         pos.push(c[0] + d[0] * radius, c[1] + d[1] * radius, c[2] + d[2] * radius);
         nrm.push(d[0], d[1], d[2]);
         uv.push(s, t);
-        face.push(fi);
+        // The atlas slot, 0-indexed, baked in rather than looked up. See the note in the
+        // fragment shader for why this cannot be a uniform array lookup.
+        face.push(FACE_VALUES[fi] - 1);
       }
     }
     for (let j = 0; j < seg; j += 1) {
@@ -502,6 +509,7 @@ export function createDice(host, opts = {}) {
   let duration = 0;
   let raf = null;
   let onDone = null;
+  let bail = null;
 
   function resize() {
     const w = host.clientWidth || 640;
@@ -578,9 +586,6 @@ export function createDice(host, opts = {}) {
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, texPips);
     gl.uniform1i(gl.getUniformLocation(progDice, 'uPips'), 2);
-    // Atlas slot per cube face, 0-indexed. Constant for a real die.
-    gl.uniform1fv(gl.getUniformLocation(progDice, 'uPipShown[0]'),
-      new Float32Array(FACE_VALUES.map((v) => v - 1)));
 
     const uModel = gl.getUniformLocation(progDice, 'uModel');
     const uNormalMat = gl.getUniformLocation(progDice, 'uNormalMat');
@@ -624,6 +629,7 @@ export function createDice(host, opts = {}) {
       raf = requestAnimationFrame(frame);
     } else {
       raf = null;
+      clearTimeout(bail);
       const done = onDone;
       onDone = null;
       if (done) done();
@@ -671,6 +677,28 @@ export function createDice(host, opts = {}) {
         duration = ms;
         onDone = resolve;
         if (raf === null) raf = requestAnimationFrame(frame);
+
+        // A throw must always finish, even when it is never drawn.
+        //
+        // A browser suspends `requestAnimationFrame` in a hidden tab, so a player who
+        // switches apps mid-throw would otherwise wait on a promise that can never
+        // settle: the bet is placed, the money has moved, and the result never appears.
+        // The fallback puts the dice down at their final pose and resolves. It is the
+        // same rule the rest of the site follows — the animation is decoration, and
+        // decoration must never be load-bearing.
+        clearTimeout(bail);
+        bail = setTimeout(() => {
+          if (!onDone) return;
+          for (let i = 0; i < dice.length; i += 1) {
+            dice[i].pos = REST[i].slice();
+            dice[i].rot = (RESTING[dice[i].value] || [0, 0, 0]).slice();
+          }
+          if (raf !== null) { cancelAnimationFrame(raf); raf = null; }
+          draw();
+          const done = onDone;
+          onDone = null;
+          done();
+        }, ms + 400);
       });
     },
 
@@ -686,6 +714,7 @@ export function createDice(host, opts = {}) {
     },
 
     destroy() {
+      clearTimeout(bail);
       if (raf !== null) cancelAnimationFrame(raf);
       ro?.disconnect();
       canvas.remove();

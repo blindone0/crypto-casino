@@ -76,7 +76,10 @@ const STRINGS = {
     en: 'That was faster than anyone can drag, so it paid nothing.',
     ru: 'Быстрее, чем человек может перетаскивать, — выплаты нет.',
   },
-  'game.dice': { en: 'Dice', ru: 'Кости' },
+  // Кости is the classic two-d6 game. The threshold game that used to hold this
+  // name keeps its module and its route — a bet already in the ledger has to stay
+  // verifiable — but it no longer has a screen, so it no longer needs a name.
+  'game.bones': { en: 'Dice', ru: 'Кости' },
   'game.limbo': { en: 'Limbo', ru: 'Лимбо' },
   'game.mines': { en: 'Mines', ru: 'Мины' },
   'game.crash': { en: 'Crash', ru: 'Краш' },
@@ -99,12 +102,33 @@ const STRINGS = {
   'bet.edge': { en: 'House edge', ru: 'Преимущество казино' },
 
   // ---- dice
-  'dice.target': { en: 'Roll under', ru: 'Меньше чем' },
-  'dice.targetOver': { en: 'Roll over', ru: 'Больше чем' },
-  'dice.mode': { en: 'Direction', ru: 'Направление' },
-  'dice.under': { en: 'Under', ru: 'Меньше' },
-  'dice.over': { en: 'Over', ru: 'Больше' },
   'dice.result': { en: 'Roll', ru: 'Результат' },
+  // Кости: two d6, call a total or a range of totals.
+  'bones.call': { en: 'Your call', ru: 'Ваше число' },
+  'bones.range': { en: 'Range', ru: 'Диапазон' },
+  'bones.single': { en: 'One number', ru: 'Одно число' },
+  'bones.throw': { en: 'Throw', ru: 'Бросать' },
+  'bones.throwing': { en: 'Throwing…', ru: 'Бросок…' },
+  'bones.paytable': { en: 'What each total pays', ru: 'Сколько платит каждая сумма' },
+  'bones.sum': { en: 'Total', ru: 'Сумма' },
+  'bones.ways': { en: 'Ways', ru: 'Вариантов' },
+  'bones.rolled': { en: '{a} + {b} = {n}', ru: '{a} + {b} = {n}' },
+  'bones.pickHigh': { en: 'Now the other end of the range', ru: 'Теперь второй край диапазона' },
+  'bones.wholeBoard': {
+    en: 'Covering every total wins every throw and still pays the edge — there is nothing to win.',
+    ru: 'Ставка на все суммы выигрывает всегда и всё равно платит комиссию — выигрывать нечего.',
+  },
+  // Said whenever the quote and the payable amount differ. A capped win that looks like
+  // a normal win is how a player learns to distrust the site, so it is named both in the
+  // panel before the bet and on the result after it.
+  'bones.capped': {
+    en: 'The house holds {n}, which is all a win can pay right now.',
+    ru: 'В кассе {n} — больше выигрыш сейчас не заплатит.',
+  },
+  'bones.fallbackNote': {
+    en: 'Your browser cannot draw the 3D dice, so the throw is shown as numbers. The game is the same.',
+    ru: 'Браузер не рисует 3D-кости, бросок показан числами. Игра та же.',
+  },
 
   // ---- limbo
   'limbo.target': { en: 'Target multiplier', ru: 'Целевой множитель' },

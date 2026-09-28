@@ -335,6 +335,15 @@ function build(cfg) {
     min: bones.MIN_SUM,
     max: bones.MAX_SUM,
     totalWays: bones.TOTAL_WAYS,
+    // What a win can actually be paid, right now.
+    //
+    // The prices above are the true odds, but the house can only hand over what it holds
+    // (`bank.capPayout`), and that balance moves with every bet placed anywhere on the
+    // site. Without this the panel would quote 35.64x on a call the house could only
+    // settle at 29.54 — a number shown that will not be honoured, which is the failure
+    // this project keeps removing. It travels with the table rather than being fetched
+    // separately so a logged-out visitor sees honest prices too.
+    maxWin: bankFor().maxProfit(),
   }));
 
   add('POST', '/api/bet/limbo', async (ctx, req) => {

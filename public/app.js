@@ -10,6 +10,7 @@ import * as tokenKeys from './tokenkeys.js';
 import { verifyChain, compareHeads } from './chainverify.js';
 import { createSparks } from './slotfx.js';
 import { createReels as createGlReels } from './slot3d.js';
+import { createDice } from './dice3d.js';
 import { startParallax } from './parallax.js';
 
 // ---------------------------------------------------------------- plumbing
@@ -676,85 +677,157 @@ function infoPanel(extra = []) {
 }
 
 // ------------------------------------------------------------------- dice
-function renderDice() {
+/**
+ * Кости: two dice, call the total before the throw.
+ *
+ * The call is a contiguous range `[low, high]`, and a single number is just the range
+ * `[n, n]`. One shape for both means the odds arithmetic has no special case, here or on
+ * the server.
+ *
+ * What the panel must never do is quote a number the house cannot pay. The prices come
+ * from the server's own table, but the *ceiling* moves with every bet placed anywhere on
+ * the site, so it is recomputed against the live house balance every time the stake
+ * changes. See `payable()` below.
+ */
+function renderBones() {
   const panel = $('#betPanel');
   const amount = amountControl();
 
-  // Four levels instead of a free slider.
-  //
-  // Not a fairness fix — the edge is identical at every win chance, because the multiplier
-  // is (1 - edge) / chance and so the expected return is (1 - edge) wherever the dial sits.
-  // It is a better control: a choice between four named risks is something a person can
-  // make, and a number between 1.00 and 95.00 is something they have to work out.
-  //
-  // `chance` is still the value the rest of the panel reads, so nothing downstream had to
-  // learn about levels. The server is unchanged and still refuses anything outside its own
-  // 1%-95% range, because the interface must never be the only thing enforcing a rule.
-  const chance = el('input', { type: 'hidden', value: '5000' });
-  const levels = [
-    { key: 'safe', chance: 7500 },
-    { key: 'normal', chance: 5000 },
-    { key: 'risky', chance: 2500 },
-    { key: 'wild', chance: 500 },
-  ];
-  const levelRow = el('div', { class: 'risk-row' });
-  const paintLevels = () => {
-    for (const b of levelRow.children) {
-      b.classList.toggle('on', b.dataset.chance === chance.value);
-    }
-  };
-  setKids(levelRow, ...levels.map((lv) => el('button', {
-    class: 'tiny risk',
-    type: 'button',
-    'data-chance': String(lv.chance),
-    onclick: () => { chance.value = String(lv.chance); paintLevels(); recalc(); },
-  }, t(`risk.${lv.key}`))));
+  // The call. `high === low` is a single number, which is the common case.
+  let low = 7;
+  let high = 7;
+  // Waiting for the second end of a range. A range is two clicks, and this is which one
+  // we are on — shown in the hint so it is never ambiguous what the next click does.
+  let awaitingHigh = false;
 
-  const mode = el('select', {},
-    el('option', { value: 'under' }, t('dice.under')),
-    el('option', { value: 'over' }, t('dice.over')));
-  const thresholdOut = el('input', { class: 'mono', readonly: 'readonly' });
-  const multOut = el('span', {});
+  const callRow = el('div', { class: 'bones-call' });
+  const callOut = el('span', { class: 'bones-callout' });
+  const hint = el('p', { class: 'hint bones-hint' }, '');
   const chanceOut = el('span', {});
+  const multOut = el('span', {});
   const profitOut = el('span', {});
-  const go = el('button', { class: 'primary big', 'data-i18n': 'bet.place' });
+  const go = el('button', { class: 'primary big', 'data-i18n': 'bones.throw' });
+  const rangeToggle = el('button', {
+    class: 'tiny',
+    type: 'button',
+    'data-i18n': 'bones.range',
+  });
 
-  const target = () => (mode.value === 'over'
-    ? 9999 - Number(chance.value)
-    : Number(chance.value));
-
-  const recalc = () => {
-    const c = Number(chance.value) / 10000;
-    const mult = floor2((1 - state.cfg.houseEdge.dice) / c);
-    thresholdOut.value = (target() / 100).toFixed(2);
-    chanceOut.textContent = `${(c * 100).toFixed(2)}%`;
-    multOut.textContent = `${mult.toFixed(2)}×`;
-    const amt = Number(amount.get()) || 0;
-    profitOut.textContent = (amt * mult - amt).toFixed(8);
-    const track = $('#diceTrack');
-    if (track) {
-      track.style.setProperty('--win', `${Number(chance.value) / 100}%`);
-      track.classList.toggle('over', mode.value === 'over');
-    }
-    const lbl = $('#diceThresholdLabel');
-    if (lbl) lbl.textContent = t(mode.value === 'over' ? 'dice.targetOver' : 'dice.target');
+  /** The 36 ordered outcomes, as a lookup. The same counting the server does. */
+  const WAYS = { 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1 };
+  const waysFor = (a, b) => {
+    let n = 0;
+    for (let s = a; s <= b; s += 1) n += WAYS[s] || 0;
+    return n;
   };
-  mode.addEventListener('change', recalc);
+
+  /**
+   * What a stake would actually be paid, against what it is quoted.
+   *
+   * This mirrors `bank.capPayout` exactly — the ceiling is the house balance plus the
+   * stake just paid into it. Keeping the two in step is the whole point: a panel that
+   * quotes 35.64x while the house can pay 29.54 is lying, and it is the kind of lie that
+   * only surfaces after someone has already taken the bet.
+   */
+  const payable = (stakeUnits, multiplier) => {
+    const raw = Math.floor(stakeUnits * multiplier);
+    // The table route carries the house balance with the prices, so the ceiling is known
+    // even before signing in. `state.tokenMaxWin` is the same figure from /api/token and
+    // is the fallback for the moment before the table has loaded.
+    const house = state.bonesTable?.maxWin ?? state.tokenMaxWin ?? 0;
+    const ceiling = house + stakeUnits;
+    const paid = Math.min(raw, ceiling);
+    return { raw, paid, capped: paid < raw, effective: stakeUnits ? paid / stakeUnits : 0 };
+  };
+
+  function recalc() {
+    const edge = state.cfg?.houseEdge?.bones ?? 0.01;
+    const ways = waysFor(low, high);
+    const chance = ways / 36;
+    const quoted = chance > 0 ? floor2((1 - edge) / chance) : 0;
+    const stake = amount.units();
+    const { paid, capped, effective } = payable(stake, quoted);
+
+    callOut.textContent = low === high ? String(low) : `${low}–${high}`;
+    chanceOut.textContent = `${(chance * 100).toFixed(2)}% (${ways}/36)`;
+
+    // The payable multiple, never the raw one — and when they differ, say so rather than
+    // quietly showing the smaller number.
+    multOut.textContent = `${(capped ? effective : quoted).toFixed(2)}×`;
+    multOut.classList.toggle('capped', capped);
+    profitOut.textContent = fmtShort(Math.max(0, paid - stake));
+
+    hint.textContent = awaitingHigh
+      ? t('bones.pickHigh')
+      : (capped ? t('bones.capped', { n: fmtShort(houseHolds()) }) : '');
+    hint.classList.toggle('warn', capped && !awaitingHigh);
+
+    for (const b of callRow.children) {
+      const n = Number(b.dataset.sum);
+      b.classList.toggle('on', n >= low && n <= high);
+      b.classList.toggle('edge', n === low || n === high);
+    }
+    go.disabled = !amount.playable();
+  }
+
+  /** Clicking a total. One click sets a number; with range armed, two set a span. */
+  function pick(n) {
+    if (awaitingHigh) {
+      const a = Math.min(low, n);
+      const b = Math.max(low, n);
+      awaitingHigh = false;
+      rangeToggle.classList.remove('on');
+      // The whole board is refused by the server and must not be offered here either: it
+      // wins every throw and still pays the edge, so there is nothing to win.
+      if (a === 2 && b === 12) {
+        low = 2; high = 11;
+        toast(t('bones.wholeBoard'), 'bad');
+      } else {
+        low = a; high = b;
+      }
+    } else {
+      low = n;
+      high = n;
+    }
+    recalc();
+  }
+
+  setKids(callRow, ...Array.from({ length: 11 }, (_, i) => {
+    const n = i + 2;
+    return el('button', {
+      class: 'tiny bones-num',
+      type: 'button',
+      'data-sum': String(n),
+      onclick: () => pick(n),
+    }, String(n));
+  }));
+
+  rangeToggle.addEventListener('click', () => {
+    awaitingHigh = !awaitingHigh;
+    rangeToggle.classList.toggle('on', awaitingHigh);
+    recalc();
+  });
+
   amount.input.addEventListener('input', recalc);
 
   go.addEventListener('click', async () => {
     if (!requireLogin()) return;
     go.disabled = true;
     try {
-      const out = await api('/api/bet/dice', {
+      const out = await api('/api/bet/bones', {
         method: 'POST',
-        body: { amount: amount.get(), target: target(), mode: mode.value },
+        body: { amount: amount.get(), low, high },
       });
-      showDiceResult(out);
+      // The throw is animated only after the server has spoken: `out.faces` is what the
+      // seed produced, and the dice are told to land on it. Nothing here decides anything.
+      if (bonesDice) await bonesDice.roll(out.faces);
+      else showBonesFallback(out.faces);
+      showBonesResult(out);
       audio.sfx(out.won ? 'win' : 'lose');
-      state.user.balance = out.balance;
-      setBalance(out.balance, out.profit);
+      await refreshTokenBalance();
+      setBalance(state.tokenBalance, out.profit);
       loadFeed();
+      recalc();
     } catch (e) {
       toast(e.message, 'bad');
     } finally {
@@ -762,44 +835,93 @@ function renderDice() {
     }
   });
 
-  setKids(panel, 
+  setKids(panel,
     amount.node,
-    el('label', { class: 'field' }, el('span', { 'data-i18n': 'dice.mode' }), mode),
     el('label', { class: 'field' },
-      el('span', { 'data-i18n': 'risk.label' }), levelRow),
-    // The threshold and the chance are shown, not set: they are what the level means.
-    el('label', { class: 'field' },
-      el('span', { id: 'diceThresholdLabel' }, t('dice.target')), thresholdOut),
+      el('span', { 'data-i18n': 'bones.call' }), callOut),
+    callRow,
+    rangeToggle,
     statRow('bet.chance', chanceOut),
     statRow('bet.multiplier', multOut),
     statRow('bet.profit', profitOut),
+    hint,
     go,
   );
   applyAll(panel);
 
-  setKids($('#stage'), 
-    el('div', { class: 'dice-readout' },
-      el('div', { class: 'roll', id: 'diceRoll' }, '00.00'),
-      el('div', { class: 'verdict', id: 'diceVerdict' }, '')),
-    el('div', { class: 'dice-track', id: 'diceTrack' },
-      el('div', { class: 'marker', id: 'diceMarker', style: 'left:50%' })),
-    el('div', { class: 'dice-scale' },
-      el('span', {}, '0.00'), el('span', {}, '25'), el('span', {}, '50'),
-      el('span', {}, '75'), el('span', {}, '99.99')),
+  const board = el('div', { class: 'bones-board' });
+  setKids($('#stage'),
+    board,
+    el('div', { class: 'bones-verdict', id: 'bonesVerdict' }, ''),
+    el('div', { class: 'bones-paytable', id: 'bonesTable' }),
   );
+
+  // The 3D dice, or the honest fallback. `createDice` returns null rather than throwing
+  // when WebGL cannot be had, and the game stays fully playable either way — it just does
+  // not tumble.
+  if (bonesDice) { bonesDice.destroy(); bonesDice = null; }
+  bonesDice = createDice(board, { material: 'bone' });
+  if (!bonesDice) {
+    setKids(board,
+      el('div', { class: 'bones-flat' },
+        el('span', { id: 'bonesFlatA' }, '⚀'),
+        el('span', { id: 'bonesFlatB' }, '⚀')),
+      el('p', { class: 'hint', 'data-i18n': 'bones.fallbackNote' }));
+    applyAll(board);
+  }
+
+  paintBonesTable();
   infoPanel();
-  paintLevels();
   recalc();
 }
 
-function showDiceResult(out) {
-  const roll = $('#diceRoll');
-  roll.textContent = out.rollDisplay;
-  roll.className = `roll ${out.won ? 'win' : 'lose'}`;
-  $('#diceVerdict').textContent = out.won
+/** What the house holds, from whichever source has answered first. */
+const houseHolds = () => state.bonesTable?.maxWin ?? state.tokenMaxWin ?? 0;
+
+/** The glyph dice, for a browser that cannot draw the real ones. */
+function showBonesFallback(faces) {
+  const glyph = (n) => String.fromCodePoint(0x2680 + Math.max(1, Math.min(6, n)) - 1);
+  const a = $('#bonesFlatA');
+  const b = $('#bonesFlatB');
+  if (a) a.textContent = glyph(faces[0]);
+  if (b) b.textContent = glyph(faces[1]);
+}
+
+function showBonesResult(out) {
+  const v = $('#bonesVerdict');
+  if (!v) return;
+  const rolled = t('bones.rolled', { a: out.faces[0], b: out.faces[1], n: out.sum });
+  const verdict = out.won
     ? `${t('bet.won')} +${fmtShort(out.profit)} (${out.multiplier.toFixed(2)}×)`
     : `${t('bet.lost')} ${fmtShort(out.wager)}`;
-  $('#diceMarker').style.left = `${(out.roll / 9999) * 100}%`;
+  v.textContent = `${rolled} · ${verdict}`;
+  v.className = `bones-verdict ${out.won ? 'win' : 'lose'}`;
+  // A capped win that looks like a normal win is how a player learns to distrust the site.
+  if (out.capped) {
+    v.textContent += ` · ${t('bones.capped', { n: fmtShort(houseHolds()) })}`;
+  }
+}
+
+/** The whole board, so the offer is legible before it is taken. */
+async function paintBonesTable() {
+  const host = $('#bonesTable');
+  if (!host) return;
+  if (!state.bonesTable) {
+    try {
+      state.bonesTable = await api('/api/bones/table');
+    } catch { return; }
+  }
+  const rows = state.bonesTable.table || [];
+  setKids(host,
+    el('div', { class: 'bones-th' },
+      el('span', { 'data-i18n': 'bones.sum' }),
+      el('span', { 'data-i18n': 'bones.ways' }),
+      el('span', { 'data-i18n': 'bet.multiplier' })),
+    ...rows.map((r) => el('div', { class: 'bones-tr' },
+      el('span', { class: 'mono' }, String(r.sum)),
+      el('span', { class: 'mono dim' }, `${r.ways}/36`),
+      el('span', { class: 'mono' }, `${r.multiplier.toFixed(2)}×`))));
+  applyAll(host);
 }
 
 // ------------------------------------------------------------------ limbo
@@ -1720,6 +1842,7 @@ let slotFx = null;
 // drums behind them are hidden. When it is not — old hardware, a refused context — the
 // DOM drums stay and everything works as before. The game logic does not know which it
 // got, which is the point: the renderer is a skin over the same screen and stops.
+let bonesDice = null;
 let glReels = null;
 let glWatch = null;
 
@@ -3641,7 +3764,7 @@ async function claimFlag(id) {
 
 // Slots first: it is the game the site is built around and the one a new arrival should
 // land on. The rest follow in the order they were built.
-const GAMES = ['slots', 'dice', 'limbo', 'mines', 'crash', 'jigsaw', 'preferans', 'debertz', 'arcade', 'match'];
+const GAMES = ['slots', 'bones', 'limbo', 'mines', 'crash', 'jigsaw', 'preferans', 'debertz', 'arcade', 'match'];
 
 /**
  * What each game is made of.
@@ -3660,7 +3783,7 @@ const GAME_SKIN = {
   jigsaw:    { m: 'tile',   hue: 268 },  // cut card stock
   crash:     { m: 'glass',  hue: 152 },  // a line on a chart, lit from within
   limbo:     { m: 'glass',  hue: 190 },
-  dice:      { m: 'resin',  hue: 8 },    // moulded, rounded, heavy
+  bones:     { m: 'cotton', hue: 118 },  // the felt the dice land on
   preferans: { m: 'cotton', hue: 158 },  // felt table
   debertz:   { m: 'cotton', hue: 128 },
   match:     { m: 'cotton', hue: 32 },
@@ -3709,6 +3832,7 @@ function renderGame() {
   // The stage it was publishing onto is about to be replaced, so the loop has nothing
   // left to drive.
   if (state.parallax && !['slots', 'games'].includes(state.game)) { state.parallax.stop(); state.parallax = null; }
+  if (bonesDice && state.game !== 'bones') { bonesDice.destroy(); bonesDice = null; }
   if (state.game !== 'match') { stopMatchPoll(); state.matchId = null; state.board = null; }
   const nav = $('#navGames');
   // Only the hue travels up here. The bar is 45px and staying that way, so the pills get
@@ -3728,7 +3852,7 @@ function renderGame() {
   }, t(`game.${g}`))));
 
   if (state.game === 'games') renderPicker();
-  else if (state.game === 'dice') renderDice();
+  else if (state.game === 'bones') renderBones();
   else if (state.game === 'limbo') renderLimbo();
   else if (state.game === 'mines') { state.mines = null; renderMines(); loadMinesState(); }
   else if (state.game === 'slots') renderSlots();
