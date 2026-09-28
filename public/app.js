@@ -991,6 +991,41 @@ function renderMines() {
   const amount = amountControl();
   const count = el('select', {}, ...Array.from({ length: 24 }, (_, i) =>
     el('option', { value: String(i + 1), selected: i + 1 === 3 ? 'selected' : false }, String(i + 1))));
+
+  // The three Windows Minesweeper boards, as densities rather than dimensions.
+  //
+  // This grid is 5x5 and the real ones are not, so the mine COUNT cannot be copied
+  // across — 10 mines on 81 tiles is a different game from 10 on 25. What carries over
+  // is the proportion, which is what the difficulty actually is:
+  //
+  //   Beginner      9x9    10 mines   12.3%  ->  3 of 25
+  //   Intermediate  16x16  40 mines   15.6%  ->  4 of 25
+  //   Expert        30x16  99 mines   20.6%  ->  5 of 25
+  //
+  // The dropdown keeps every value from 1 to 24. These are shortcuts to three of them,
+  // not a replacement for choosing your own.
+  const PRESETS = [
+    { key: 'mines.beginner', mines: 3 },
+    { key: 'mines.intermediate', mines: 4 },
+    { key: 'mines.expert', mines: 5 },
+  ];
+  const presetBtns = PRESETS.map((p) =>
+    el('button', { class: 'tiny risk', 'data-i18n': p.key, 'data-mines': String(p.mines) }));
+  const presetRow = el('div', { class: 'risk-row' }, ...presetBtns);
+
+  // A preset is only "on" while the dropdown still says what it set. Change the number
+  // by hand and no preset is highlighted, because none of them describes it any more.
+  const markPreset = () => {
+    for (const b of presetBtns) b.classList.toggle('on', b.dataset.mines === count.value);
+  };
+  for (const b of presetBtns) {
+    b.addEventListener('click', () => {
+      count.value = b.dataset.mines;
+      markPreset();
+      refreshLadder();
+    });
+  }
+  count.addEventListener('change', markPreset);
   const nextOut = el('span', {});
   const start = el('button', { class: 'primary big', 'data-i18n': 'mines.start' });
   const cash = el('button', { class: 'big hide' });
@@ -1002,6 +1037,7 @@ function renderMines() {
     } catch { /* offline */ }
   };
   count.addEventListener('change', refreshLadder);
+  markPreset();
 
   start.addEventListener('click', async () => {
     if (!requireLogin()) return;
@@ -1037,6 +1073,7 @@ function renderMines() {
 
   setKids(panel, 
     amount.node,
+    presetRow,
     el('label', { class: 'field' }, el('span', { 'data-i18n': 'mines.count' }), count),
     statRow('mines.next', nextOut),
     start, cash,

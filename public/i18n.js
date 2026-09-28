@@ -136,6 +136,12 @@ const STRINGS = {
 
   // ---- mines
   'mines.count': { en: 'Mines', ru: 'Количество мин' },
+  // The Windows Minesweeper boards, as densities: this grid is 5x5, so the proportion
+  // carries across and the mine count cannot. Beginner 12.3%, Intermediate 15.6%,
+  // Expert 20.6% — 3, 4 and 5 mines of 25.
+  'mines.beginner': { en: 'Beginner', ru: 'Новичок' },
+  'mines.intermediate': { en: 'Intermediate', ru: 'Любитель' },
+  'mines.expert': { en: 'Expert', ru: 'Профессионал' },
   'mines.start': { en: 'Start round', ru: 'Начать раунд' },
   'mines.cashout': { en: 'Cash out {amount}', ru: 'Забрать {amount}' },
   'mines.next': { en: 'Next tile pays', ru: 'Следующая плитка' },

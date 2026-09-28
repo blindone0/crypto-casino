@@ -396,3 +396,67 @@ test('signing a stake survives a request with no body at all', () => {
   assert.ok(guard < firstRead,
     'the guard has to come before the first property read, or it does not guard anything');
 });
+
+// ---------------------------------------------------------------------------
+// The Minesweeper presets are the real Windows densities.
+//
+// This grid is 5x5 and the Windows boards are not, so the mine COUNT cannot be copied
+// across: ten mines on eighty-one tiles is a different game from ten on twenty-five.
+// What carries over is the proportion, and that is the whole claim the labels make —
+// press "Expert" and you should be playing Expert's odds, not a number someone liked.
+//
+// Pinned here because the three constants live in a click handler in app.js, where a
+// plausible-looking edit ("3, 5, 8 feels better") would silently make the labels lie.
+
+test('the mines presets match the Windows Minesweeper densities', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+
+  // The three classic boards, straight from the game.
+  const WINDOWS = [
+    { name: 'Beginner', w: 9, h: 9, mines: 10, key: 'mines.beginner' },
+    { name: 'Intermediate', w: 16, h: 16, mines: 40, key: 'mines.intermediate' },
+    { name: 'Expert', w: 30, h: 16, mines: 99, key: 'mines.expert' },
+  ];
+
+  // MINES_TILES is the server's, so a change there has to be reflected here rather than
+  // silently leaving the presets describing a board that no longer exists.
+  const { MINES_TILES } = require('../src/fair');
+  assert.strictEqual(MINES_TILES, 25, 'the preset numbers below assume a 25-tile grid');
+
+  for (const board of WINDOWS) {
+    const want = Math.round((board.mines / (board.w * board.h)) * MINES_TILES);
+
+    // Found by string search rather than a built regex: the key contains a dot, and
+    // three layers of escaping (shell, generator, regex) is how the first two attempts
+    // at this line silently matched nothing.
+    const needle = "key: '" + board.key + "', mines: ";
+    const at = src.indexOf(needle);
+    const m = at < 0 ? null : [needle, src.slice(at + needle.length).match(/^\d+/)[0]];
+    assert.ok(m, `${board.name} is not declared as a preset in app.js`);
+
+    const got = Number(m[1]);
+    assert.strictEqual(got, want,
+      `${board.name} is ${board.w}x${board.h} with ${board.mines} mines — `
+      + `${((board.mines / (board.w * board.h)) * 100).toFixed(1)}% — which on `
+      + `${MINES_TILES} tiles is ${want}, but the preset says ${got}`);
+
+    // And it must be a legal choice: the server clamps to 1..24.
+    assert.ok(got >= 1 && got <= 24, `${board.name} sets ${got} mines, outside 1..24`);
+  }
+});
+
+test('the mines presets get harder from left to right', () => {
+  // The row is colour-graded green to red by CSS nth-child, so the order in the markup
+  // IS the difficulty cue. Reordering the array without reordering the colours would
+  // put a red Beginner beside a green Expert.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const block = src.slice(src.indexOf('const PRESETS = ['));
+  const nums = [...block.slice(0, block.indexOf(']')).matchAll(/mines:\s*(\d+)/g)]
+    .map((m) => Number(m[1]));
+
+  assert.strictEqual(nums.length, 3, `expected three presets, found ${nums.length}`);
+  for (let i = 1; i < nums.length; i += 1) {
+    assert.ok(nums[i] > nums[i - 1],
+      `preset ${i} has ${nums[i]} mines, which is not more than the ${nums[i - 1]} before it`);
+  }
+});
