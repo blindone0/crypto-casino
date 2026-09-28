@@ -411,9 +411,12 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
  */
 .slot-stage {
   position: relative;
-  perspective: 1500px;
-  perspective-origin: 50% 32%;
-  padding: 10px 0 26px;
+  /* A near eye point. This is the single number that decides how three-dimensional the
+     whole thing looks: far away and a box is a rectangle, close up and you can see round
+     it. 820px against a 660px cabinet is close enough to see the sides. */
+  perspective: 820px;
+  perspective-origin: 50% 28%;
+  padding: 14px 0 34px;
 }
 .slot-cabinet {
   position: relative;
@@ -421,8 +424,7 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
   padding: 0 0 10px;
   border-radius: 18px 18px 12px 12px;
   transform-style: preserve-3d;
-  transform: rotateX(7deg);
-  /* The striped body of every one of these machines ever made. */
+  transform: rotateX(9deg);
   background:
     repeating-linear-gradient(90deg,
       #241a14 0 14px, #1b120d 14px 28px),
@@ -430,32 +432,38 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
   border: 2px solid #8a6a24;
   box-shadow:
     0 0 0 1px rgba(0,0,0,.8) inset,
-    0 26px 60px rgba(0,0,0,.65),
+    0 30px 70px rgba(0,0,0,.7),
     inset 0 2px 0 rgba(255,255,255,.08);
 }
-/* The top of the cabinet, laid flat and hinged back from the front edge. Catches the
-   light, which is most of what tells you a box is a box. */
+
+/* The top and sides of the cabinet.
+ *
+ * These were hinged the wrong way round the first time: rotateX(90deg) about the top edge
+ * swings a panel forward, not back, so the box was turned inside out and read as flat
+ * because the faces you should see receding were coming at you instead. The top goes
+ * back with -90, and each side goes back with a rotateY of the opposite sign to the edge
+ * it hangs from. */
 .cab-top {
   position: absolute; left: 0; right: 0; top: 0;
-  height: 44px;
+  height: 54px;
   transform-origin: 50% 0%;
-  transform: rotateX(90deg);
+  transform: rotateX(-90deg);
   border-radius: 18px 18px 0 0;
-  background: linear-gradient(180deg, #55401d 0%, #33260f 55%, #1d1509 100%);
-  box-shadow: inset 0 1px 0 rgba(255,228,160,.35);
+  background: linear-gradient(180deg, #6b5226 0%, #3d2d12 55%, #22190b 100%);
+  box-shadow: inset 0 1px 0 rgba(255,228,160,.4);
 }
-/* The sides, hinged out from each edge. Darker: they face away from the light. */
 .cab-side {
-  position: absolute; top: 0; bottom: 0; width: 44px;
-  background: linear-gradient(90deg, #241a0e, #120c06);
+  position: absolute; top: 0; bottom: 0; width: 54px;
+  background: linear-gradient(90deg, #2c2011, #140d06);
 }
-.cab-side.l { left: 0; transform-origin: 0% 50%; transform: rotateY(-90deg); }
-.cab-side.r { right: 0; transform-origin: 100% 50%; transform: rotateY(90deg); }
+.cab-side.l { left: 0; transform-origin: 0% 50%; transform: rotateY(90deg); }
+.cab-side.r { right: 0; transform-origin: 100% 50%; transform: rotateY(-90deg); }
 
 
 /* ------------------------------------------------------------ the marquee */
 .slot-marquee {
   position: relative;
+  transform: translateZ(14px);
   padding: 12px 16px 10px;
   text-align: center;
   border-radius: 16px 16px 0 0;
@@ -488,6 +496,7 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
 .slot-body {
   display: flex; align-items: center; gap: 10px;
   padding: 14px 12px 12px;
+  transform-style: preserve-3d;
 }
 /* The window the drums sit behind: a deep gold bezel around a dark recess. */
 .slot-window {
@@ -503,11 +512,22 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
     0 0 0 6px rgba(255, 228, 160, .22),
     inset 0 10px 26px rgba(0,0,0,.9);
 }
+/* The drums stay on the face of the cabinet.
+ *
+ * Pushing them back in Z to sit inside a recess does not work: the cabinet's own painted
+ * front is an element at z=0, so anything behind it is simply occluded by it and the
+ * window goes black. CSS cannot punch a hole through a background. The depth here comes
+ * from the bezel standing proud instead, which costs nothing and cannot hide the game.
+ */
+.slot-window {
+  transform-style: preserve-3d;
+  transform: translateZ(10px);
+}
 .slot-window > .reels { flex: 1 1 auto; min-width: 0; }
-
 /* ---------------------------------------------------------------- the arm */
 .slot-lever {
   flex: 0 0 auto;
+  transform: translateZ(26px);
   width: 34px; height: 190px;
   cursor: pointer;
   /* Hangs off the side of the cabinet, the way the real one is bolted on. */
