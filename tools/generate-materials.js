@@ -91,6 +91,25 @@ const MATERIALS = {
       + 'macro photograph, flat even diffuse lighting, no shadows, top down orthographic',
     note: 'the table the dice land on',
   },
+  // The card back. A back is the one part of a card that IS a tileable pattern, so it
+  // comes off the model like any other material. The faces are not, and are drawn below,
+  // because a model cannot be trusted to put exactly seven pips in the right places.
+  cardback: {
+    file: 'card-back',
+    prompt: 'seamless tileable ornate guilloche pattern, deep crimson red and dark '
+      + 'burgundy, fine engraved rosette lattice, symmetrical, antique Russian playing '
+      + 'card back design, intricate line engraving, flat even diffuse lighting, '
+      + 'no shadows, top down orthographic, high detail',
+    note: 'the back of every card',
+  },
+  // The stock the faces are printed on: aged, slightly uneven, not white paper.
+  cardstock: {
+    file: 'card-stock',
+    prompt: 'seamless tileable texture of aged ivory card stock paper, warm off-white, '
+      + 'very fine linen grain, subtle age toning, faint handling wear, '
+      + 'macro photograph, flat even diffuse lighting, no shadows, top down orthographic',
+    note: 'the face side of every card',
+  },
   leather: {
     file: 'cup-leather',
     prompt: 'seamless tileable texture of dark brown worn leather, '
@@ -222,7 +241,7 @@ mirror_x = off.transpose(Image.FLIP_LEFT_RIGHT)
 mirror_y = off.transpose(Image.FLIP_TOP_BOTTOM)
 
 def ramp_mask(size, horizontal, band):
-    """1 at the seam line, falling to 0 over `band` pixels either side."""
+    """1 at the seam line, falling to 0 over band pixels either side."""
     w_, h_ = size
     m = Image.new("L", (w_, h_), 0)
     px = m.load()
@@ -324,6 +343,163 @@ print(f"{atlas.size[0]}x{atlas.size[1]}")
     { encoding: 'utf8' }).trim();
 }
 
+/**
+ * The card faces, drawn rather than generated.
+ *
+ * Same reasoning as the dice pips, only more so. A generative model cannot be relied on
+ * to put exactly seven pips in the two-three-two arrangement a seven of spades has, and a
+ * card whose pip count is wrong is not a stylish card, it is a card that says the wrong
+ * thing — in a game where reading it correctly is the whole activity. So the arithmetic
+ * places every pip and index, and the model only supplies the stock it is printed on.
+ *
+ * Output is one atlas: 8 ranks across by 4 suits down. The renderer picks a card by its
+ * (rank, suit) offset, exactly as the dice pick a face out of their pip atlas.
+ *
+ * The deck is the Russian short deck both games use: 7 8 9 10 J Q K A in four suits.
+ *
+ * NOTE: no backticks anywhere below. This whole string is a JS template literal, and a
+ * backtick inside it ends the string and turns the rest of the Python into JavaScript.
+ */
+function cards(outPath, cell = 256) {
+  const script = `
+import sys
+from PIL import Image, ImageDraw, ImageFont
+
+out, cell = sys.argv[1], int(sys.argv[2])
+
+RANKS = ["7", "8", "9", "10", "J", "Q", "K", "A"]
+SUITS = ["S", "C", "D", "H"]
+RED = (168, 22, 41)
+BLACK = (24, 20, 18)
+
+# Where the pips sit, as fractions of the face. These are the standard arrangements every
+# deck uses, written out because they are not derivable: a seven is not "a six plus one in
+# the middle", it is its own layout.
+COL_L, COL_M, COL_R = 0.30, 0.50, 0.70
+def row(t): return 0.18 + t * 0.64
+
+PIPS = {
+    "7": [(COL_L, row(0)), (COL_R, row(0)), (COL_M, row(0.25)),
+          (COL_L, row(0.5)), (COL_R, row(0.5)), (COL_L, row(1)), (COL_R, row(1))],
+    "8": [(COL_L, row(0)), (COL_R, row(0)), (COL_M, row(0.25)),
+          (COL_L, row(0.5)), (COL_R, row(0.5)), (COL_M, row(0.75)),
+          (COL_L, row(1)), (COL_R, row(1))],
+    "9": [(COL_L, row(0)), (COL_R, row(0)), (COL_L, row(0.33)), (COL_R, row(0.33)),
+          (COL_M, row(0.5)),
+          (COL_L, row(0.67)), (COL_R, row(0.67)), (COL_L, row(1)), (COL_R, row(1))],
+    "10": [(COL_L, row(0)), (COL_R, row(0)), (COL_M, row(0.17)),
+           (COL_L, row(0.33)), (COL_R, row(0.33)),
+           (COL_L, row(0.67)), (COL_R, row(0.67)), (COL_M, row(0.83)),
+           (COL_L, row(1)), (COL_R, row(1))],
+    "A": [(COL_M, 0.5)],
+}
+
+def suit_path(d, cx, cy, r, colour, kind):
+    """One pip, from primitives. No font: a glyph depends on what is installed."""
+    if kind == "D":
+        d.polygon([(cx, cy - r), (cx + r * 0.72, cy), (cx, cy + r), (cx - r * 0.72, cy)],
+                  fill=colour)
+        return
+    if kind == "H":
+        d.ellipse([cx - r * 0.78, cy - r * 0.9, cx - r * 0.02, cy + r * 0.05], fill=colour)
+        d.ellipse([cx + r * 0.02, cy - r * 0.9, cx + r * 0.78, cy + r * 0.05], fill=colour)
+        d.polygon([(cx - r * 0.78, cy - r * 0.28), (cx + r * 0.78, cy - r * 0.28),
+                   (cx, cy + r)], fill=colour)
+        return
+    if kind == "S":
+        # A spade is a heart upside down, with a stem.
+        d.ellipse([cx - r * 0.78, cy - r * 0.05, cx - r * 0.02, cy + r * 0.85], fill=colour)
+        d.ellipse([cx + r * 0.02, cy - r * 0.05, cx + r * 0.78, cy + r * 0.85], fill=colour)
+        d.polygon([(cx - r * 0.78, cy + r * 0.28), (cx + r * 0.78, cy + r * 0.28),
+                   (cx, cy - r)], fill=colour)
+        d.polygon([(cx - r * 0.30, cy + r), (cx + r * 0.30, cy + r),
+                   (cx + r * 0.10, cy + r * 0.45), (cx - r * 0.10, cy + r * 0.45)],
+                  fill=colour)
+        return
+    lobe = r * 0.46
+    d.ellipse([cx - lobe, cy - r * 0.92, cx + lobe, cy - r * 0.92 + lobe * 2], fill=colour)
+    d.ellipse([cx - r * 0.92, cy - r * 0.10,
+               cx - r * 0.92 + lobe * 2, cy - r * 0.10 + lobe * 2], fill=colour)
+    d.ellipse([cx + r * 0.92 - lobe * 2, cy - r * 0.10,
+               cx + r * 0.92, cy - r * 0.10 + lobe * 2], fill=colour)
+    d.polygon([(cx - r * 0.32, cy + r), (cx + r * 0.32, cy + r),
+               (cx + r * 0.10, cy + r * 0.30), (cx - r * 0.10, cy + r * 0.30)], fill=colour)
+
+def court(d, w, h, colour):
+    """
+    A court card as a panel rather than a portrait.
+
+    Drawing a credible Russian king at this size with primitives is not achievable, and a
+    bad one is worse than none. A real court card is two rotationally symmetric halves
+    anyway, so this is a bordered panel split down the middle. It reads as a court card at
+    a glance, which is what the game needs of it.
+    """
+    m = w * 0.16
+    d.rounded_rectangle([m, m, w - m, h - m], radius=w * 0.05, outline=colour,
+                        width=max(2, int(w * 0.018)))
+    d.rounded_rectangle([m * 1.35, m * 1.35, w - m * 1.35, h - m * 1.35],
+                        radius=w * 0.04, outline=colour, width=max(1, int(w * 0.008)))
+    d.line([m * 1.6, h / 2, w - m * 1.6, h / 2], fill=colour, width=max(1, int(w * 0.008)))
+
+SS = 3
+aw, ah = cell, int(cell * 1.4)
+atlas = Image.new("RGBA", (aw * len(RANKS), ah * len(SUITS)), (0, 0, 0, 0))
+
+def font_at(px):
+    for name in ("georgia.ttf", "times.ttf", "arial.ttf", "DejaVuSerif.ttf"):
+        try:
+            return ImageFont.truetype(name, px)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+for si, suit in enumerate(SUITS):
+    colour = RED if suit in ("D", "H") else BLACK
+    for ri, rank in enumerate(RANKS):
+        w, h = aw * SS, ah * SS
+        face = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        d = ImageDraw.Draw(face)
+
+        # THE BODY FIRST, while d still refers to face.
+        #
+        # The first version drew the indices first, and each index composite rebinds face
+        # to a NEW image. The ImageDraw handle taken beforehand kept pointing at the
+        # original, so every pip drawn afterwards went onto an orphan nothing pasted. The
+        # deck came out with corner indices and blank middles. Drawing the body before any
+        # compositing removes the hazard instead of working around it.
+        if rank in ("J", "Q", "K"):
+            court(d, w, h, colour)
+            fb = font_at(int(cell * 0.62) * SS)
+            bbox = d.textbbox((0, 0), rank, font=fb)
+            d.text(((w - (bbox[2] - bbox[0])) / 2, (h - (bbox[3] - bbox[1])) / 2 - h * 0.06),
+                   rank, font=fb, fill=colour)
+        else:
+            r = w * 0.085
+            for (fx, fy) in PIPS[rank]:
+                cx, cy = w * fx, h * fy
+                suit_path(d, cx, cy, w * 0.20 if rank == "A" else r, colour, suit)
+
+        # Then the index, top-left and again bottom-right upside down.
+        f = font_at(int(cell * 0.24) * SS)
+        for corner in (0, 1):
+            layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            dl = ImageDraw.Draw(layer)
+            dl.text((w * 0.07, h * 0.035), rank, font=f, fill=colour)
+            suit_path(dl, w * 0.115, h * 0.175, w * 0.040, colour, suit)
+            if corner:
+                layer = layer.rotate(180)
+            face = Image.alpha_composite(face, layer)
+
+        face = face.resize((aw, ah), Image.LANCZOS)
+        atlas.paste(face, (ri * aw, si * ah))
+
+atlas.save(out, "PNG", optimize=True)
+print(str(atlas.size[0]) + "x" + str(atlas.size[1]))
+`;
+  return execFileSync(python(), ['-c', script, outPath, String(cell)],
+    { encoding: 'utf8' }).trim();
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const go = args.includes('--yes');
@@ -369,6 +545,15 @@ async function main() {
 
   // The pips first: they need no GPU and prove the Python side works before spending
   // four minutes of rendering to find out it does not.
+  process.stdout.write('  cards     ');
+  try {
+    console.log(`ok  ${cards(path.join(out, 'card-faces.png'))}`);
+  } catch (e) {
+    console.log('FAILED  ' + String(e.message).split('\n')[0]);
+    process.exitCode = 1;
+    return;
+  }
+
   process.stdout.write('  pips      ');
   try {
     const size = pips(path.join(out, 'dice-pips.png'));
