@@ -698,7 +698,14 @@ function build(cfg) {
       if (fs.existsSync(file)) {
         const pack = JSON.parse(fs.readFileSync(file, 'utf8'));
         for (const [key, pic] of Object.entries(pack.pictures || {})) {
-          picturePack.pictures[key] = `data:${pic.mime};base64,${pic.data}`;
+          // Two shapes, because a pack imported before the pictures moved to files still
+          // carries its data inline. `file` is the current form — a URL the browser
+          // fetches like any other image, so it is cached, revalidated by ETag and not
+          // parsed into this process at all. `data` is the old form, kept working rather
+          // than stranding anyone who has not run tools/puzzle-unpack.js.
+          picturePack.pictures[key] = pic.file
+            ? `/pictures/${pic.file}`
+            : `data:${pic.mime};base64,${pic.data}`;
         }
       }
     } catch { /* no pack; the drawn pictures stand alone */ }

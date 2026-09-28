@@ -1,4 +1,244 @@
 {
-  "_comment": "The 8.1MB base64 picture pack that used to be here was removed from git history. The pictures are files under public/pictures/, and this file is a manifest of them. See the commit 'Ship the jigsaw pictures as files instead of base64'.",
-  "pictures": {}
+  "pictures": {
+    "own-gen-001-1": {
+      "name": "gen-001-1.jpg",
+      "file": "own-gen-001-1.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-001-2": {
+      "name": "gen-001-2.jpg",
+      "file": "own-gen-001-2.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-001-3": {
+      "name": "gen-001-3.jpg",
+      "file": "own-gen-001-3.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-001-4": {
+      "name": "gen-001-4.jpg",
+      "file": "own-gen-001-4.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-001-5": {
+      "name": "gen-001-5.jpg",
+      "file": "own-gen-001-5.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-001-6": {
+      "name": "gen-001-6.jpg",
+      "file": "own-gen-001-6.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-002-1": {
+      "name": "gen-002-1.jpg",
+      "file": "own-gen-002-1.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-002-2": {
+      "name": "gen-002-2.jpg",
+      "file": "own-gen-002-2.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-002-3": {
+      "name": "gen-002-3.jpg",
+      "file": "own-gen-002-3.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-002-4": {
+      "name": "gen-002-4.jpg",
+      "file": "own-gen-002-4.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-002-5": {
+      "name": "gen-002-5.jpg",
+      "file": "own-gen-002-5.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-002-6": {
+      "name": "gen-002-6.jpg",
+      "file": "own-gen-002-6.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-003-1": {
+      "name": "gen-003-1.jpg",
+      "file": "own-gen-003-1.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-003-2": {
+      "name": "gen-003-2.jpg",
+      "file": "own-gen-003-2.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-003-3": {
+      "name": "gen-003-3.jpg",
+      "file": "own-gen-003-3.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-003-4": {
+      "name": "gen-003-4.jpg",
+      "file": "own-gen-003-4.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-003-5": {
+      "name": "gen-003-5.jpg",
+      "file": "own-gen-003-5.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-003-6": {
+      "name": "gen-003-6.jpg",
+      "file": "own-gen-003-6.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-004-1": {
+      "name": "gen-004-1.jpg",
+      "file": "own-gen-004-1.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-004-2": {
+      "name": "gen-004-2.jpg",
+      "file": "own-gen-004-2.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-004-3": {
+      "name": "gen-004-3.jpg",
+      "file": "own-gen-004-3.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-004-4": {
+      "name": "gen-004-4.jpg",
+      "file": "own-gen-004-4.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-004-5": {
+      "name": "gen-004-5.jpg",
+      "file": "own-gen-004-5.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-004-6": {
+      "name": "gen-004-6.jpg",
+      "file": "own-gen-004-6.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-005-1": {
+      "name": "gen-005-1.jpg",
+      "file": "own-gen-005-1.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-005-2": {
+      "name": "gen-005-2.jpg",
+      "file": "own-gen-005-2.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-005-3": {
+      "name": "gen-005-3.jpg",
+      "file": "own-gen-005-3.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-005-4": {
+      "name": "gen-005-4.jpg",
+      "file": "own-gen-005-4.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-005-5": {
+      "name": "gen-005-5.jpg",
+      "file": "own-gen-005-5.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-005-6": {
+      "name": "gen-005-6.jpg",
+      "file": "own-gen-005-6.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-006-1": {
+      "name": "gen-006-1.jpg",
+      "file": "own-gen-006-1.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-006-2": {
+      "name": "gen-006-2.jpg",
+      "file": "own-gen-006-2.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-006-3": {
+      "name": "gen-006-3.jpg",
+      "file": "own-gen-006-3.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-006-4": {
+      "name": "gen-006-4.jpg",
+      "file": "own-gen-006-4.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-006-5": {
+      "name": "gen-006-5.jpg",
+      "file": "own-gen-006-5.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-006-6": {
+      "name": "gen-006-6.jpg",
+      "file": "own-gen-006-6.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-007-1": {
+      "name": "gen-007-1.jpg",
+      "file": "own-gen-007-1.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-007-2": {
+      "name": "gen-007-2.jpg",
+      "file": "own-gen-007-2.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-007-3": {
+      "name": "gen-007-3.jpg",
+      "file": "own-gen-007-3.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-007-4": {
+      "name": "gen-007-4.jpg",
+      "file": "own-gen-007-4.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-007-5": {
+      "name": "gen-007-5.jpg",
+      "file": "own-gen-007-5.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-007-6": {
+      "name": "gen-007-6.jpg",
+      "file": "own-gen-007-6.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-008-1": {
+      "name": "gen-008-1.jpg",
+      "file": "own-gen-008-1.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-008-2": {
+      "name": "gen-008-2.jpg",
+      "file": "own-gen-008-2.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-008-3": {
+      "name": "gen-008-3.jpg",
+      "file": "own-gen-008-3.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-008-4": {
+      "name": "gen-008-4.jpg",
+      "file": "own-gen-008-4.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-008-5": {
+      "name": "gen-008-5.jpg",
+      "file": "own-gen-008-5.jpg",
+      "mime": "image/jpeg"
+    },
+    "own-gen-008-6": {
+      "name": "gen-008-6.jpg",
+      "file": "own-gen-008-6.jpg",
+      "mime": "image/jpeg"
+    }
+  }
 }
