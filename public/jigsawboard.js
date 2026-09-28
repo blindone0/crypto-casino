@@ -216,7 +216,13 @@ export function board(host, {
    * is what keeps the clip path and the art in register.
    */
   function layoutTray() {
-    const avail = Math.max(60, tray.clientWidth - 18);          // minus the padding
+    // The column count has to be worked out in the units the SVG is finally sized in, or
+    // it disagrees with itself by the padding. Measured across every plausible tray width,
+    // the naive version overflowed by 2px at exactly one of them — which is the kind of
+    // thing that is invisible until it is a horizontal scrollbar on somebody's tablet.
+    const unit = trayPx / cellW;                 // screen px per board unit
+    const frame = TRAY_PAD * 2 * unit;           // the tabs' overhang, in screen px
+    const avail = Math.max(trayPx, tray.clientWidth - 18 - frame);
     const cols_ = Math.max(1, Math.floor(avail / trayPx));
     const rows_ = Math.ceil(trayOrder.length / cols_) || 1;
 
@@ -228,7 +234,6 @@ export function board(host, {
     // One board unit is `trayPx / cellW` screen pixels, and the root is sized in screen
     // pixels so the browser scales the viewBox to exactly that. Mixing the two units is
     // what made a 1176-unit viewBox render 210px wide with everything on top of itself.
-    const unit = trayPx / cellW;
     traySvg.setAttribute('width', Math.round((cols_ * cellW + TRAY_PAD * 2) * unit));
     traySvg.setAttribute('height', Math.round((rows_ * cellH + TRAY_PAD * 2) * unit));
 

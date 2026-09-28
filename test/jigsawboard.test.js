@@ -193,3 +193,74 @@ test('the arrangement it hands the server is slot -> piece', () => {
   m.place(2, 0);
   assert.deepStrictEqual(m.arrangement(), [2, 0, 1, null]);
 });
+
+// ---------------------------------------------------------------------------
+// The tray's grid, which is arithmetic and therefore testable without a browser.
+
+/**
+ * `layoutTray`'s column maths, extracted from `public/jigsawboard.js`.
+ *
+ * The tray is one SVG holding every piece rather than one SVG per piece — a memory
+ * decision: a root per piece carried its own copy of the picture's data URI and a
+ * 400-piece board came to 65MB of markup. The cost of that is this: an SVG grid does not
+ * reflow by itself, so the column count is computed here, in two different unit systems
+ * at once. Board units for the viewBox, screen pixels for the element. Mixing them is
+ * exactly the bug this guards.
+ */
+function trayLayout({ pieces, cellW = 100, trayWidth }) {
+  const trayPad = cellW * 0.34;
+  const trayPx = Math.max(26, Math.round(300 / Math.sqrt(pieces)));
+  const unit = trayPx / cellW;
+  const frame = trayPad * 2 * unit;
+  const avail = Math.max(trayPx, trayWidth - 18 - frame);
+  const cols = Math.max(1, Math.floor(avail / trayPx));
+  const rows = Math.ceil(pieces / cols) || 1;
+  return {
+    cols,
+    rows,
+    trayPx,
+    width: Math.round((cols * cellW + trayPad * 2) * unit),
+    height: Math.round((rows * cellW + trayPad * 2) * unit),
+  };
+}
+
+test('the tray fits its container at every width a screen actually has', () => {
+  // A tray wider than its box is a horizontal scrollbar, and the page is supposed never
+  // to scroll sideways. The first version of this overflowed by 2px at exactly one width
+  // out of eleven — 768px, an iPad — because the padding was subtracted in screen pixels
+  // and added back in board units.
+  for (const pieces of [100, 225, 400]) {
+    for (const trayWidth of [200, 239, 320, 360, 390, 414, 500, 640, 768, 820, 900, 1024, 1200, 1440]) {
+      const out = trayLayout({ pieces, trayWidth });
+      assert.ok(out.width <= trayWidth,
+        `${pieces} pieces in a ${trayWidth}px tray needs ${out.width}px`);
+      assert.ok(out.cols >= 1 && out.rows >= 1);
+      assert.ok(out.cols * out.rows >= pieces,
+        `the grid holds ${out.cols * out.rows} cells for ${pieces} pieces`);
+    }
+  }
+});
+
+test('every piece gets its own cell, and the grid grows as the tray narrows', () => {
+  const wide = trayLayout({ pieces: 100, trayWidth: 900 });
+  const narrow = trayLayout({ pieces: 100, trayWidth: 320 });
+  assert.ok(wide.cols > narrow.cols, 'a wider tray takes more columns');
+  assert.ok(narrow.rows > wide.rows, 'and a narrower one is taller');
+
+  // No two pieces may land in one cell: that is a piece you cannot see or pick up.
+  for (const { cols } of [wide, narrow]) {
+    const cells = new Set();
+    for (let i = 0; i < 100; i += 1) cells.add(`${i % cols},${Math.floor(i / cols)}`);
+    assert.strictEqual(cells.size, 100);
+  }
+});
+
+test('a big board shrinks its pieces rather than growing a corridor', () => {
+  // 400 pieces at the 100-piece size is a tray 130 rows deep, which is not a tray. The
+  // size falls with the count and stops at 26px, below which a piece is a speck.
+  const small = trayLayout({ pieces: 100, trayWidth: 390 });
+  const big = trayLayout({ pieces: 400, trayWidth: 390 });
+  assert.ok(big.trayPx < small.trayPx, 'a bigger board uses smaller tray pieces');
+  assert.ok(big.trayPx >= 26, 'but never smaller than a finger can find');
+  assert.ok(big.rows < 40, `400 pieces would need ${big.rows} rows`);
+});
