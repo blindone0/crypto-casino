@@ -16,6 +16,7 @@ const adminApi = require('./admin');
 const bankMod = require('./bank');
 const tokenchain = require('./tokenchain');
 const solo = require('./solo');
+const jigsaw = require('./games/jigsaw');
 const arcade = require('./arcade');
 // Named `matches`, not `match`: build() declares its own local `match(method, pathname)`
 // for route lookup, and a function declaration shadows the module import inside it.
@@ -465,6 +466,29 @@ function build(cfg) {
     const user = requireUser(ctx);
     return { bet: crash.myBet(user) };
   });
+
+  // ---------------------------------------------------------------- jigsaw
+  //
+  // A skill game, so the clock lives on this side of the wire and the finish is verified
+  // rather than reported. `solve` takes the arrangement and checks it; nothing the client
+  // says about its own timing is used.
+  add('POST', '/api/bet/jigsaw/start', async (ctx, req) => {
+    checkCsrf(req, ctx);
+    const body = await U.readJsonBody(req);
+    return jigsaw.start(gameCtx(ctx, body.spend), body);
+  });
+
+  add('POST', '/api/bet/jigsaw/solve', async (ctx, req) => {
+    checkCsrf(req, ctx);
+    return jigsaw.solve(gameCtx(ctx), await U.readJsonBody(req));
+  });
+
+  add('POST', '/api/bet/jigsaw/give', async (ctx, req) => {
+    checkCsrf(req, ctx);
+    return jigsaw.give(gameCtx(ctx));
+  });
+
+  add('GET', '/api/bet/jigsaw/current', async (ctx) => jigsaw.current(gameCtx(ctx)));
 
   // ----------------------------------------------------------- singleplayer
   //

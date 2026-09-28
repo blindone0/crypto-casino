@@ -117,6 +117,46 @@ const STEPS = [
       `);
     },
   },
+  {
+    id: 4,
+    name: 'jigsaw_games',
+    /**
+     * The drag-to-assemble jigsaw, which is a skill game and therefore needs a clock the
+     * player cannot touch.
+     *
+     * `started_at` is the only reason this is a table rather than a client-side toy.
+     * Anyone who keeps dragging finishes eventually, so the payout can only depend on how
+     * fast — and a time the browser reports is a time the browser can invent. It is
+     * written when the round opens and read when it closes, both on the server.
+     *
+     * `scramble` is stored rather than recomputed so the round survives a restart, and it
+     * is derived from the seed, so replaying the seed reproduces the exact board played.
+     */
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS jigsaw_games (
+          id          INTEGER PRIMARY KEY,
+          user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          wager       INTEGER NOT NULL,
+          board       TEXT NOT NULL,
+          picture     TEXT NOT NULL,
+          scramble    TEXT NOT NULL,
+          seed_id     INTEGER REFERENCES server_seeds(id),
+          nonce       INTEGER NOT NULL,
+          client_seed TEXT NOT NULL,
+          state       TEXT NOT NULL DEFAULT 'active',
+          seconds     INTEGER,
+          multiplier  REAL,
+          payout      INTEGER,
+          started_at  INTEGER NOT NULL,
+          created_at  INTEGER NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_jigsaw_live
+          ON jigsaw_games(user_id) WHERE state = 'active';
+        CREATE INDEX IF NOT EXISTS ix_jigsaw_user ON jigsaw_games(user_id, id DESC);
+      `);
+    },
+  },
 ];
 
 const latest = (steps = STEPS) => steps.reduce((n, s) => Math.max(n, s.id), 0);
