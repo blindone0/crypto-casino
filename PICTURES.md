@@ -29,18 +29,35 @@ difference in output is not subtle. Illustrious or NoobAI is the sensible defaul
 They all need a VAE alongside the checkpoint (`sdxl_vae.safetensors`), or colours come out
 washed and grey.
 
-## What to install
+## What is installed on this machine
 
-**ComfyUI** is the one to use here. It is a portable download rather than an install, it
-batches without fuss, and batching is what you want — a puzzle pool wants fifty pictures,
-not one.
+**ComfyUI, at `D:\ai\comfyui`.** Installed 2026-09-28. There is a **ComfyUI shortcut on
+the desktop** that starts it and opens the browser at <http://127.0.0.1:8188>.
 
-1. Get the portable Windows build from the ComfyUI releases page.
-2. Unzip it somewhere with room; the models are several GB each.
-3. Put the model file in `ComfyUI/models/checkpoints/`.
-4. Run `run_nvidia_gpu.bat`.
+Not the portable build — that ships as a `.7z` and there is no 7-Zip here. It is a git
+clone running against a virtual environment built on the system Python 3.11.9:
 
-A1111 or Forge will do the same job with a friendlier interface if you prefer one.
+```
+D:\ai\comfyui\
+  venv\                     Python 3.11.9 + torch 2.6.0+cu124
+  models\checkpoints\       animagine-xl-4.0.safetensors
+  start-comfyui.bat         what the desktop shortcut runs
+```
+
+`torch.cuda.is_available()` returns true and reports the RTX 4080, so it is on the GPU
+rather than quietly falling back to the CPU — worth re-checking if generation is ever
+absurdly slow, because that is what a CPU fallback looks like:
+
+```bash
+D:\ai\comfyui\venv\Scripts\python.exe -c "import torch; print(torch.cuda.get_device_name(0))"
+```
+
+The model is **Animagine XL 4.0** from Cagliostro Lab, pulled from HuggingFace. It is an
+anime SDXL checkpoint, ungated, ~6.5GB. Nothing talks to the internet once it is down:
+the server binds to 127.0.0.1 and the card does the work.
+
+To add another checkpoint later, drop the `.safetensors` in `models\checkpoints\` and
+restart. A1111 or Forge would do the same job with a friendlier interface.
 
 ## Output settings that matter here
 
