@@ -1353,7 +1353,11 @@ async function renderSlots() {
 
   setKids($('#stage'),
     el('div', { class: 'slot-banner', id: 'slotBanner' }, ''),
-    el('div', { class: 'slot-cabinet' },
+    el('div', { class: 'slot-stage' },
+      el('div', { class: 'slot-cabinet' },
+      el('div', { class: 'cab-top' }),
+      el('div', { class: 'cab-side l' }),
+      el('div', { class: 'cab-side r' }),
       el('div', { class: 'slot-marquee' },
         el('span', { class: 'mq-top' }, 'CASINO'),
         el('span', { class: 'mq-main' }, (state.cfg?.siteName || 'NULLSTAKE').toUpperCase()),
@@ -1363,7 +1367,7 @@ async function renderSlots() {
           el('div', { class: 'reels', id: 'reels' })),
         slotLever()),
       el('div', { class: 'slot-base' },
-        el('div', { class: 'slot-tray' }))),
+        el('div', { class: 'slot-tray' })))),
   );
 
   if (!slotInfo) {

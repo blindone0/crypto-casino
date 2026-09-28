@@ -399,11 +399,29 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
 
 /* ----------------------------------------------------------------- slots */
 /* The cabinet: a dark inset well with a gold bezel, sitting on felt. */
+/* The machine is an object in a room, not a picture of one.
+ *
+ * The drums were already turning in 3D inside a cabinet that was flat, which is an odd
+ * combination: the parts had depth and the thing containing them did not. So the cabinet
+ * is a solid now — a front, a top and two sides, tipped back a few degrees so you are
+ * looking slightly down at it the way you would at a machine on a floor.
+ *
+ * The tilt is deliberately small. Past about eight degrees the symbols start to shear and
+ * the paylines stop reading, and a slot you cannot read is worse than a flat one.
+ */
+.slot-stage {
+  position: relative;
+  perspective: 1500px;
+  perspective-origin: 50% 32%;
+  padding: 10px 0 26px;
+}
 .slot-cabinet {
   position: relative;
   max-width: 660px; margin: 0 auto; width: 100%;
   padding: 0 0 10px;
   border-radius: 18px 18px 12px 12px;
+  transform-style: preserve-3d;
+  transform: rotateX(7deg);
   /* The striped body of every one of these machines ever made. */
   background:
     repeating-linear-gradient(90deg,
@@ -415,6 +433,25 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
     0 26px 60px rgba(0,0,0,.65),
     inset 0 2px 0 rgba(255,255,255,.08);
 }
+/* The top of the cabinet, laid flat and hinged back from the front edge. Catches the
+   light, which is most of what tells you a box is a box. */
+.cab-top {
+  position: absolute; left: 0; right: 0; top: 0;
+  height: 44px;
+  transform-origin: 50% 0%;
+  transform: rotateX(90deg);
+  border-radius: 18px 18px 0 0;
+  background: linear-gradient(180deg, #55401d 0%, #33260f 55%, #1d1509 100%);
+  box-shadow: inset 0 1px 0 rgba(255,228,160,.35);
+}
+/* The sides, hinged out from each edge. Darker: they face away from the light. */
+.cab-side {
+  position: absolute; top: 0; bottom: 0; width: 44px;
+  background: linear-gradient(90deg, #241a0e, #120c06);
+}
+.cab-side.l { left: 0; transform-origin: 0% 50%; transform: rotateY(-90deg); }
+.cab-side.r { right: 0; transform-origin: 100% 50%; transform: rotateY(90deg); }
+
 
 /* ------------------------------------------------------------ the marquee */
 .slot-marquee {

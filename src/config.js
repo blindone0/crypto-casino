@@ -68,6 +68,16 @@ const DEFAULTS = {
   // a message in a browser that may already be gone. Override with CASINO_LOG.
   logLevel: 'info',
 
+  // ---- LOGGING ----------------------------------------------------------
+  // quiet  only server faults, which is what a production log should be
+  // info   every refused request too: method, path, status and the reason
+  // debug  every request, with timing
+  //
+  // Refused requests are the ones worth seeing while building. A 400 is the server
+  // telling a client it did something wrong, and with no log of it the only evidence is
+  // a message in a browser that may already be gone. Override with CASINO_LOG.
+  logLevel: 'info',
+
   // ---- SITE TOKEN -------------------------------------------------------
   // A hash-linked, signed ledger that any player can verify in their browser. Balances
   // are controlled by keys derived from a word phrase the player holds, so the operator
@@ -324,6 +334,7 @@ function load() {
   if (process.env.CASINO_PUBLIC_URL) cfg.publicUrl = process.env.CASINO_PUBLIC_URL;
   if (process.env.CASINO_ADMIN_TOKEN) cfg.adminToken = process.env.CASINO_ADMIN_TOKEN;
   if (process.env.CASINO_DB) cfg.dbFile = process.env.CASINO_DB;
+  if (process.env.CASINO_LOG) cfg.logLevel = String(process.env.CASINO_LOG).toLowerCase();
   if (process.env.CASINO_LOG) cfg.logLevel = String(process.env.CASINO_LOG).toLowerCase();
   if (process.env.CASINO_TRUST_PROXY) cfg.trustProxy = process.env.CASINO_TRUST_PROXY === '1';
   if (process.env.CASINO_SECURE_COOKIES) cfg.secureCookies = process.env.CASINO_SECURE_COOKIES === '1';
