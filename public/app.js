@@ -2439,6 +2439,7 @@ function showGameOver(game, score, result) {
 const MATCH_BOARDS = {
   chess: () => import('./games/chessboard.js'),
   seabattle: () => import('./games/seabattleboard.js'),
+  balda: () => import('./games/baldaboard.js'),
 };
 
 /** Poll while a match is live. Matches are turn-based, so a socket would be overkill. */
@@ -2663,7 +2664,7 @@ function paintMatch(view) {
       el('span', { class: 'v' }, matchStatusText(view))),
     view.game === 'chess'
       ? el('div', { class: 'movelist' }, ...pairMoves(view.view.san || []))
-      : el('div', { class: 'movelist' }, ...shotLog(view)),
+      : el('div', { class: 'movelist' }, ...eventLog(view)),
     view.status === 'playing' && mine
       ? el('button', {
         class: 'big', style: 'margin-top:10px',
@@ -2708,13 +2709,29 @@ function matchStatusText(view) {
   return `${t(`match.${outcome}`)} — ${t(`match.why.${view.reason}`, {}) || view.reason}`;
 }
 
-/** The shot log, newest first, for the games that have shots rather than moves. */
-function shotLog(view) {
-  const rows = (view.view.log || []).slice().reverse();
-  return rows.map((entry) => el('div', {},
-    el('span', { class: 'k' }, entry.seat === view.seat ? '\u2794' : '\u2190'),
-    el('span', {}, cellName(entry.cell, view.view.size || 10)),
-    el('span', { class: entry.outcome === 'miss' ? '' : 'pos' }, t(`match.shot.${entry.outcome}`))));
+/**
+ * What happened, newest first, for the games that have events rather than moves.
+ *
+ * One renderer for both, because a shot and a claimed word are the same shape on screen:
+ * who did it, what they did, and what it was worth.
+ */
+function eventLog(view) {
+  const mark = (seat) => (seat === view.seat ? '\u2794' : '\u2190');
+  const row = (seat, what, worth, cls) => el('div', {},
+    el('span', { class: 'k' }, mark(seat)),
+    el('span', {}, what),
+    el('span', { class: cls || '' }, worth));
+
+  return (view.view.log || []).slice().reverse().map((entry) => {
+    if (entry.pass) return row(entry.seat, t('match.passed'), '');
+    if (entry.word) return row(entry.seat, entry.word, `+${entry.score}`, 'pos');
+    return row(
+      entry.seat,
+      cellName(entry.cell, view.view.size || 10),
+      t(`match.shot.${entry.outcome}`),
+      entry.outcome === 'miss' ? '' : 'pos',
+    );
+  });
 }
 
 const SEA_LETTERS = '\u0410\u0411\u0412\u0413\u0414\u0415\u0416\u0417\u0418\u041a';
