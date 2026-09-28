@@ -1,0 +1,154 @@
+'use strict';
+// The shared WebGL helpers: the maths, and the two traps.
+//
+// `public/gl.js` exists because slot3d.js and dice3d.js independently grew the same five
+// helpers, and the card renderer was about to make it three. Extracting them is a
+// refactor of working, shipped code — the slots in particular are the game the site is
+// built around and have no browser tests at all.
+//
+// So the numbers below were captured from the COMMITTED slot3d.js before anything moved,
+// and they are the only thing standing between a tidy-up and a silently broken camera.
+// If a future change to the matrix code alters any of them, that change is wrong until
+// proven otherwise.
+
+const test = require('node:test');
+const assert = require('node:assert');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+// An ES module in a CommonJS package: copy to .mjs and import, the same trick
+// test/client.test.js uses for i18n.js. Nothing here touches `document` at import time.
+const load = (async () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'public', 'gl.js'), 'utf8');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gl-'));
+  const file = path.join(dir, 'gl.mjs');
+  fs.writeFileSync(file, src);
+  return import(`file://${file.replace(/\\/g, '/')}`);
+})();
+
+// Float32Array, not Float64: every matrix here is 32-bit, so equality is to about seven
+// significant figures and no tighter. A test that demands 1e-9 of a float32 is testing
+// the storage type, not the arithmetic.
+const near = (a, b, tol = 1e-6) => Math.abs(a - b) <= tol;
+
+// ---------------------------------------------------------------------------
+
+test('perspective produces exactly what the slots have always been drawn with', async () => {
+  const { perspective } = await load;
+
+  // Captured from the committed slot3d.js. The slots have no browser test, so this is
+  // the guard: if the camera changes, the reels are in the wrong place and nothing else
+  // would say so.
+  const golden = [
+    1.7560153002, 0, 0, 0,
+    0, 3.1218049782, 0, 0,
+    0, 0, -1.0050125313, -1,
+    0, 0, -0.2005012531, 0,
+  ];
+  const got = perspective(0.62, 16 / 9, 0.1, 40);
+  assert.strictEqual(got.length, 16);
+  golden.forEach((want, i) => {
+    assert.ok(near(got[i], want, 1e-7),
+      `element ${i}: got ${got[i]}, the slots expect ${want}`);
+  });
+});
+
+test('perspective produces what the dice are drawn with', async () => {
+  const { perspective } = await load;
+  const golden = [
+    1.6480237939, 0, 0, 0,
+    0, 2.6567280127, 0, 0,
+    0, 0, -1.0033388982, -1,
+    0, 0, -0.2003338898, 0,
+  ];
+  const got = perspective(0.72, 1496 / 928, 0.1, 60);
+  golden.forEach((want, i) => {
+    assert.ok(near(got[i], want, 1e-7), `element ${i}: got ${got[i]}, expected ${want}`);
+  });
+});
+
+test('multiply is column major and leaves identity alone', async () => {
+  const { multiply, identity, translation } = await load;
+
+  const t = translation(1, 2, 3);
+  const viaLeft = multiply(identity(), t);
+  const viaRight = multiply(t, identity());
+  for (let i = 0; i < 16; i += 1) {
+    assert.ok(near(viaLeft[i], t[i]), `I * T differs at ${i}`);
+    assert.ok(near(viaRight[i], t[i]), `T * I differs at ${i}`);
+  }
+  // Column major puts a translation in elements 12, 13, 14 — not 3, 7, 11. Getting this
+  // backwards transposes every matrix in the renderer and is not obvious from one frame.
+  assert.deepStrictEqual([t[12], t[13], t[14]], [1, 2, 3]);
+  assert.deepStrictEqual([t[3], t[7], t[11]], [0, 0, 0]);
+});
+
+test('rotation composes X then Y then Z, as both renderers assume', async () => {
+  const { rotation } = await load;
+
+  // A rotation about X alone must match the plain X matrix. slot3d.js has its own
+  // `rotationX` and dice3d.js relies on `rotation(a, 0, 0)` being the same thing; if the
+  // composition order ever changes, they silently disagree.
+  const a = 0.7;
+  const r = rotation(a, 0, 0);
+  const c = Math.cos(a); const s = Math.sin(a);
+  const want = [1, 0, 0, 0, 0, c, s, 0, 0, -s, c, 0, 0, 0, 0, 1];
+  want.forEach((v, i) => assert.ok(near(r[i], v), `element ${i}: ${r[i]} vs ${v}`));
+
+  // And a full turn on any axis is the identity again.
+  const full = rotation(Math.PI * 2, Math.PI * 2, Math.PI * 2);
+  const id = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  id.forEach((v, i) => assert.ok(near(full[i], v, 1e-6), `a full turn is not identity at ${i}`));
+});
+
+test('normalMatrix drops translation and keeps scale', async () => {
+  const { normalMatrix, multiply, translation, scaling } = await load;
+  const m = multiply(translation(5, -2, 7), scaling(2));
+  const n = normalMatrix(m);
+  assert.strictEqual(n.length, 9);
+  // Uniform scale only, which the renderers rely on: a non-uniform scale would need the
+  // inverse transpose, and shading would be subtly wrong rather than obviously broken.
+  assert.deepStrictEqual([...n], [2, 0, 0, 0, 2, 0, 0, 0, 2]);
+});
+
+test('lookAt puts the target in front of the camera', async () => {
+  const { lookAt } = await load;
+  const view = lookAt([0, 10, 10], [0, 0, 0], [0, 1, 0]);
+  // The camera looks down its own -Z, so the target must land at negative z in view space.
+  const p = [0, 0, 0, 1];
+  const z = view[2] * p[0] + view[6] * p[1] + view[10] * p[2] + view[14];
+  assert.ok(z < 0, `the target is behind the camera (z = ${z})`);
+  assert.ok(Math.abs(z) > 1, 'and it should be a real distance away');
+});
+
+test('the key light is a unit vector, above and to the left', async () => {
+  const { KEY_DIR } = await load;
+  assert.ok(near(Math.hypot(...KEY_DIR), 1, 1e-12), 'must be normalised');
+  assert.ok(KEY_DIR[1] > 0.5, 'the key light is above the table');
+  assert.ok(KEY_DIR[0] < 0, 'and to the left, which is what the shadows assume');
+});
+
+test('isPOT knows which textures may repeat', async () => {
+  const { isPOT } = await load;
+  // WebGL 1 renders an NPOT texture black if asked to REPEAT, with no warning at all.
+  // Both renderers learned this independently, which is why the helper is shared.
+  for (const n of [1, 2, 256, 512, 1024, 2048]) {
+    assert.strictEqual(isPOT(n), true, `${n} is a power of two`);
+  }
+  for (const n of [0, 3, 100, 1432, 1536, 2047]) {
+    assert.strictEqual(isPOT(n), false, `${n} is not`);
+  }
+  // The two atlases actually shipped are NPOT on at least one edge, so they must clamp.
+  assert.strictEqual(isPOT(1536) && isPOT(256), false, 'the pip atlas must not repeat');
+  assert.strictEqual(isPOT(2048) && isPOT(1432), false, 'the card atlas must not repeat');
+});
+
+test('the tonemap is a single GLSL function, and is not empty', async () => {
+  const { ACES } = await load;
+  assert.ok(ACES.includes('vec3 tonemap(vec3'), 'it must declare tonemap()');
+  assert.ok(ACES.includes('clamp('), 'and clamp, or a highlight can still exceed 1');
+  // It is pasted into shader sources, so a backtick in it would end the template literal
+  // it lands in. That hazard has cost this project several round trips already.
+  assert.ok(!ACES.includes('`'), 'no backticks: this is pasted into template literals');
+});
