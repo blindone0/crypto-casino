@@ -40,13 +40,10 @@
  * wrongness nobody can name but everybody can see: highlights on one side of a die and
  * its shadow on the same side.
  */
-const KEY_DIR = (() => {
-  const v = [-0.45, 1.0, 0.55];
-  const l = Math.hypot(v[0], v[1], v[2]);
-  return [v[0] / l, v[1] / l, v[2] / l];
-})();
-
-import { locations } from './gl.js';
+import {
+  KEY_DIR, dot, cross, norm, identity, multiply, translation, scaling, rotation,
+  normalMatrix, lookAt, perspective, shader, program, locations, loadTexture,
+} from './gl.js';
 
 const VERT = `
 attribute vec3 aPos;
@@ -269,126 +266,11 @@ void main() {
   gl_FragColor = vec4(clamp(lit, 0.0, 1.0), 1.0);
 }`;
 
-function shader(gl, type, src) {
-  const s = gl.createShader(type);
-  gl.shaderSource(s, src);
-  gl.compileShader(s);
-  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
-    const log = gl.getShaderInfoLog(s);
-    gl.deleteShader(s);
-    throw new Error(`shader: ${log}`);
-  }
-  return s;
-}
-
-function program(gl, vertSrc, fragSrc) {
-  const p = gl.createProgram();
-  gl.attachShader(p, shader(gl, gl.VERTEX_SHADER, vertSrc));
-  gl.attachShader(p, shader(gl, gl.FRAGMENT_SHADER, fragSrc));
-  gl.linkProgram(p);
-  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-    throw new Error(`link: ${gl.getProgramInfoLog(p)}`);
-  }
-  return p;
-}
-
-// --------------------------------------------------------------------- maths
-//
-// Written out rather than imported, which is the trade this file exists to make. Column
-// major, matching what WebGL expects, and the same convention slot3d.js uses.
-
-const perspective = (fovy, aspect, near, far) => {
-  const f = 1 / Math.tan(fovy / 2);
-  const nf = 1 / (near - far);
-  return new Float32Array([
-    f / aspect, 0, 0, 0,
-    0, f, 0, 0,
-    0, 0, (far + near) * nf, -1,
-    0, 0, 2 * far * near * nf, 0,
-  ]);
-};
-
-/** A camera looking at a point, built the usual way from three basis vectors. */
-function lookAt(eye, target, up) {
-  const z = norm([eye[0] - target[0], eye[1] - target[1], eye[2] - target[2]]);
-  const x = norm(cross(up, z));
-  const y = cross(z, x);
-  return new Float32Array([
-    x[0], y[0], z[0], 0,
-    x[1], y[1], z[1], 0,
-    x[2], y[2], z[2], 0,
-    -dot(x, eye), -dot(y, eye), -dot(z, eye), 1,
-  ]);
-}
-
-const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-const cross = (a, b) => [
-  a[1] * b[2] - a[2] * b[1],
-  a[2] * b[0] - a[0] * b[2],
-  a[0] * b[1] - a[1] * b[0],
-];
-function norm(v) {
-  const l = Math.hypot(v[0], v[1], v[2]) || 1;
-  return [v[0] / l, v[1] / l, v[2] / l];
-}
-
-function multiply(a, b) {
-  const out = new Float32Array(16);
-  for (let c = 0; c < 4; c += 1) {
-    for (let r = 0; r < 4; r += 1) {
-      let s = 0;
-      for (let k = 0; k < 4; k += 1) s += a[k * 4 + r] * b[c * 4 + k];
-      out[c * 4 + r] = s;
-    }
-  }
-  return out;
-}
-
-const identity = () => new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
-
-function translation(x, y, z) {
-  const m = identity();
-  m[12] = x; m[13] = y; m[14] = z;
-  return m;
-}
-
-function scaling(s) {
-  const m = identity();
-  m[0] = s; m[5] = s; m[10] = s;
-  return m;
-}
-
-/** Rotation from Euler angles, applied X then Y then Z. */
-function rotation(rx, ry, rz) {
-  const cx = Math.cos(rx); const sx = Math.sin(rx);
-  const cy = Math.cos(ry); const sy = Math.sin(ry);
-  const cz = Math.cos(rz); const sz = Math.sin(rz);
-  const x = identity(); x[5] = cx; x[6] = sx; x[9] = -sx; x[10] = cx;
-  const y = identity(); y[0] = cy; y[2] = -sy; y[8] = sy; y[10] = cy;
-  const z = identity(); z[0] = cz; z[1] = sz; z[4] = -sz; z[5] = cz;
-  return multiply(z, multiply(y, x));
-}
-
-/** The upper-left 3x3, for transforming normals. Uniform scale only, so no inverse. */
-function normalMatrix(m) {
-  return new Float32Array([m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]]);
-}
-
 // ------------------------------------------------------------------ geometry
+// The matrix and GL helpers that used to live here are in `gl.js` now — fourteen of them,
+// character-for-character the same as the copies in `cards3d.js` and `slot3d.js`. What
+// remains below is the one piece of geometry that is actually the dice's own.
 
-/**
- * A cube with rounded edges and corners.
- *
- * Built by subdividing each face into a grid and pushing every vertex out onto a
- * "squircle" — the point is moved towards the surface of a rounded box by clamping its
- * position to the inner cube and adding a radius along the direction to it. That gives
- * real curvature at the edges with correct normals, which is what the highlight needs;
- * a bevelled cube with flat chamfers reads as a machined part rather than a die.
- *
- * `aFace` carries which of the six faces a vertex belongs to, so the fragment shader can
- * pick the right pips out of the atlas. The UVs are per face, 0..1, so a face's material
- * and its pips line up.
- */
 function roundedBox(gl, radius = 0.18, seg = 10) {
   const pos = [];
   const nrm = [];
@@ -644,44 +526,6 @@ function nearestRest(value, rot) {
   return best.map((a, i) => rot[i] + wrapAngle(a - rot[i]));
 }
 
-
-function loadTexture(gl, url, { repeat = true, onReady = null } = {}) {
-  const tex = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, tex);
-  // One grey pixel until the real image arrives, so the first frames are not black.
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
-    new Uint8Array([160, 160, 160, 255]));
-
-  const img = new Image();
-  img.onload = () => {
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
-    // WebGL 1 cannot REPEAT a non-power-of-two texture, and silently renders black if
-    // asked to. The materials are all 512 and the pip atlas is 1536x256 — that one is
-    // NPOT on its long edge, so it must clamp and must not be mipmapped.
-    const pot = (n) => (n & (n - 1)) === 0;
-    const canRepeat = repeat && pot(img.width) && pot(img.height);
-    if (canRepeat) {
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-      gl.generateMipmap(gl.TEXTURE_2D);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-    } else {
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    }
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    // Repaint, or a still frame drawn before this arrived keeps the grey placeholder for
-    // good. `show()` draws exactly once, so a table opened and left alone would stay grey
-    // until something else happened to trigger a frame — which, on a game that only
-    // animates when you throw, could be never.
-    if (onReady) onReady();
-  };
-  img.src = url;
-  return tex;
-}
 
 const easeOut = (t) => 1 - (1 - t) ** 3;
 

@@ -16,6 +16,8 @@
 // turned off — createReels returns null and the caller keeps the CSS drums. A slot that
 // does not draw is worse than a slot that draws flat.
 
+import { program, perspective, translation } from './gl.js';
+
 const VERT = `
 attribute vec3 aPos;
 attribute vec3 aNormal;
@@ -119,28 +121,7 @@ void main() {
 }`;
 
 /** Compile one shader and say plainly what was wrong if it will not. */
-function shader(gl, type, src) {
-  const sh = gl.createShader(type);
-  gl.shaderSource(sh, src);
-  gl.compileShader(sh);
-  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
-    const log = gl.getShaderInfoLog(sh);
-    gl.deleteShader(sh);
-    throw new Error(`shader: ${log}`);
-  }
-  return sh;
-}
 
-function program(gl) {
-  const p = gl.createProgram();
-  gl.attachShader(p, shader(gl, gl.VERTEX_SHADER, VERT));
-  gl.attachShader(p, shader(gl, gl.FRAGMENT_SHADER, FRAG));
-  gl.linkProgram(p);
-  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-    throw new Error(`link: ${gl.getProgramInfoLog(p)}`);
-  }
-  return p;
-}
 
 /**
  * A cylinder lying along X, wrapped by the texture around its circumference.
@@ -181,23 +162,12 @@ function cylinder(gl, halfWidth, radius, segments = 48) {
 }
 
 // ------------------------------------------------------------------ matrices
-// Four-by-four column-major, written out rather than imported. A projection, a translate
-// and a rotate about X is the whole of what this needs.
-
-const perspective = (fovy, aspect, near, far) => {
-  const f = 1 / Math.tan(fovy / 2);
-  const nf = 1 / (near - far);
-  return new Float32Array([
-    f / aspect, 0, 0, 0,
-    0, f, 0, 0,
-    0, 0, (far + near) * nf, -1,
-    0, 0, 2 * far * near * nf, 0,
-  ]);
-};
-
-const translation = (x, y, z) => new Float32Array([
-  1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, z, 1,
-]);
+// The projection and the translate now come from gl.js, which carries the same two
+// written the same way; `test/gl.test.js` pins the projection to the exact floats this
+// file was shipping before they moved, because the slots have no browser test.
+//
+// What stays here is what is genuinely the slots': a rotation about one axis, and the
+// fused model matrix below that depends on it.
 
 const rotationX = (a) => {
   const c = Math.cos(a);
@@ -296,7 +266,7 @@ export function createReels(host, opts = {}) {
 
   let prog;
   try {
-    prog = program(gl);
+    prog = program(gl, VERT, FRAG);
   } catch (e) {
     canvas.remove();
     return null;
