@@ -598,10 +598,32 @@ export function createDice(host, opts = {}) {
   const material = opts.material === 'resin' ? 'dice-resin' : 'dice-bone';
   // A repaint when each texture lands. Cheap, and it is the difference between a table
   // that turns green a moment after opening and one that never does.
+  // Declared before `repaint` rather than beside the animation loop below, because a
+  // cached image fires `onload` synchronously — during the loadTexture calls a few lines
+  // down, long before the loop exists. Reading a `let` before its declaration is a
+  // ReferenceError, so the old code depended on its own try/catch swallowing one, which
+  // also silently swallowed the first paint. Declaring them here makes the guard real.
+  let raf = null;      // the animation loop, while a throw is in flight
+  let pending = null;  // a single coalesced idle repaint
+
   // Guarded, because a cached image can fire `onload` synchronously — before `raf` is
   // even declared, which is a temporal-dead-zone throw rather than a quiet no-op.
   const repaint = () => {
-    try { if (raf === null) draw(); } catch { /* not built yet; the next frame covers it */ }
+    // Coalesced, not immediate. Five textures, the explicit first draw and the
+    // ResizeObserver's guaranteed initial fire each used to paint a whole frame:
+    // measured at six frames and twelve draw calls to show one static table.
+    // Scheduling instead of drawing collapses however many callers ask in the same tick
+    // into the one frame the browser was going to give them anyway.
+    //
+    // `pending` is separate from `raf` on purpose. `raf` belongs to the animation loop,
+    // and a throw landing mid-repaint must not cancel the loop or be cancelled by it.
+    if (raf !== null || pending !== null) return;
+    pending = requestAnimationFrame(() => {
+      pending = null;
+      // Still guarded: a cached image can fire `onload` synchronously, before the
+      // geometry this draws exists.
+      try { draw(); } catch { /* not built yet; the next frame covers it */ }
+    });
   };
   const texBody = loadTexture(gl, `${base}${material}.jpg`, { onReady: repaint });
   const texRough = loadTexture(gl, `${base}${material}-rough.jpg`, { onReady: repaint });
@@ -854,7 +876,6 @@ export function createDice(host, opts = {}) {
   let t0 = 0;
   let last = 0;
   let duration = 0;
-  let raf = null;
   let onDone = null;
   let bail = null;
 
@@ -862,11 +883,21 @@ export function createDice(host, opts = {}) {
     const w = host.clientWidth || 640;
     const h = opts.height || Math.round(w * 0.62);
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
+    const cw = Math.round(w * dpr);
+    const ch = Math.round(h * dpr);
+
+    // Only when it actually changed: assigning `canvas.width`/`canvas.height`
+    // reallocates and clears the drawing buffer even when the value is identical.
+    // ResizeObserver fires once on observe, so without this the first frame was
+    // drawn and then immediately thrown away on a size that had not moved.
+    if (canvas.width === cw && canvas.height === ch) return false;
+
+    canvas.width = cw;
+    canvas.height = ch;
     canvas.style.setProperty('width', `${w}px`);
     canvas.style.setProperty('height', `${h}px`);
-    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.viewport(0, 0, cw, ch);
+    return true;
   }
 
   // The camera.
@@ -1053,7 +1084,7 @@ export function createDice(host, opts = {}) {
   draw();
 
   const ro = typeof ResizeObserver === 'function'
-    ? new ResizeObserver(() => { resize(); draw(); })
+    ? new ResizeObserver(() => { if (resize()) draw(); })
     : null;
   ro?.observe(host);
 
@@ -1160,6 +1191,7 @@ export function createDice(host, opts = {}) {
     destroy() {
       clearTimeout(bail);
       if (raf !== null) cancelAnimationFrame(raf);
+      if (pending !== null) cancelAnimationFrame(pending);
       ro?.disconnect();
       canvas.remove();
     },

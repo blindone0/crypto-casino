@@ -358,11 +358,22 @@ export function createReels(host, opts = {}) {
     const h = host.clientHeight;
     if (!w || !h) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
-    canvas.style.width = `${w}px`;
-    canvas.style.height = `${h}px`;
-    gl.viewport(0, 0, canvas.width, canvas.height);
+    const cw = Math.round(w * dpr);
+    const ch = Math.round(h * dpr);
+
+    // Only when it actually changed: assigning `canvas.width`/`canvas.height`
+    // reallocates and clears the drawing buffer even when the value is identical.
+    // ResizeObserver fires once on observe, so without this the first frame was
+    // drawn and then immediately thrown away on a size that had not moved.
+    // Only the buffer is guarded here: the reel pitch below is derived from the
+    // aspect and must be recomputed whenever this is called.
+    if (canvas.width !== cw || canvas.height !== ch) {
+      canvas.width = cw;
+      canvas.height = ch;
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+      gl.viewport(0, 0, cw, ch);
+    }
 
     // The visible width at the front of the barrel, divided between the reels.
     const aspect = w / Math.max(1, h);

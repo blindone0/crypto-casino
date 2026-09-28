@@ -283,8 +283,22 @@ export function createTable(host, opts = {}) {
 
   const mesh = cardMesh(gl);
   const base = opts.textures || '/textures/';
-  let raf = null;
-  const repaint = () => { try { if (raf === null) draw(); } catch { /* not built yet */ } };
+  let raf = null;      // the animation loop, while cards are moving
+  let pending = null;  // a single coalesced idle repaint
+
+  // Coalesced rather than immediate: five textures each land at their own moment and
+  // each used to paint a whole frame to show one static table. Scheduling collapses
+  // every caller in the same tick into the one frame the browser was going to give.
+  //
+  // `pending` is deliberately not `raf`: the animation loop must not cancel an idle
+  // repaint, nor be cancelled by one.
+  const repaint = () => {
+    if (raf !== null || pending !== null) return;
+    pending = requestAnimationFrame(() => {
+      pending = null;
+      try { draw(); } catch { /* not built yet */ }
+    });
+  };
 
   const texStock = loadTexture(gl, `${base}card-stock.jpg`, { onReady: repaint });
   const texFaces = loadTexture(gl, `${base}card-faces.png`, { repeat: false, onReady: repaint });
@@ -494,6 +508,7 @@ export function createTable(host, opts = {}) {
 
     destroy() {
       if (raf !== null) cancelAnimationFrame(raf);
+      if (pending !== null) cancelAnimationFrame(pending);
       size.disconnect();
       canvas.remove();
     },

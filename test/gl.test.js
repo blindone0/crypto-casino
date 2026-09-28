@@ -152,3 +152,94 @@ test('the tonemap is a single GLSL function, and is not empty', async () => {
   // it lands in. That hazard has cost this project several round trips already.
   assert.ok(!ACES.includes('`'), 'no backticks: this is pasted into template literals');
 });
+
+// ---------------------------------------------------------------------------
+// The resize guard.
+//
+// Assigning `canvas.width` or `canvas.height` is not a plain property write: it
+// reallocates and CLEARS the drawing buffer, even when the value assigned is identical to
+// the one already there. ResizeObserver fires once on observe in every browser, so the
+// unguarded version threw away a freshly drawn frame immediately after drawing it, on a
+// size that had not moved — once per renderer, every time a game opened.
+//
+// A fake canvas counts the writes, because that is the thing that costs: what matters is
+// not what the size ends up being, but how many times it was set to get there.
+
+function fakeCanvas() {
+  let w = 0;
+  let h = 0;
+  const writes = { width: 0, height: 0 };
+  const style = { setProperty() {}, };
+  return {
+    writes,
+    style,
+    get width() { return w; },
+    set width(v) { writes.width += 1; w = v; },
+    get height() { return h; },
+    set height(v) { writes.height += 1; h = v; },
+  };
+}
+
+test('resizing to the size it already is does not reallocate the buffer', async () => {
+  const { sizer } = await load;
+
+  const canvas = fakeCanvas();
+  let viewports = 0;
+  const gl = { viewport() { viewports += 1; } };
+  const host = { clientWidth: 800 };
+
+  // The browser globals sizer reads. Node has neither.
+  const hadWindow = 'window' in globalThis;
+  const prevWindow = globalThis.window;
+  globalThis.window = { devicePixelRatio: 1 };
+
+  try {
+    const { resize } = sizer(canvas, gl, host, { height: 400 });
+
+    assert.strictEqual(resize(), true, 'the first call has to size it');
+    assert.strictEqual(canvas.width, 800);
+    assert.strictEqual(canvas.height, 400);
+    assert.deepStrictEqual(canvas.writes, { width: 1, height: 1 });
+
+    // Three more calls at the same size: the ResizeObserver's guaranteed first fire, and
+    // whatever else asks. None may touch the buffer.
+    assert.strictEqual(resize(), false);
+    assert.strictEqual(resize(), false);
+    assert.strictEqual(resize(), false);
+    assert.deepStrictEqual(canvas.writes, { width: 1, height: 1 },
+      'a no-op resize must not write the size back');
+    assert.strictEqual(viewports, 1, 'nor reset the viewport');
+
+    // A real change still goes through.
+    host.clientWidth = 1000;
+    assert.strictEqual(resize(), true, 'a genuine resize must report that it changed');
+    assert.strictEqual(canvas.width, 1000);
+    assert.deepStrictEqual(canvas.writes, { width: 2, height: 2 });
+    assert.strictEqual(viewports, 2);
+  } finally {
+    if (hadWindow) globalThis.window = prevWindow;
+    else delete globalThis.window;
+  }
+});
+
+test('a device pixel ratio above 2 is capped rather than honoured', async () => {
+  const { sizer } = await load;
+
+  // A phone reporting 3 or 4 would otherwise ask for nine or sixteen times the fill
+  // rate for a difference nobody can see.
+  const canvas = fakeCanvas();
+  const host = { clientWidth: 400 };
+  const hadWindow = 'window' in globalThis;
+  const prevWindow = globalThis.window;
+  globalThis.window = { devicePixelRatio: 4 };
+
+  try {
+    const { resize } = sizer(canvas, { viewport() {} }, host, { height: 200 });
+    resize();
+    assert.strictEqual(canvas.width, 800, '400 css px at a capped ratio of 2');
+    assert.strictEqual(canvas.height, 400);
+  } finally {
+    if (hadWindow) globalThis.window = prevWindow;
+    else delete globalThis.window;
+  }
+});

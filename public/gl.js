@@ -131,18 +131,32 @@ export function sizer(canvas, gl, host, { height = null, aspect = 0.62 } = {}) {
     const w = host.clientWidth || 640;
     const h = height || Math.round(w * aspect);
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
-    canvas.style.setProperty('width', `${w}px`);
-    canvas.style.setProperty('height', `${h}px`);
-    gl.viewport(0, 0, canvas.width, canvas.height);
+    const cw = Math.round(w * dpr);
+    const ch = Math.round(h * dpr);
+
+    // Only when it actually changed. Assigning `canvas.width` or `canvas.height`
+    // reallocates and clears the drawing buffer even when the value is identical — it is
+    // a setter with side effects, not a plain property. ResizeObserver fires once on
+    // observe in every browser, so without this guard every renderer threw away a
+    // freshly drawn buffer immediately after drawing it, on a size that had not moved.
+    const changed = canvas.width !== cw || canvas.height !== ch;
+    if (changed) {
+      canvas.width = cw;
+      canvas.height = ch;
+      canvas.style.setProperty('width', `${w}px`);
+      canvas.style.setProperty('height', `${h}px`);
+      gl.viewport(0, 0, cw, ch);
+    }
+    return changed;
   };
   let ro = null;
   return {
     resize,
     observe(cb) {
       if (typeof ResizeObserver !== 'function') return;
-      ro = new ResizeObserver(() => { resize(); cb(); });
+      // `resize()` reports whether anything actually changed, so the guaranteed
+      // first fire does not cost a redraw of a canvas that is already correct.
+      ro = new ResizeObserver(() => { if (resize()) cb(); });
       ro.observe(host);
     },
     disconnect() { ro?.disconnect(); ro = null; },
