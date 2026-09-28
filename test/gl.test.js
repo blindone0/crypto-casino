@@ -243,3 +243,126 @@ test('a device pixel ratio above 2 is capped rather than honoured', async () => 
     else delete globalThis.window;
   }
 });
+
+// ---------------------------------------------------------------------------
+// Pre-normalised lighting constants.
+//
+// Four shaders normalised a LITERAL vector once per fragment — an inverse square root,
+// millions of times a second, for a value fixed when the shader was written. Two more
+// normalised `uKey`, which is KEY_DIR and is already unit length because gl.js builds it
+// with norm().
+//
+// Substituting the computed value is only safe while the substituted digits are right,
+// and a wrong digit moves the lighting by an amount too small to notice in a screenshot
+// and too large to be correct. So the literals are pinned here: if someone edits a
+// direction in a shader without recomputing it, this fails.
+
+const GLSL_CONSTANTS = [
+  { file: 'slot3d.js', raw: [-0.25, 0.75, 0.62], text: 'vec3(-0.2488332, 0.7464997, 0.6171064)' },
+  { file: 'slot3d.js', raw: [0.0, 0.45, 1.0], text: 'vec3(0.0, 0.4103647, 0.9119215)' },
+  { file: 'dice3d.js', raw: [0.6, 0.25, -0.5], text: 'vec3(0.7316529, 0.3048554, -0.6097108)' },
+  { file: 'cards3d.js', raw: [0.6, 0.35, -0.5], text: 'vec3(0.7010475, 0.4089444, -0.5842062)' },
+];
+
+test('the baked lighting directions are the normalised form of what they replaced', () => {
+  for (const { raw, text } of GLSL_CONSTANTS) {
+    const len = Math.hypot(raw[0], raw[1], raw[2]);
+    const want = raw.map((n) => n / len);
+    // Parse inside the parentheses only: `vec3` ends in a 3, which a bare number
+    // regex happily reports as a fourth component.
+    const got = text.slice(text.indexOf('(') + 1, text.lastIndexOf(')'))
+      .split(',').map((n) => Number(n.trim()));
+
+    assert.strictEqual(got.length, 3, `${text} must have three components`);
+    got.forEach((g, i) => {
+      assert.ok(near(g, want[i], 5e-7),
+        `${text} component ${i}: baked ${g}, but normalising gives ${want[i]}`);
+    });
+
+    // And the result must actually be unit length, which is the whole point.
+    assert.ok(near(Math.hypot(...got), 1, 1e-6), `${text} is not unit length`);
+  }
+});
+
+test('the shaders no longer normalise a constant or an already-unit uniform', () => {
+  // The saving is only real if the calls are gone. A regression here is silent: the
+  // picture is identical and only the frame time moves.
+  for (const file of ['slot3d.js', 'dice3d.js', 'cards3d.js']) {
+    const raw = fs.readFileSync(path.join(__dirname, '..', 'public', file), 'utf8');
+
+    // Comments are stripped first. slot3d.js quotes the old CSS-era lighting expression
+    // in a comment, and prose describing what the code used to do is not a cost.
+    const src = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+    assert.ok(!/normalize\(\s*vec3\(\s*-?\d/.test(src),
+      `${file} still normalises a literal vec3 per fragment`);
+    assert.ok(!/normalize\(\s*uKey\s*\)/.test(src),
+      `${file} still normalises uKey, which gl.js already built with norm()`);
+  }
+
+  // The ones that remain must remain: an interpolated normal is not unit length, and
+  // the view vector is a difference of two positions.
+  const dice = fs.readFileSync(path.join(__dirname, '..', 'public', 'dice3d.js'), 'utf8');
+  assert.ok(dice.includes('normalize(vNormal)'), 'an interpolated normal must be renormalised');
+  assert.ok(dice.includes('normalize(uEye - vWorld)'), 'the view vector must be normalised');
+});
+
+// ---------------------------------------------------------------------------
+// A stray backtick in any shader, not just the dice.
+//
+// test/dice3d.test.js has guarded this since it cost two round trips in two earlier
+// sessions. It checks dice3d.js only — so when the same mistake was made in cards3d.js
+// (a comment reading `uKey`, inside GLSL, inside a template literal) it cost a THIRD.
+// The whole app failed to boot with "Unexpected identifier 'uKey'".
+//
+// The hazard belongs to every file that keeps GLSL in a template literal, so the guard
+// does too. This walks the real files rather than a copy: a new renderer is covered the
+// day it is added, without anyone remembering to extend a list.
+
+const TICK = String.fromCharCode(96);
+
+test('no shader in any renderer is cut short by a stray backtick', () => {
+  const dir = path.join(__dirname, '..', 'public');
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('3d.js') || f === 'gl.js');
+  assert.ok(files.length >= 3, `expected the renderers, found ${files.join(', ')}`);
+
+  let checked = 0;
+  for (const file of files) {
+    const src = fs.readFileSync(path.join(dir, file), 'utf8');
+    const re = /const\s+([A-Z_0-9]+)\s*=\s*`/g;
+    let m;
+    while ((m = re.exec(src)) !== null) {
+      const name = m[1];
+      const rest = src.slice(m.index + m[0].length);
+      const body = rest.slice(0, rest.indexOf(TICK));
+
+      // Only GLSL: gl.js also exports the ACES tonemap as a fragment of source, which is
+      // a function body rather than a whole shader and has no main() of its own.
+      const isShader = /void\s+main\s*\(/.test(body) || /attribute |uniform |varying /.test(body);
+      if (!isShader) continue;
+      checked += 1;
+
+      assert.ok(body.includes('void main()') || name === 'ACES',
+        `${file}:${name} is truncated before main() — look for a ${TICK} inside its source`);
+      assert.ok(body.trimEnd().endsWith('}'),
+        `${file}:${name} does not end with a closing brace`);
+    }
+  }
+  assert.ok(checked >= 8, `only ${checked} shaders were checked; the walk is not finding them`);
+});
+
+test('no comment inside a shader contains a backtick', () => {
+  // The failure above is the symptom; this is the cause, and it names the line.
+  const dir = path.join(__dirname, '..', 'public');
+  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('3d.js'))) {
+    const lines = fs.readFileSync(path.join(dir, file), 'utf8').split('\n');
+    let inShader = false;
+    lines.forEach((line, i) => {
+      if (/const\s+[A-Z_0-9]+\s*=\s*`/.test(line)) { inShader = true; return; }
+      if (inShader && line.includes(TICK)) { inShader = false; return; }
+      if (inShader && /^\s*\/\//.test(line) && line.includes(TICK)) {
+        assert.fail(`${file}:${i + 1} has a ${TICK} in a comment inside GLSL: ${line.trim()}`);
+      }
+    });
+  }
+});

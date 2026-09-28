@@ -82,10 +82,12 @@ vec4 strip(vec2 uv) {
 
 void main() {
   vec3 n = normalize(vNormal);
-  vec3 key = normalize(vec3(-0.25, 0.75, 0.62));
+  // Pre-normalised: this is a literal, so normalize() here recomputed an inverse
+  // square root per fragment for a value fixed at compile time.
+  vec3 key = vec3(-0.2488332, 0.7464997, 0.6171064);
   float d = max(dot(n, key), 0.0);
   float fill = max(dot(n, vec3(0.0, -1.0, 0.2)), 0.0) * 0.16;
-  float sheen = pow(max(dot(n, normalize(vec3(0.0, 0.45, 1.0))), 0.0), 8.0) * 0.10;
+  float sheen = pow(max(dot(n, vec3(0.0, 0.4103647, 0.9119215)), 0.0), 8.0) * 0.10;
 
   // Straight at the viewer, so the highlight sits on the payline where the glass would
   // catch it, and 0.18 rather than 0.75.

@@ -136,8 +136,9 @@ void main() {
   vec3 n = normalize(vNormal);
   vec3 v = normalize(uEye - vWorld);
 
-  vec3 keyDir = normalize(uKey);
-  vec3 fillDir = normalize(vec3(0.6, 0.25, -0.5));
+  // uKey is KEY_DIR, which gl.js builds with norm(). Already unit length.
+  vec3 keyDir = uKey;
+  vec3 fillDir = vec3(0.7316529, 0.3048554, -0.6097108);
 
   float key = max(dot(n, keyDir), 0.0);
   float fill = max(dot(n, fillDir), 0.0) * 0.28;

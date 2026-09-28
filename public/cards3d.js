@@ -82,10 +82,11 @@ void main() {
 
   vec3 n = normalize(vNormal);
   vec3 v = normalize(uEye - vWorld);
-  vec3 k = normalize(uKey);
+  // uKey is KEY_DIR, already unit length (gl.js builds it with norm()).
+  vec3 k = uKey;
 
   float key = max(dot(n, k), 0.0);
-  float fill = max(dot(n, normalize(vec3(0.6, 0.35, -0.5))), 0.0) * 0.30;
+  float fill = max(dot(n, vec3(0.7010475, 0.4089444, -0.5842062)), 0.0) * 0.30;
   vec3 ambient = vec3(0.30, 0.29, 0.27);
 
   // Weak and broad: card stock is matte, and a tight highlight would make it plastic.
