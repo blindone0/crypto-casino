@@ -107,7 +107,13 @@ function main() {
 
     const size = fs.statSync(full).size;
     if (size > MAX_BYTES) {
-      skipped.push([name, `${human(size)}, over the ${human(MAX_BYTES)} limit`]);
+      // Far and away the commonest failure is a generator that saved PNG. The same
+      // picture as a JPEG is usually a quarter of the size, so say that rather than
+      // just quoting the number back.
+      const fix = ext === '.png' || ext === '.avif' || ext === '.webp'
+        ? ' — re-save as JPEG, quality 85'
+        : ' — resize to about 1024px on the long edge';
+      skipped.push([name, `${human(size)}, over the ${human(MAX_BYTES)} limit${fix}`]);
       continue;
     }
 
