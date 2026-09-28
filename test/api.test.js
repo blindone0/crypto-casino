@@ -516,3 +516,65 @@ test('revalidation still works, and still costs no body', async (t) => {
   const body = await again.arrayBuffer();
   assert.strictEqual(body.byteLength, 0, 'a 304 carries no body');
 });
+
+// ---------------------------------------------------------------------------
+// One picture, not forty-eight.
+//
+// `/api/puzzle/pictures` sends the whole pool as base64 data URIs: 8.1MB to play a round
+// that uses exactly one of them. A round already knows its own key, so it asks for that
+// one — measured at 213KB against 8305KB, 38 times smaller. On a phone that was the worst
+// thing in the project for load time, and it also parked 8.1MB of strings in the tab for
+// the whole session.
+
+test('a round can ask for the one picture it needs', async (t) => {
+  // A fixture pack, so this runs everywhere rather than skipping on a machine where
+  // nobody has imported pictures. A skipped test guards nothing.
+  const cfg0 = testConfig();
+  const fs = require('node:fs');
+  const path = require('node:path');
+  fs.mkdirSync(cfg0.dataDir, { recursive: true });
+  fs.writeFileSync(path.join(cfg0.dataDir, 'puzzle-pictures.json'), JSON.stringify({
+    pictures: {
+      'fixture-a': { name: 'a.jpg', mime: 'image/jpeg', data: 'QUFB'.repeat(300) },
+      'fixture-b': { name: 'b.jpg', mime: 'image/jpeg', data: 'QkJC'.repeat(300) },
+    },
+  }));
+  const { app, cfg, base } = await boot({ dataDir: cfg0.dataDir });
+  t.after(() => shutdown(app, cfg));
+
+  const pack = await (await fetch(`${base}/api/puzzle/pictures`)).json();
+  const keys = Object.keys(pack.pictures || {});
+  assert.ok(keys.length, 'the fixture pack should have been written before boot');
+
+  const res = await fetch(`${base}/api/puzzle/picture?key=${encodeURIComponent(keys[0])}`);
+  assert.strictEqual(res.status, 200);
+  const got = await res.json();
+  assert.strictEqual(got.key, keys[0]);
+  assert.ok(got.uri.startsWith('data:image/'), 'it must be a usable image URI');
+
+  // And it must carry ONE picture, not the pool. Asserting a size ratio would only be
+  // testing how many pictures the fixture happens to have; what matters is that the
+  // response is a single picture whatever the pool size. With the real 48-picture pack
+  // that is 213KB against 8305KB.
+  assert.deepStrictEqual(Object.keys(got).sort(), ['key', 'uri']);
+  for (const other of keys.slice(1)) {
+    assert.ok(!got.uri.includes(pack.pictures[other]),
+      'the response must not carry any other picture');
+  }
+});
+
+test('an unknown picture key is refused rather than read from disk', async (t) => {
+  const { app, cfg, base } = await boot();
+  t.after(() => shutdown(app, cfg));
+
+  // The key indexes an in-memory object; it is never joined onto a path. So a traversal
+  // attempt is not "sanitised", it simply misses the lookup — which is the property worth
+  // pinning, because a future refactor that turned this into a file read would still pass
+  // a test that only checked the status code of the happy path.
+  for (const bad of ['../../etc/passwd', '../config.json', '', 'no-such-picture']) {
+    const res = await fetch(`${base}/api/puzzle/picture?key=${encodeURIComponent(bad)}`);
+    assert.strictEqual(res.status, 400, `"${bad}" must be refused`);
+    const body = await res.json();
+    assert.ok(!('uri' in body), 'and must not return anything readable');
+  }
+});

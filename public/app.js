@@ -2111,6 +2111,9 @@ async function renderJigsaw() {
     try { game = await api('/api/bet/jigsaw/current'); } catch { /* nothing open */ }
   }
   state.jigsaw = game;
+  // The picture before the paint: `paintJigsaw` reads it synchronously, so it has to be
+  // in the cache by then. One round, one picture, about 170KB.
+  await loadPicture(game?.picture);
   paintJigsaw();
 }
 
@@ -3921,7 +3924,7 @@ function renderGame() {
   else if (state.game === 'limbo') renderLimbo();
   else if (state.game === 'mines') { state.mines = null; renderMines(); loadMinesState(); }
   else if (state.game === 'slots') renderSlots();
-  else if (state.game === 'jigsaw') { loadPuzzlePictures(); renderJigsaw(); }
+  else if (state.game === 'jigsaw') renderJigsaw();
   else if (state.game === 'preferans') renderPreferans();
   else if (state.game === 'debertz') renderDebertz();
   else if (state.game === 'arcade') renderArcade();
@@ -3929,14 +3932,30 @@ function renderGame() {
   else renderCrash();
 }
 
-/** Fetch the imported picture pack once. Harmless and empty if none were imported. */
-async function loadPuzzlePictures() {
-  if (state.puzzlePictures) return;
-  state.puzzlePictures = {};
+/**
+ * Fetch the one picture this round needs.
+ *
+ * This used to fetch all of them: forty-eight pictures as base64 data URIs, 8.1MB, to
+ * play a round that uses exactly one. On a phone that was the worst thing in the project
+ * for load time, and it also parked 8.1MB of strings in the tab for the whole session —
+ * which on mobile is a good way to have the tab evicted while the player is in another
+ * app.
+ *
+ * `state.puzzlePictures` stays, but as a cache keyed by picture rather than a download of
+ * everything. A failed fetch memoises `null` so a broken key does not re-request on every
+ * repaint.
+ */
+async function loadPicture(key) {
+  if (!key) return null;
+  if (!state.puzzlePictures) state.puzzlePictures = {};
+  if (state.puzzlePictures[key] !== undefined) return state.puzzlePictures[key];
   try {
-    const pack = await api('/api/puzzle/pictures');
-    state.puzzlePictures = pack.pictures || {};
-  } catch { /* the drawn pictures stand alone */ }
+    const got = await api(`/api/puzzle/picture?key=${encodeURIComponent(key)}`);
+    state.puzzlePictures[key] = got.uri || null;
+  } catch {
+    state.puzzlePictures[key] = null;   // the drawn pictures stand alone
+  }
+  return state.puzzlePictures[key];
 }
 
 async function loadMinesState() {

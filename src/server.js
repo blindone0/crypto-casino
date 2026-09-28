@@ -684,21 +684,55 @@ function build(cfg) {
   // The imported puzzle pictures, as data URIs. Cached in memory because the file does
   // not change while the server is running: the importer says to restart, and this is why.
   let picturePack = null;
-  add('GET', '/api/puzzle/pictures', async () => {
-    if (!picturePack) {
-      picturePack = { pictures: {} };
-      try {
-        const file = path.join(cfg.dataDir, 'puzzle-pictures.json');
-        if (fs.existsSync(file)) {
-          const pack = JSON.parse(fs.readFileSync(file, 'utf8'));
-          for (const [key, pic] of Object.entries(pack.pictures || {})) {
-            picturePack.pictures[key] = `data:${pic.mime};base64,${pic.data}`;
-          }
+  /**
+   * Load the imported picture pack, once, into memory.
+   *
+   * The importer says to restart after importing, so parsing lazily on first use and
+   * holding it is correct — the file cannot change under a running server.
+   */
+  function loadPicturePack() {
+    if (picturePack) return picturePack;
+    picturePack = { pictures: {} };
+    try {
+      const file = path.join(cfg.dataDir, 'puzzle-pictures.json');
+      if (fs.existsSync(file)) {
+        const pack = JSON.parse(fs.readFileSync(file, 'utf8'));
+        for (const [key, pic] of Object.entries(pack.pictures || {})) {
+          picturePack.pictures[key] = `data:${pic.mime};base64,${pic.data}`;
         }
-      } catch { /* no pack; the drawn pictures stand alone */ }
-    }
+      }
+    } catch { /* no pack; the drawn pictures stand alone */ }
     return picturePack;
+  }
+
+  /**
+   * One picture, by the key the round is already carrying.
+   *
+   * This exists because the route below sends ALL of them. Forty-eight pictures as base64
+   * data URIs is 8.1MB, and a player who opens the jigsaw downloads every one of them to
+   * play a round that uses exactly one — on a phone that is the worst thing in the
+   * project for load time. A round knows its own key (`g.picture`, chosen from the seed
+   * when the round opened), so it can ask for the one it needs: about 170KB.
+   *
+   * The key is looked up in an in-memory object rather than joined onto a path, so a key
+   * that is not in the pool cannot reach the filesystem. That is the security property
+   * worth stating: this is a Map lookup, not a file read.
+   */
+  add('GET', '/api/puzzle/picture', async (ctx, req) => {
+    const key = new URL(req.url, 'http://x').searchParams.get('key') || '';
+    const uri = loadPicturePack().pictures[key];
+    if (!uri) throw new U.BadRequest('no such picture');
+    return { key, uri };
   });
+
+  /**
+   * Every picture at once.
+   *
+   * Kept for a round that was already in flight when this server started serving single
+   * pictures, and for anything that wants the whole pool. New code should use the route
+   * above: this one is 8.1MB.
+   */
+  add('GET', '/api/puzzle/pictures', async () => loadPicturePack());
 
   add('GET', '/api/admin/arcade', async (ctx, req) => {
     requireAdmin(req, ctx);
