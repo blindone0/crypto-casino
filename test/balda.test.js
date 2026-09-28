@@ -27,6 +27,11 @@ const words = require('../src/words-ru');
 const tc = require('../src/tokenchain');
 const match = require('../src/match');
 
+// A tugrik is divisible to eight places, like everything else here, so every stake below
+// is written as whole tugriks times TUG. Bare numbers would be hundred-millionths of a
+// coin and far under the table minimum.
+const TUG = 100000000;
+
 const DICT = words.loadWords();
 const cell = (x, y) => y * balda.SIZE + x;
 const start = () => ({
@@ -250,7 +255,7 @@ function spend(db, key, amount) {
   return { from: key.pub, nonce: tx.nonce, sig };
 }
 
-function started(db, cfg, users, keys, stake = 100) {
+function started(db, cfg, users, keys, stake = 100 * TUG) {
   const made = match.create(db, cfg, users.alice, {
     game: 'balda', stake, spend: spend(db, keys.alice, stake),
   });
@@ -313,7 +318,7 @@ test('you cannot move out of turn or from outside the game', (t) => {
 test('two passes in a row end the game on the higher score', (t) => {
   const { cfg, db, users, keys } = setup();
   t.after(() => cleanup(cfg, db));
-  const stake = 100;
+  const stake = 100 * TUG;
   const id = started(db, cfg, users, keys, stake);
   const first = match.detail(db, cfg, users.alice, id);
   const mover = first.toMove;
@@ -351,7 +356,7 @@ test('a single pass does not end anything, and scoring resets the count', (t) =>
 test('a tied game is a draw and both stakes come back', (t) => {
   const { cfg, db, users, keys } = setup({ match: { rake: 0 } });
   t.after(() => cleanup(cfg, db));
-  const id = started(db, cfg, users, keys, 120);
+  const id = started(db, cfg, users, keys, 120 * TUG);
   const before = {
     alice: tc.balanceOf(db, keys.alice.pub),
     bob: tc.balanceOf(db, keys.bob.pub),
@@ -364,8 +369,8 @@ test('a tied game is a draw and both stakes come back', (t) => {
 
   assert.strictEqual(out.result, 'draw');
   assert.strictEqual(out.reason, 'tied');
-  assert.strictEqual(tc.balanceOf(db, keys.alice.pub), before.alice + 120);
-  assert.strictEqual(tc.balanceOf(db, keys.bob.pub), before.bob + 120);
+  assert.strictEqual(tc.balanceOf(db, keys.alice.pub), before.alice + 120 * TUG);
+  assert.strictEqual(tc.balanceOf(db, keys.bob.pub), before.bob + 120 * TUG);
 });
 
 test('an illegal move over the match layer is a client error, not a crash', (t) => {

@@ -45,7 +45,7 @@ const MIME = {
 function build(cfg) {
   const db = dbMod.open(cfg.dbPath);
   const driver = walletApi.loadDriver(cfg);
-  const bankFor = (mode) => bankMod.bankFor(db, cfg, mode);
+  const bankFor = (mode, spend) => bankMod.bankFor(db, cfg, mode, spend);
   const crash = crashMod.createCrash({ db, cfg, bankFor });
   const geo = geoMod.createGeo(cfg);
   const publicDir = path.join(cfg.root, 'public');
@@ -307,12 +307,13 @@ function build(cfg) {
     * also get `bankFor`, so they can settle against the bank the round was opened with
     * rather than whatever the current request claims.
     */
-  const gameCtx = (ctx, mode) => {
+  const gameCtx = (ctx, mode, spend) => {
     const user = requireUser(ctx);
     limits.requireNotExcluded(user);
-    const wanted = mode === 'demo' ? 'demo' : 'real';
+    const wanted = ['demo', 'token'].includes(mode) ? mode : 'real';
     if (wanted === 'demo' && !cfg.demo.enabled) throw new U.BadRequest('practice mode is disabled');
-    return { db, cfg, user, bank: bankFor(wanted), bankFor };
+    if (wanted === 'token' && !cfg.token.enabled) throw new U.BadRequest('the site token is disabled');
+    return { db, cfg, user, bank: bankFor(wanted, spend), bankFor };
   };
 
   /**
@@ -320,24 +321,24 @@ function build(cfg) {
    * dice already uses `mode` for the roll direction, and overloading it would have made
    * "play for free" and "roll over" the same field.
    */
-  const modeOf = (src) => (src?.wallet === 'demo' ? 'demo' : 'real');
+  const modeOf = (src) => (['demo', 'token'].includes(src?.wallet) ? src.wallet : 'real');
 
   add('POST', '/api/bet/dice', async (ctx, req) => {
     checkCsrf(req, ctx);
     const body = await U.readJsonBody(req);
-    return dice.play(gameCtx(ctx, modeOf(body)), body);
+    return dice.play(gameCtx(ctx, modeOf(body), body.spend), body);
   });
 
   add('POST', '/api/bet/limbo', async (ctx, req) => {
     checkCsrf(req, ctx);
     const body = await U.readJsonBody(req);
-    return limbo.play(gameCtx(ctx, modeOf(body)), body);
+    return limbo.play(gameCtx(ctx, modeOf(body), body.spend), body);
   });
 
   add('POST', '/api/bet/mines/start', async (ctx, req) => {
     checkCsrf(req, ctx);
     const body = await U.readJsonBody(req);
-    return mines.start(gameCtx(ctx, modeOf(body)), body);
+    return mines.start(gameCtx(ctx, modeOf(body), body.spend), body);
   });
 
   add('POST', '/api/bet/mines/reveal', async (ctx, req) => {
@@ -359,7 +360,7 @@ function build(cfg) {
   add('POST', '/api/bet/slots', async (ctx, req) => {
     checkCsrf(req, ctx);
     const body = await U.readJsonBody(req);
-    return slots.play(gameCtx(ctx, modeOf(body)), body);
+    return slots.play(gameCtx(ctx, modeOf(body), body.spend), body);
   });
 
   add('GET', '/api/bet/slots/info', async () => slots.info(cfg));
@@ -368,7 +369,7 @@ function build(cfg) {
   add('POST', '/api/bet/puzzle/start', async (ctx, req) => {
     checkCsrf(req, ctx);
     const body = await U.readJsonBody(req);
-    return puzzle.start(gameCtx(ctx, modeOf(body)), body);
+    return puzzle.start(gameCtx(ctx, modeOf(body), body.spend), body);
   });
 
   add('POST', '/api/bet/puzzle/reveal', async (ctx, req) => {
@@ -392,7 +393,7 @@ function build(cfg) {
   add('POST', '/api/bet/debertz/start', async (ctx, req) => {
     checkCsrf(req, ctx);
     const body = await U.readJsonBody(req);
-    return debertz.start(gameCtx(ctx, modeOf(body)), body);
+    return debertz.start(gameCtx(ctx, modeOf(body), body.spend), body);
   });
 
   add('POST', '/api/bet/debertz/trump', async (ctx, req) => {
@@ -416,7 +417,7 @@ function build(cfg) {
   add('POST', '/api/bet/preferans/start', async (ctx, req) => {
     checkCsrf(req, ctx);
     const body = await U.readJsonBody(req);
-    return preferans.start(gameCtx(ctx, modeOf(body)), body);
+    return preferans.start(gameCtx(ctx, modeOf(body), body.spend), body);
   });
 
   add('POST', '/api/bet/preferans/trump', async (ctx, req) => {
@@ -506,6 +507,9 @@ function build(cfg) {
       nextNonce: key ? tokenchain.nextNonce(db, key.pubkey) : 0,
       height: tip ? tip.height : -1,
       head: tip ? tip.hash : null,
+      // Where a stake is signed to. The wallet needs it to bet, not only to enter a match.
+      houseKey: matches.houseKey(db).publicRaw,
+      betLimits: cfg.token.bet,
       // Read off the chain, not off the config, so what a player is shown is what the
       // ledger actually says. The cap is checkable: every token was minted in block zero
       // and the verifier refuses a chain that mints anywhere else.
@@ -593,6 +597,25 @@ function build(cfg) {
   add('GET', '/api/arcade/leaderboard', async (ctx, req) => {
     const url = new URL(req.url, 'http://x');
     return { scores: arcade.leaderboard(db, url.searchParams.get('game'), url.searchParams.get('limit')) };
+  });
+
+  // The imported puzzle pictures, as data URIs. Cached in memory because the file does
+  // not change while the server is running: the importer says to restart, and this is why.
+  let picturePack = null;
+  add('GET', '/api/puzzle/pictures', async () => {
+    if (!picturePack) {
+      picturePack = { pictures: {} };
+      try {
+        const file = path.join(cfg.dataDir, 'puzzle-pictures.json');
+        if (fs.existsSync(file)) {
+          const pack = JSON.parse(fs.readFileSync(file, 'utf8'));
+          for (const [key, pic] of Object.entries(pack.pictures || {})) {
+            picturePack.pictures[key] = `data:${pic.mime};base64,${pic.data}`;
+          }
+        }
+      } catch { /* no pack; the drawn pictures stand alone */ }
+    }
+    return picturePack;
   });
 
   add('GET', '/api/admin/arcade', async (ctx, req) => {

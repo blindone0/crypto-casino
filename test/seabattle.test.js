@@ -20,6 +20,11 @@ const sb = require('../src/seabattle');
 const tc = require('../src/tokenchain');
 const match = require('../src/match');
 
+// A tugrik is divisible to eight places, like everything else here, so every stake below
+// is written as whole tugriks times TUG. Bare numbers would be hundred-millionths of a
+// coin and far under the table minimum.
+const TUG = 100000000;
+
 const cell = (x, y) => y * sb.SIZE + x;
 
 /** A legal fleet, laid out by hand so the tests do not depend on the random placer. */
@@ -185,7 +190,7 @@ function spend(db, key, amount) {
 }
 
 /** Start a seabattle match with both stakes escrowed. */
-function started(db, cfg, users, keys, stake = 100) {
+function started(db, cfg, users, keys, stake = 100 * TUG) {
   const made = match.create(db, cfg, users.alice, {
     game: 'seabattle', stake, spend: spend(db, keys.alice, stake),
   });
@@ -305,7 +310,7 @@ test('a hit keeps the turn and a miss gives it away', (t) => {
 test('sinking the last ship wins the match and pays out', (t) => {
   const { cfg, db, users, keys } = setup();
   t.after(() => cleanup(cfg, db));
-  const stake = 100;
+  const stake = 100 * TUG;
   const id = started(db, cfg, users, keys, stake);
   match.act(db, cfg, users.alice, { id, fleet: GOOD_FLEET });
   match.act(db, cfg, users.bob, { id, fleet: OTHER_FLEET });
@@ -349,7 +354,7 @@ test('the clock does not run while the fleets are still being placed', (t) => {
 test('a player who never sets up loses to the one who did', (t) => {
   const { cfg, db, users, keys } = setup();
   t.after(() => cleanup(cfg, db));
-  const id = started(db, cfg, users, keys, 100);
+  const id = started(db, cfg, users, keys, 100 * TUG);
   match.act(db, cfg, users.alice, { id, fleet: GOOD_FLEET });
 
   assert.throws(() => match.claimTimeout(db, cfg, users.alice, id), /time to set up/);
@@ -361,7 +366,7 @@ test('a player who never sets up loses to the one who did', (t) => {
 
   assert.strictEqual(out.reason, 'no-setup');
   assert.strictEqual(out.result, 'host');
-  const prize = 200 - Math.floor(200 * cfg.match.rake);
+  const prize = (200 * TUG) - Math.floor(200 * TUG * cfg.match.rake);
   assert.strictEqual(tc.balanceOf(db, keys.alice.pub), before + prize);
 });
 
@@ -372,7 +377,7 @@ test('if neither player sets up, both stakes go back', (t) => {
     alice: tc.balanceOf(db, keys.alice.pub),
     bob: tc.balanceOf(db, keys.bob.pub),
   };
-  const id = started(db, cfg, users, keys, 150);
+  const id = started(db, cfg, users, keys, 150 * TUG);
   db.run('UPDATE matches SET started_at=? WHERE id=?',
     Math.floor(Date.now() / 1000) - cfg.match.setupSeconds - 1, id);
 

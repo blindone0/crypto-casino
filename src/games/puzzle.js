@@ -85,10 +85,37 @@ function brokenTiles(serverSeed, clientSeed, nonce, tier) {
   return tiles.slice(0, tier.broken).sort((a, b) => a - b);
 }
 
+/**
+ * Pictures the operator imported with tools/puzzle-import.js, if there are any.
+ *
+ * Read once and cached. They join the drawn ones in the same pool, so an imported picture
+ * is chosen the same way and by the same seed as a drawn one; nothing here treats them
+ * differently, and nothing here looks at what is in them.
+ */
+let importedKeys = null;
+function imported(cfg) {
+  if (importedKeys) return importedKeys;
+  importedKeys = [];
+  try {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const file = path.join(cfg.dataDir, 'puzzle-pictures.json');
+    if (fs.existsSync(file)) {
+      const pack = JSON.parse(fs.readFileSync(file, 'utf8'));
+      importedKeys = Object.keys(pack.pictures || {});
+    }
+  } catch { /* no pack, or an unreadable one; the drawn pictures stand alone */ }
+  return importedKeys;
+}
+
+/** Forget the cache. The importer tells the operator to restart, but tests need this. */
+const forgetImported = () => { importedKeys = null; };
+
 /** Which picture this round shows, also from the seed so it is not cherry-picked. */
-function pictureFor(serverSeed, clientSeed, nonce) {
+function pictureFor(serverSeed, clientSeed, nonce, cfg) {
+  const pool = [...PICTURES, ...imported(cfg)];
   const [f] = fair.floats(serverSeed, `${clientSeed}:picture`, nonce, 1);
-  return PICTURES[Math.floor(f * PICTURES.length)];
+  return pool[Math.floor(f * pool.length)];
 }
 
 const activeGame = (db, userId) => db.get(
@@ -137,7 +164,7 @@ function start({ db, cfg, user, bank }, body) {
     const seed = auth.activeSeed(db, user.id);
     const nonce = auth.claimNonce(db, seed.id);
     const broken = brokenTiles(seed.seed, user.client_seed, nonce, tier);
-    const picture = pictureFor(seed.seed, user.client_seed, nonce);
+    const picture = pictureFor(seed.seed, user.client_seed, nonce, cfg);
 
     bank.takeStake(user, wager, `puzzle#${nonce}`);
     db.run(
@@ -289,6 +316,7 @@ function info(cfg) {
 }
 
 module.exports = {
+  forgetImported,
   TIERS, PICTURES, tierOf, choose, multiplierFor, ladder, brokenTiles, pictureFor,
   start, reveal, cashout, current, info,
 };

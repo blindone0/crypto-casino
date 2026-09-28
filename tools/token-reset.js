@@ -17,6 +17,10 @@
 const configMod = require('../src/config');
 const dbMod = require('../src/db');
 const tokenchain = require('../src/tokenchain');
+const U = require('../src/util');
+
+// Tugriks are divisible to eight places, so raw units are unreadable. Print the coin.
+const tug = (units) => U.formatAmount(units);
 
 function main() {
   const confirmed = process.argv.includes('--yes');
@@ -31,12 +35,12 @@ function main() {
   console.log(`database    ${cfg.dbPath}`);
   console.log(`blocks      ${blocks}`);
   console.log(`wallets     ${wallets}`);
-  console.log(`held        ${held} ${cfg.token.symbol}`);
+  console.log(`held        ${tug(held)} ${cfg.token.symbol}`);
   if (current) {
-    console.log(`minted      ${current.minted} (this chain's fixed supply)`);
-    console.log(`burned      ${current.burned}`);
+    console.log(`minted      ${tug(current.minted)} (this chain's fixed supply)`);
+    console.log(`burned      ${tug(current.burned)}`);
   }
-  console.log(`new supply  ${cfg.token.maxSupply} ${cfg.token.symbol}`);
+  console.log(`new supply  ${tug(cfg.token.maxSupply)} ${cfg.token.symbol}`);
 
   if (!confirmed) {
     console.log('');
@@ -64,7 +68,7 @@ function main() {
   console.log('');
   console.log(made ? 'Genesis block written.' : 'Genesis already present, nothing minted.');
   console.log(`treasury    ${tokenchain.treasuryKey(db).publicRaw}`);
-  console.log(`supply      ${supply.minted} ${cfg.token.symbol}, all of it in the treasury`);
+  console.log(`supply      ${tug(supply.minted)} ${cfg.token.symbol}, all of it in the treasury`);
   console.log(`verifies    ${check.ok ? 'yes' : `NO: ${check.reason}`}`);
   console.log('');
   console.log('Every wallet will need to be created again from its phrase.');

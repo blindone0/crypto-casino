@@ -64,6 +64,10 @@ const state = {
   wallet: 'real', demoBalance: 0,
   // Head-to-head matches: the lobby, the one being watched, its board and its poll.
   matchLobby: null, matchId: null, matchView: null, board: null, matchTimer: null,
+  // Pictures the operator imported for the puzzle, keyed the same way the drawn ones are.
+  puzzlePictures: null,
+  // The tugrik wallet, when it is the active one.
+  tokenBalance: 0, tokenNonce: 0, tokenPubkey: null, tokenHouse: null,
 };
 
 const UNIT = 1e8;
@@ -82,8 +86,12 @@ async function api(path, { method = 'GET', body } = {}) {
   // Anything that stakes money carries the active wallet, set in one place rather than
   // at each of the dozen call sites, so a new game cannot forget it and bet real funds.
   let payload = body;
-  if (method === 'POST' && state.wallet === 'demo' && STAKE_ROUTES.some((r) => path.startsWith(r))) {
-    payload = { ...(body || {}), wallet: 'demo' };
+  if (method === 'POST' && state.wallet !== 'real' && STAKE_ROUTES.some((r) => path.startsWith(r))) {
+    payload = { ...(body || {}), wallet: state.wallet };
+    // A tugrik stake is a transfer, and a transfer needs the player's signature. Done here,
+    // in the one place every staking request passes through, so a new game cannot forget
+    // it and cannot send an unsigned bet the server would refuse.
+    if (state.wallet === 'token') payload.spend = await signStakeFor(payload);
   }
   if (payload !== undefined) headers['content-type'] = 'application/json';
   if (state.csrf && method !== 'GET') headers['x-csrf-token'] = state.csrf;
@@ -110,11 +118,24 @@ function toast(msg, kind = '') {
   }, 3600);
 }
 
+/** Put a already-formatted figure in the balance box. Tugriks are whole and not divided. */
+function setBalanceRaw(text, direction) {
+  const box = $('#balanceBox');
+  const v = $('#balanceValue');
+  box.hidden = false;
+  v.textContent = text;
+  if (direction) {
+    v.className = `value ${direction > 0 ? 'flash' : 'flash-down'}`;
+    setTimeout(() => { v.className = 'value'; }, 320);
+  }
+}
+
 function setBalance(units, direction) {
   const box = $('#balanceBox');
   const v = $('#balanceValue');
   box.hidden = false;
   if (state.wallet === 'demo') state.demoBalance = units;
+  else if (state.wallet === 'token') state.tokenBalance = units;
   else if (state.user) state.user.balance = units;
   v.textContent = fmt(units);
   if (direction) {
@@ -298,28 +319,79 @@ function afterAuth() {
 }
 
 /** Reflect the active wallet everywhere: balance, styling, banner, switch. */
+/** True while the active wallet is the site token. Same units; a different currency. */
+const inTokens = () => state.wallet === 'token';
+
 function applyWallet() {
   const demo = state.wallet === 'demo';
   document.body.classList.toggle('practice', demo);
+  document.body.classList.toggle('tokens', inTokens());
   for (const b of document.querySelectorAll('#modeSwitch button')) {
     b.classList.toggle('on', b.dataset.wallet === state.wallet);
   }
-  setBalance(demo ? state.demoBalance : (state.user?.balance ?? 0));
+  // The currency label follows the wallet, because a tugrik balance shown as "1000.00000000
+  // CRD" is not a smaller mistake than showing the wrong number.
+  const label = $('#currencyLabel');
+  if (label) label.textContent = inTokens() ? (state.cfg?.token?.symbol || 'TUG') : state.cfg?.currency;
+  if (inTokens()) setBalance(state.tokenBalance ?? 0);
+  else setBalance(demo ? state.demoBalance : (state.user?.balance ?? 0));
   renderBanners();
 }
 
 async function setWallet(next) {
   if (state.wallet === next) return;
+  if (next === 'token' && !state.cfg?.token?.enabled) return;
   state.wallet = next;
   try { localStorage.setItem('wallet', next); } catch { /* private mode */ }
   if (next === 'demo' && state.user) {
     try { state.demoBalance = (await api('/api/demo')).balance; } catch { /* keep last */ }
   }
+  if (next === 'token' && state.user) await refreshTokenBalance();
+  if (next === 'token' && state.user && !tokenKey) toast(t('arc.needUnlock'), 'warn');
   // Any half-finished round belongs to the other wallet, so start clean.
   state.mines = null;
   state.pref = null;
   applyWallet();
   renderGame();
+}
+
+/**
+ * Sign the stake on an outgoing bet.
+ *
+ * The amount is read from the request rather than passed in, because every game words it
+ * the same way and there is exactly one field that means "how much". A round that has
+ * already been paid for (revealing a tile, cashing out) has no amount and needs no
+ * signature: the stake went in when the round opened.
+ */
+async function signStakeFor(payload) {
+  const amount = payload.amount ?? payload.wager;
+  if (amount === undefined || amount === null || amount === '') return undefined;
+  const units = Math.round(Number(amount) * UNIT);
+  if (!Number.isSafeInteger(units) || units <= 0) return undefined;
+
+  if (!tokenKey) {
+    await refreshTokenBalance();
+    throw new Error(t('arc.needUnlock'));
+  }
+  await refreshTokenBalance();
+  if (!state.tokenHouse) throw new Error(t('tok.noHouse'));
+
+  const tx = {
+    from: tokenKey.publicKey, to: state.tokenHouse, amount: units, nonce: state.tokenNonce,
+  };
+  const sig = await tokenKeys.signTransfer(tokenKey, tx);
+  return { from: tx.from, nonce: tx.nonce, sig };
+}
+
+/** The tugrik balance, and the next nonce a stake will have to be signed with. */
+async function refreshTokenBalance() {
+  try {
+    const info = await api('/api/token');
+    state.tokenBalance = info.balance || 0;
+    state.tokenNonce = info.nextNonce || 0;
+    state.tokenPubkey = info.pubkey || null;
+    state.tokenHouse = info.houseKey || null;
+  } catch { /* keep the last figure rather than blanking it */ }
 }
 
 async function signOut() {
@@ -1564,7 +1636,17 @@ function paintPuzzle() {
   const broken = new Set(g.state && g.state !== 'active' ? (g.broken || []) : []);
 
   const art = el('div', { class: 'puzzle-art' });
-  art.innerHTML = pictureSvg(g.picture || 'deco');
+  const key = g.picture || 'deco';
+  const own = state.puzzlePictures?.[key];
+  if (own) {
+    // An imported picture. Set as a background rather than written into the markup, so a
+    // filename can never become markup on the page.
+    art.style.backgroundImage = `url("${own}")`;
+    art.style.backgroundSize = 'cover';
+    art.style.backgroundPosition = 'center';
+  } else {
+    art.innerHTML = pictureSvg(key);
+  }
 
   // Real jigsaw pieces rather than a grid of squares: neighbouring pieces share an edge
   // exactly, so a tab on one is the blank on the other. The cut is seeded from the round
@@ -2823,12 +2905,22 @@ function renderGame() {
   else if (state.game === 'limbo') renderLimbo();
   else if (state.game === 'mines') { state.mines = null; renderMines(); loadMinesState(); }
   else if (state.game === 'slots') renderSlots();
-  else if (state.game === 'puzzle') renderPuzzle();
+  else if (state.game === 'puzzle') { loadPuzzlePictures(); renderPuzzle(); }
   else if (state.game === 'preferans') renderPreferans();
   else if (state.game === 'debertz') renderDebertz();
   else if (state.game === 'arcade') renderArcade();
   else if (state.game === 'match') renderMatch();
   else renderCrash();
+}
+
+/** Fetch the imported picture pack once. Harmless and empty if none were imported. */
+async function loadPuzzlePictures() {
+  if (state.puzzlePictures) return;
+  state.puzzlePictures = {};
+  try {
+    const pack = await api('/api/puzzle/pictures');
+    state.puzzlePictures = pack.pictures || {};
+  } catch { /* the drawn pictures stand alone */ }
 }
 
 async function loadMinesState() {

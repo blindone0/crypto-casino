@@ -308,7 +308,7 @@ test('the supply does not grow however many wallets register', (t) => {
 
 test('when the treasury runs dry the grants stop rather than inventing more', (t) => {
   // A supply of exactly two grants. The third wallet gets a key and nothing else.
-  const { cfg, db } = setup({ token: { maxSupply: 2000, welcomeGrant: 1000 } });
+  const { cfg, db } = setup({ token: { maxSupply: 2000 * 100000000, welcomeGrant: 1000 * 100000000 } });
   t.after(() => cleanup(cfg, db));
   for (let i = 1; i <= 3; i += 1) {
     db.run(
@@ -320,11 +320,11 @@ test('when the treasury runs dry the grants stop rather than inventing more', (t
   const second = db.tx(() => tc.registerKey(db, 2, makeKey().pub, cfg));
   const third = db.tx(() => tc.registerKey(db, 3, makeKey().pub, cfg));
 
-  assert.strictEqual(first.balance, 1000);
-  assert.strictEqual(second.balance, 1000);
+  assert.strictEqual(first.balance, 1000 * 100000000);
+  assert.strictEqual(second.balance, 1000 * 100000000);
   assert.strictEqual(third.balance, 0, 'the faucet is empty, and stays empty');
   assert.strictEqual(third.granted, false);
-  assert.strictEqual(tc.supply(db).minted, 2000);
+  assert.strictEqual(tc.supply(db).minted, 2000 * 100000000);
   assert.ok(tc.verifyChain(db).ok);
 });
 
@@ -346,16 +346,16 @@ test('a mint after the genesis block is refused by the verifier', (t) => {
 });
 
 test('raising maxSupply later does not create anything', (t) => {
-  const { cfg, db } = setup({ token: { maxSupply: 5000 } });
+  const { cfg, db } = setup({ token: { maxSupply: 5000 * 100000000 } });
   t.after(() => cleanup(cfg, db));
   tc.ensureGenesis(db, cfg);
-  assert.strictEqual(tc.supply(db).minted, 5000);
+  assert.strictEqual(tc.supply(db).minted, 5000 * 100000000);
 
   // The operator edits the config and restarts. The chain already exists, so the genesis
   // block is settled and signed, and nothing about it changes.
   const greedy = { ...cfg, token: { ...cfg.token, maxSupply: 999999999 } };
   assert.strictEqual(tc.ensureGenesis(db, greedy), false);
-  assert.strictEqual(tc.supply(db).minted, 5000);
+  assert.strictEqual(tc.supply(db).minted, 5000 * 100000000);
   assert.ok(tc.verifyChain(db).ok);
 });
 
@@ -374,12 +374,12 @@ test('burning takes tokens out of circulation for good', (t) => {
   db.tx(() => tc.registerKey(db, 1, A.pub, cfg));
 
   const before = tc.supply(db);
-  db.tx(() => tc.appendBlock(db, [{ type: 'burn', from: A.pub, amount: 250, memo: 'arcade' }]));
+  db.tx(() => tc.appendBlock(db, [{ type: 'burn', from: A.pub, amount: 250 * 100000000, memo: 'arcade' }]));
   const after = tc.supply(db);
 
   assert.strictEqual(after.minted, before.minted, 'burning does not change what was minted');
-  assert.strictEqual(after.burned, 250);
-  assert.strictEqual(after.circulating, before.circulating - 250);
+  assert.strictEqual(after.burned, 250 * 100000000);
+  assert.strictEqual(after.circulating, before.circulating - 250 * 100000000);
   // And it is gone: nothing re-mints it.
   assert.ok(after.circulating < cfg.token.maxSupply);
   assert.ok(tc.verifyChain(db).ok);

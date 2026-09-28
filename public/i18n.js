@@ -295,6 +295,15 @@ const STRINGS = {
   },
 
   'tok.coin': { en: 'Tugrik', ru: 'Тугрик' },
+  'tok.wallet': { en: 'Tugriks', ru: 'Тугрики' },
+  'tok.noHouse': {
+    en: 'The token wallet is not ready yet. Try again in a moment.',
+    ru: 'Токен-кошелёк ещё не готов. Попробуйте через мгновение.',
+  },
+  'tok.betHint': {
+    en: 'Staking tugriks signs a transfer with your key. The operator cannot place a bet for you.',
+    ru: 'Ставка в тугриках подписывается вашим ключом. Оператор не может сделать ставку за вас.',
+  },
   'tok.coins': { en: 'tugriks', ru: 'тугриков' },
   'tok.title': { en: 'Token wallet', ru: 'Токен-кошелёк' },
   'tok.nav': { en: 'Token', ru: 'Токен' },

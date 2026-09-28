@@ -18,6 +18,11 @@ const { testConfig, cleanup } = require('./helpers');
 const { build } = require('../src/server');
 const tc = require('../src/tokenchain');
 
+// A tugrik is divisible to eight places, like everything else here, so every stake below
+// is written as whole tugriks times TUG. Bare numbers would be hundred-millionths of a
+// coin and far under the table minimum.
+const TUG = 100000000;
+
 function makeClient(base) {
   let cookie = '';
   let csrf = null;
@@ -97,7 +102,7 @@ test('every match route answers, and a full game settles over HTTP', async (t) =
   // --- post a challenge
   const made = await alice.client.call('/api/match/create', {
     method: 'POST',
-    body: { game: 'chess', stake: 100, spend: await stake(alice, 100) },
+    body: { game: 'chess', stake: 100 * TUG, spend: await stake(alice, 100 * TUG) },
   });
   assert.strictEqual(made.status, 200, `create: ${JSON.stringify(made.data)}`);
   const id = made.data.id;
@@ -108,7 +113,7 @@ test('every match route answers, and a full game settles over HTTP', async (t) =
 
   // --- take it up
   const joined = await bob.client.call('/api/match/join', {
-    method: 'POST', body: { id, spend: await stake(bob, 100) },
+    method: 'POST', body: { id, spend: await stake(bob, 100 * TUG) },
   });
   assert.strictEqual(joined.status, 200, `join: ${JSON.stringify(joined.data)}`);
 
@@ -154,10 +159,10 @@ test('every match route answers, and a full game settles over HTTP', async (t) =
   assert.deepStrictEqual(done.data.view.san, ['f3', 'e5', 'g4', 'Qh4#']);
 
   // --- the pot moved, less the rake
-  const rake = Math.floor(200 * cfg.match.rake);
+  const rake = Math.floor(200 * TUG * cfg.match.rake);
   const after = await alice.client.call('/api/match');
-  const loserPaid = cfg.token.welcomeGrant - 100;
-  const winnerPaid = cfg.token.welcomeGrant - 100 + (200 - rake);
+  const loserPaid = cfg.token.welcomeGrant - 100 * TUG;
+  const winnerPaid = cfg.token.welcomeGrant - 100 * TUG + (200 * TUG - rake);
   assert.ok([loserPaid, winnerPaid].includes(after.data.balance),
     `unexpected balance ${after.data.balance}`);
 });
@@ -166,12 +171,12 @@ test('the routes that move money refuse a request without a CSRF token', async (
   const { cfg, app, base } = await boot();
   t.after(async () => { await app.stop(); cleanup(cfg, app.db); });
   const alice = await player(base, 'alice');
-  const spend = await stake(alice, 100);
+  const spend = await stake(alice, 100 * TUG);
 
   const res = await fetch(`${base}/api/match/create`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ game: 'chess', stake: 100, spend }),
+    body: JSON.stringify({ game: 'chess', stake: 100 * TUG, spend }),
   });
   assert.ok(res.status === 401 || res.status === 403, `got ${res.status}`);
 });
@@ -185,11 +190,11 @@ test('the routes that move money refuse a stranger', async (t) => {
   const carol = await player(base, 'carol');
 
   const made = await alice.client.call('/api/match/create', {
-    method: 'POST', body: { game: 'chess', stake: 100, spend: await stake(alice, 100) },
+    method: 'POST', body: { game: 'chess', stake: 100 * TUG, spend: await stake(alice, 100 * TUG) },
   });
   const id = made.data.id;
   await bob.client.call('/api/match/join', {
-    method: 'POST', body: { id, spend: await stake(bob, 100) },
+    method: 'POST', body: { id, spend: await stake(bob, 100 * TUG) },
   });
 
   for (const [path, body] of [
@@ -214,10 +219,10 @@ test('resigning over HTTP settles the match', async (t) => {
   const alice = await player(base, 'alice');
   const bob = await player(base, 'bob');
   const made = await alice.client.call('/api/match/create', {
-    method: 'POST', body: { game: 'chess', stake: 200, spend: await stake(alice, 200) },
+    method: 'POST', body: { game: 'chess', stake: 200 * TUG, spend: await stake(alice, 200 * TUG) },
   });
   await bob.client.call('/api/match/join', {
-    method: 'POST', body: { id: made.data.id, spend: await stake(bob, 200) },
+    method: 'POST', body: { id: made.data.id, spend: await stake(bob, 200 * TUG) },
   });
 
   const out = await alice.client.call('/api/match/resign', {
@@ -226,9 +231,9 @@ test('resigning over HTTP settles the match', async (t) => {
   assert.strictEqual(out.status, 200);
   assert.strictEqual(out.data.result, 'guest');
 
-  const prize = 400 - Math.floor(400 * cfg.match.rake);
+  const prize = (400 * TUG) - Math.floor(400 * TUG * cfg.match.rake);
   const bobLobby = await bob.client.call('/api/match');
-  assert.strictEqual(bobLobby.data.balance, cfg.token.welcomeGrant - 200 + prize);
+  assert.strictEqual(bobLobby.data.balance, cfg.token.welcomeGrant - 200 * TUG + prize);
 });
 
 test('withdrawing a challenge over HTTP returns the stake', async (t) => {
@@ -237,7 +242,7 @@ test('withdrawing a challenge over HTTP returns the stake', async (t) => {
 
   const alice = await player(base, 'alice');
   const made = await alice.client.call('/api/match/create', {
-    method: 'POST', body: { game: 'chess', stake: 300, spend: await stake(alice, 300) },
+    method: 'POST', body: { game: 'chess', stake: 300 * TUG, spend: await stake(alice, 300 * TUG) },
   });
   const out = await alice.client.call('/api/match/cancel', {
     method: 'POST', body: { id: made.data.id },

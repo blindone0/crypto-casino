@@ -269,6 +269,28 @@ CREATE TABLE IF NOT EXISTS arcade_plays (
 CREATE INDEX IF NOT EXISTS ix_arcade_board ON arcade_plays(game, score DESC);
 CREATE INDEX IF NOT EXISTS ix_arcade_user ON arcade_plays(user_id, game);
 
+-- Bets staked in the site token. A separate log from the main bets table, for the same
+-- reason demo has one: tugrik play is not casino-currency play, the two must never be
+-- added together, and the operator's P&L is in one currency. The money itself lives on
+-- the token chain; this table is the record of what each block was for.
+--
+-- No backticks in this comment. The whole schema is a JS template literal, and one here
+-- ends it. That has now happened twice.
+CREATE TABLE IF NOT EXISTS token_bets (
+  id         INTEGER PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  game       TEXT NOT NULL,
+  wager      INTEGER NOT NULL,
+  multiplier REAL NOT NULL DEFAULT 0,
+  payout     INTEGER NOT NULL DEFAULT 0,
+  profit     INTEGER NOT NULL DEFAULT 0,
+  nonce      INTEGER NOT NULL DEFAULT 0,
+  detail     TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_token_bets_user ON token_bets(user_id, id DESC);
+CREATE INDEX IF NOT EXISTS ix_token_bets_game ON token_bets(game, created_at DESC);
+
 -- Head-to-head matches played for tokens: chess and the rest. The board lives here, not
 -- in the browser, because the moment a stake rides on the result a client-side rules check
 -- is worth nothing. Stakes are escrowed on the token chain, so the money movements are

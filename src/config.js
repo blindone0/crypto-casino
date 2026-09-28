@@ -72,20 +72,32 @@ const DEFAULTS = {
     symbol: 'TUG',
     name: 'Tugrik',
 
-    // THE SUPPLY IS FIXED. Every tugrik that will ever exist is minted once, into the
-    // treasury, in the genesis block. Nothing afterwards creates any: a welcome grant is
-    // a transfer out of the treasury, not a mint, and the chain verifier refuses a mint
+    // A tugrik is divisible to eight places, the same as everything else here and the
+    // same as a bitcoin. Every figure below is in those hundred-millionths.
+    //
+    // It has to be divisible or it cannot be staked: a one-tugrik bet at 1.98x pays 1.98
+    // tugriks, and a currency that can only hold whole numbers would have to round that,
+    // which is a house edge nobody agreed to on top of the one that is published.
+    decimals: 8,
+
+    // THE SUPPLY IS FIXED at 21,000,000 tugriks. Every one of them is minted once, into
+    // the treasury, in the genesis block. Nothing afterwards creates any: a welcome grant
+    // is a transfer out of the treasury, not a mint, and the chain verifier refuses a mint
     // in any block but the first. That makes the cap something a player can check by
     // replaying the chain rather than something the operator promises.
     //
     // Changing this number on a chain that already exists does nothing. The genesis block
     // is signed and hashed, and every later block links to it, so the supply is settled
     // the first time the server starts and cannot be revised afterwards.
-    maxSupply: 21000000,
+    maxSupply: 21000000 * 100000000,
 
     // Paid out of the treasury to each new wallet, first come first served. When the
     // treasury runs dry the grants stop; they do not resume by inventing more.
-    welcomeGrant: 1000,
+    welcomeGrant: 1000 * 100000000,
+
+    // Staking tugriks on the ordinary casino games. The house pays wins out of what it
+    // holds, so the real ceiling is its own balance rather than a number set here.
+    bet: { min: 1 * 100000000, max: 2000 * 100000000 },
   },
 
   // ---- ARCADE -----------------------------------------------------------
@@ -94,7 +106,7 @@ const DEFAULTS = {
   // the token sale, which is how the arcades this imitates actually earned.
   arcade: {
     enabled: true,
-    tokenCost: 10,          // tokens burned per play
+    tokenCost: 10 * 100000000,   // tugriks burned per play, in hundred-millionths
     playTtlSeconds: 7200,   // an open play older than this is a stale tab, not a long game
   },
 
@@ -106,8 +118,8 @@ const DEFAULTS = {
   match: {
     enabled: true,
     rake: 0.05,             // taken once from the pot, on every settled match
-    minStake: 10,
-    maxStake: 5000,
+    minStake: 10 * 100000000,
+    maxStake: 5000 * 100000000,
     maxOpenPerUser: 3,      // stops one account papering the lobby with challenges
     // How long a game that has to be set up (placing a fleet) waits before the player who
     // did turn up can claim it. Without a deadline an absent player holds both stakes.
