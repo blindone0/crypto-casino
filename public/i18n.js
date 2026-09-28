@@ -89,7 +89,7 @@ const STRINGS = {
   'slots.paytable': { en: 'Paytable', ru: 'Таблица выплат' },
   'slots.lines': { en: 'Paylines', ru: 'Линий' },
   'slots.rtp': { en: 'Return to player', ru: 'Возврат игроку' },
-  'slots.freeSpins': { en: '{n} free spins!', ru: '{n} фриспинов!' },
+  'slots.freeSpins': { en: '{n} {freeSpins}!', ru: '{n} {freeSpins}!' },
   'slots.freeSpinRun': { en: 'Free spin {i} of {n}', ru: 'Фриспин {i} из {n}' },
   'slots.scatterPays': { en: 'Scatter pays (x total bet)', ru: 'Скаттер (x общей ставки)' },
   'slots.ofAKind': { en: '3 / 4 / 5 of a kind', ru: '3 / 4 / 5 подряд' },
@@ -170,12 +170,13 @@ const STRINGS = {
   'pref.yourTurn': { en: 'Your turn', ru: 'Ваш ход' },
   'pref.waiting': { en: 'Opponents playing…', ru: 'Ходят соперники…' },
   'pref.tricks': { en: 'Tricks', ru: 'Взятки' },
+  'pref.nTricks': { en: '{n} {tricks}', ru: '{n} {tricks}' },
   'pref.you': { en: 'You', ru: 'Вы' },
   'pref.opponents': { en: 'Opponents', ru: 'Соперники' },
   'pref.trick': { en: 'Trick {n} of 10', ru: 'Взятка {n} из 10' },
   'pref.result': {
-    en: 'You took {n} tricks: {outcome}',
-    ru: 'Вы взяли {n} взяток: {outcome}',
+    en: 'You took {n} {tricksTaken}: {outcome}',
+    ru: 'Вы взяли {n} {tricksTaken}: {outcome}',
   },
   'pref.won': { en: 'paid {mult}x', ru: 'выплата {mult}x' },
   'pref.push': { en: 'stake returned', ru: 'ставка возвращена' },
@@ -260,7 +261,7 @@ const STRINGS = {
   'match.stake': { en: 'Stake', ru: 'Ставка' },
   'match.players': { en: 'Players', ru: 'Игроков' },
   'err.amount': { en: 'That is not an amount.', ru: 'Это не сумма.' },
-  'match.nPlayers': { en: '{n} players', ru: '{n} игрока' },
+  'match.nPlayers': { en: '{n} {players}', ru: '{n} {players}' },
   'match.seated': { en: 'Seated. Waiting for {n} of {of}.', ru: 'Вы за столом. Ждём: {n} из {of}.' },
   'match.rake': { en: 'House cut', ru: 'Комиссия' },
   'match.minStake': { en: 'Smallest stake', ru: 'Минимальная ставка' },
@@ -362,7 +363,7 @@ const STRINGS = {
   'tok.verifying': { en: 'Checking block {n} of {total}…', ru: 'Проверка блока {n} из {total}…' },
   'tok.verifyOk': {
     en: 'All {n} blocks check out: every link, every signature, every balance.',
-    ru: 'Все {n} блоков проверены: связи, подписи и балансы сходятся.',
+    ru: 'Проверено блоков: {n}. Связи, подписи и балансы сходятся.',
   },
   'tok.verifyFail': { en: 'Verification failed at block {h}: {why}', ru: 'Проверка не прошла на блоке {h}: {why}' },
   'tok.height': { en: 'Chain height', ru: 'Высота цепочки' },
@@ -419,8 +420,8 @@ const STRINGS = {
   'wallet.copy': { en: 'Copy', ru: 'Копировать' },
   'wallet.copied': { en: 'Copied', ru: 'Скопировано' },
   'wallet.confirmations': {
-    en: 'Credited after {n} confirmations.',
-    ru: 'Зачисление после {n} подтверждений.',
+    en: 'Credited after {n} {confirmations}.',
+    ru: 'Зачисление после {n} {confirmations}.',
   },
   'wallet.minDeposit': { en: 'Minimum deposit', ru: 'Минимальное пополнение' },
   'wallet.noMinimum': { en: 'no minimum', ru: 'без минимума' },
@@ -492,8 +493,8 @@ const STRINGS = {
     ru: 'Блокирует аккаунт на выбранный срок. Отменить или сократить нельзя.',
   },
   'limits.excludeConfirm': {
-    en: 'Lock the account for {n} days? This cannot be undone.',
-    ru: 'Заблокировать аккаунт на {n} дней? Отменить нельзя.',
+    en: 'Lock the account for {n} {days}? This cannot be undone.',
+    ru: 'Заблокировать аккаунт на {n} {days}? Отменить нельзя.',
   },
   'limits.playedToday': { en: 'Played today', ru: 'Сегодня в игре' },
   'limits.minutes': { en: '{n} min, {bets} bets', ru: '{n} мин, ставок: {bets}' },
@@ -530,12 +531,69 @@ function setLocale(code) {
 
 const getLocale = () => current;
 
+/**
+ * Counted nouns.
+ *
+ * English picks between two forms, Russian between three: 1 игрок, 2 игрока, 5 игроков.
+ * Baking one form into a string gets it right for a single number and wrong for the rest,
+ * which is how the seat picker came to offer "5 игрока".
+ *
+ * A string that counts something writes the noun as a placeholder naming a set here --
+ * '{n} {players}' -- and t() agrees it with the n it was handed. The set name is the same
+ * in both languages, so a translation cannot quietly drift out of step with its English.
+ *
+ * Two sets name the same noun because Russian also declines for the sentence around it: a
+ * bare count takes `tricks` ("6 взяток"), "you took" takes `tricksTaken` ("взяли 1 взятку").
+ */
+const PLURALS = {
+  players: { en: ['player', 'players'], ru: ['игрок', 'игрока', 'игроков'] },
+  tricks: { en: ['trick', 'tricks'], ru: ['взятка', 'взятки', 'взяток'] },
+  tricksTaken: { en: ['trick', 'tricks'], ru: ['взятку', 'взятки', 'взяток'] },
+  freeSpins: { en: ['free spin', 'free spins'], ru: ['фриспин', 'фриспина', 'фриспинов'] },
+  days: { en: ['day', 'days'], ru: ['день', 'дня', 'дней'] },
+  confirmations: {
+    en: ['confirmation', 'confirmations'],
+    ru: ['подтверждения', 'подтверждений', 'подтверждений'],
+  },
+};
+
+/**
+ * Which form a number takes: 0 for one, 1 for a few, 2 for many.
+ *
+ * The Russian rule reads the last digit, except that the teens are all "many" -- which is
+ * why 21 counts as one and 11 does not.
+ */
+function pluralIndex(lang, n) {
+  const abs = Math.abs(Math.trunc(n));
+  if (lang !== 'ru') return abs === 1 ? 0 : 1;
+  const tens = abs % 100;
+  if (tens >= 11 && tens <= 14) return 2;
+  const unit = abs % 10;
+  if (unit === 1) return 0;
+  if (unit >= 2 && unit <= 4) return 1;
+  return 2;
+}
+
+/** The right form of a counted noun: plural(5, 'players') is 'игроков' in Russian. */
+function plural(n, set, lang = current) {
+  const forms = PLURALS[set] && (PLURALS[set][lang] ?? PLURALS[set].en);
+  if (!forms) return set;
+  return forms[Math.min(pluralIndex(lang, n), forms.length - 1)];
+}
+
 /** Translate a key, filling {placeholders}. Falls back to English, then the key itself. */
 function t(key, vars) {
   const entry = STRINGS[key];
   let s = entry ? (entry[current] ?? entry.en) : key;
   if (vars) {
     for (const [k, v] of Object.entries(vars)) s = s.split(`{${k}}`).join(String(v));
+    // Whatever is left naming a counted noun agrees with n. Explicit vars are filled
+    // first, so a caller can still pass its own word under one of these names.
+    if (typeof vars.n === 'number') {
+      for (const set of Object.keys(PLURALS)) {
+        if (s.includes(`{${set}}`)) s = s.split(`{${set}}`).join(plural(vars.n, set));
+      }
+    }
   }
   return s;
 }
@@ -554,4 +612,4 @@ function applyAll(root = document) {
   document.dispatchEvent(new CustomEvent('localechange', { detail: { locale: current } }));
 }
 
-export { LANGS, STRINGS, t, setLocale, getLocale, applyAll };
+export { LANGS, STRINGS, PLURALS, t, plural, setLocale, getLocale, applyAll };

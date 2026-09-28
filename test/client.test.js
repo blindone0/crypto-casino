@@ -201,3 +201,96 @@ test('nothing in the client reaches for a remote origin', () => {
   }
   assert.deepStrictEqual(bad, [], 'these would be blocked by the CSP at runtime');
 });
+
+// ------------------------------------------------------------- counted nouns
+//
+// The checks above read the client as text. These run a piece of it for real: i18n.js is
+// copied to a .mjs so node will treat it as the module the browser already does, and the
+// handful of browser globals it touches on the way in are stubbed.
+
+let i18n;
+test.before(async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'i18n-'));
+  const copy = path.join(dir, 'i18n.mjs');
+  fs.writeFileSync(copy, read(path.join(PUBLIC, 'i18n.js')));
+  globalThis.localStorage = { getItem: () => null, setItem() {} };
+  globalThis.document = {
+    documentElement: {},
+    querySelectorAll: () => [],
+    dispatchEvent: () => {},
+  };
+  globalThis.CustomEvent = class { constructor(type, init) { Object.assign(this, init); } };
+  i18n = await import(require('node:url').pathToFileURL(copy).href);
+});
+
+test('Russian agrees a noun with its number', () => {
+  const ru = (n) => i18n.plural(n, 'players', 'ru');
+  assert.strictEqual(ru(1), 'игрок');
+  assert.strictEqual(ru(2), 'игрока');
+  assert.strictEqual(ru(4), 'игрока');
+  assert.strictEqual(ru(5), 'игроков');
+  assert.strictEqual(ru(6), 'игроков');
+  // The teens are the exception the rule is famous for: 11 is many, 21 is one.
+  assert.strictEqual(ru(11), 'игроков');
+  assert.strictEqual(ru(12), 'игроков');
+  assert.strictEqual(ru(14), 'игроков');
+  assert.strictEqual(ru(21), 'игрок');
+  assert.strictEqual(ru(22), 'игрока');
+  assert.strictEqual(ru(101), 'игрок');
+  assert.strictEqual(ru(111), 'игроков');
+  assert.strictEqual(ru(0), 'игроков');
+});
+
+test('English picks between two forms', () => {
+  const en = (n) => i18n.plural(n, 'players', 'en');
+  assert.strictEqual(en(1), 'player');
+  assert.strictEqual(en(2), 'players');
+  assert.strictEqual(en(0), 'players');
+  assert.strictEqual(en(21), 'players');
+});
+
+test('the seat picker counts players in both languages', () => {
+  // This is the bug: poker seats up to six, and the picker offered "5 игрока".
+  i18n.setLocale('en');
+  assert.strictEqual(i18n.t('match.nPlayers', { n: 2 }), '2 players');
+  i18n.setLocale('ru');
+  assert.strictEqual(i18n.t('match.nPlayers', { n: 2 }), '2 игрока');
+  assert.strictEqual(i18n.t('match.nPlayers', { n: 5 }), '5 игроков');
+  assert.strictEqual(i18n.t('match.nPlayers', { n: 6 }), '6 игроков');
+  i18n.setLocale('en');
+});
+
+test('every plural set offers two English forms and three Russian', () => {
+  for (const [name, set] of Object.entries(i18n.PLURALS)) {
+    assert.strictEqual(set.en.length, 2, `${name}: English has two forms`);
+    assert.strictEqual(set.ru.length, 3, `${name}: Russian has three`);
+    for (const form of [...set.en, ...set.ru]) {
+      assert.ok(form && form.trim() === form && form.length, `${name}: "${form}" is not a word`);
+    }
+  }
+});
+
+test('a counted noun is counted in every language that has the string', () => {
+  // A {players} left in one language and spelled out in the other is exactly the drift
+  // this is meant to prevent, so both sides have to carry the same placeholders.
+  const sets = Object.keys(i18n.PLURALS);
+  for (const [key, entry] of Object.entries(i18n.STRINGS)) {
+    const used = (text) => sets.filter((s) => String(text).includes(`{${s}}`)).sort();
+    assert.deepStrictEqual(used(entry.ru), used(entry.en),
+      `${key}: the two languages do not count the same things`);
+  }
+});
+
+test('nothing asks for a counted noun without a number', () => {
+  // t() only agrees a noun when it was given a numeric n. A string using {players} that
+  // is called without one would render the placeholder to the page.
+  const sets = Object.keys(i18n.PLURALS);
+  for (const [key, entry] of Object.entries(i18n.STRINGS)) {
+    for (const lang of ['en', 'ru']) {
+      if (sets.some((s) => String(entry[lang]).includes(`{${s}}`))) {
+        assert.ok(String(entry[lang]).includes('{n}'),
+          `${key} (${lang}) counts a noun but never mentions {n}`);
+      }
+    }
+  }
+});

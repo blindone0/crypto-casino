@@ -1890,7 +1890,7 @@ function paintPreferans() {
   infoPanel(prefInfo ? [
     el('h3', { style: 'margin-top:10px' }, t('pref.payTable')),
     ...Object.entries(prefInfo.pays).map(([k, v]) => el('div', { class: 'stat-row' },
-      el('span', { class: 'k' }, `${k} ${t('pref.tricks').toLowerCase()}`),
+      el('span', { class: 'k' }, t('pref.nTricks', { n: Number(k) })),
       el('span', { class: 'v' }, `${v.toFixed(2)}x`))),
     el('p', { class: 'hint' }, t('pref.skillNote')),
   ] : []);
