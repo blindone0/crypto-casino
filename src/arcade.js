@@ -111,8 +111,8 @@ function insertToken(db, cfg, user, spend) {
 
     const ticket = crypto.randomBytes(16).toString('hex');
     db.run(
-      `INSERT INTO arcade_plays(user_id, pubkey, game, ticket, tokens, score, state, created_at)
-       VALUES(?,?,?,?,?,0,'open',?)`,
+      `INSERT INTO arcade_plays(user_id, pubkey, game, ticket, tokens, score, state, mode, created_at)
+       VALUES(?,?,?,?,?,0,'open','real',?)`,
       user.id, clean.from, game.key, ticket, cost, now(),
     );
     return {
@@ -122,6 +122,37 @@ function insertToken(db, cfg, user, spend) {
       block: block.height,
       balance: tokenchain.balanceOf(db, clean.from),
     };
+  });
+}
+
+/**
+ * Start a play that costs nothing.
+ *
+ * Practice mode is the rest of the site's answer to "let me try this without money", and
+ * the arcade was the one room that ignored it: every cabinet demanded real tugriks and a
+ * wallet to sign with, so switching to Тренировка and clicking a machine got you a
+ * request to go and create a wallet.
+ *
+ * Letting it run free costs nothing to allow, because the arcade never pays out — the
+ * prize is a place on the board. That is also the one thing a free play must not touch:
+ * a score nobody paid for does not belong on a board that other people bought their way
+ * onto. So the play is recorded like any other and marked practice, and the board reads
+ * that and skips it.
+ */
+function practicePlay(db, cfg, user, gameKey) {
+  const game = GAMES[String(gameKey || '')];
+  if (!game) throw new U.BadRequest('no such cabinet');
+  if (!cfg.arcade.enabled) throw new U.BadRequest('the arcade is closed');
+  if (!cfg.demo.enabled) throw new U.BadRequest('practice mode is off');
+
+  return db.tx(() => {
+    const ticket = crypto.randomBytes(16).toString('hex');
+    db.run(
+      `INSERT INTO arcade_plays(user_id, pubkey, game, ticket, tokens, score, state, mode, created_at)
+       VALUES(?,'',?,?,0,0,'open','practice',?)`,
+      user.id, game.key, ticket, now(),
+    );
+    return { ticket, game: game.key, cost: 0, mode: 'practice' };
   });
 }
 
@@ -154,9 +185,15 @@ function submitScore(db, cfg, user, { ticket, score }) {
     if (stale) throw new U.BadRequest('that play expired; insert another token');
 
     const best = db.get(
-      'SELECT MAX(score) AS s FROM arcade_plays WHERE user_id=? AND game=?', user.id, play.game,
+      `SELECT MAX(score) AS s FROM arcade_plays
+        WHERE user_id=? AND game=? AND mode='real'`, user.id, play.game,
     ).s || 0;
-    return { game: play.game, score: capped, personalBest: best, capped: capped < value };
+    // personalBest is the best of the plays that count, so a practice run reports the
+    // real one back rather than appearing to have beaten it.
+    return {
+      game: play.game, score: capped, personalBest: best, capped: capped < value,
+      mode: play.mode,
+    };
   });
 }
 
@@ -167,7 +204,7 @@ function leaderboard(db, gameKey, limit = 10) {
   return db.all(
     `SELECT u.username, MAX(p.score) AS score, COUNT(*) AS plays
        FROM arcade_plays p JOIN users u ON u.id = p.user_id
-      WHERE p.game = ? AND p.state = 'done'
+      WHERE p.game = ? AND p.state = 'done' AND p.mode = 'real'
       GROUP BY p.user_id
       HAVING score > 0
       ORDER BY score DESC
@@ -182,7 +219,8 @@ function overview(db, cfg, user) {
   const mine = user
     ? db.all(
       `SELECT game, MAX(score) AS best, COUNT(*) AS plays
-         FROM arcade_plays WHERE user_id=? AND state='done' GROUP BY game`, user.id,
+         FROM arcade_plays WHERE user_id=? AND state='done' AND mode='real'
+        GROUP BY game`, user.id,
     )
     : [];
   const bests = Object.fromEntries(mine.map((r) => [r.game, { best: r.best, plays: r.plays }]));
@@ -218,5 +256,5 @@ function stats(db) {
 
 module.exports = {
   GAMES, spendPayload, verifySpendSignature,
-  insertToken, submitScore, leaderboard, overview, stats,
+  insertToken, practicePlay, submitScore, leaderboard, overview, stats,
 };

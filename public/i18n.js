@@ -202,6 +202,44 @@ const STRINGS = {
   'arc.insert': { en: 'Insert token ({n} {sym})', ru: 'Бросить жетон ({n} {sym})' },
   'arc.balance': { en: 'Tokens', ru: 'Жетоны' },
   'arc.cost': { en: 'A play costs', ru: 'Игра стоит' },
+  'arc.free': { en: 'nothing, while practising', ru: 'ничего, в тренировке' },
+  'arc.practiceNote': {
+    en: 'Practice plays are free and take no tokens. They do not go on the high scores: '
+      + 'that board is for plays somebody paid for.',
+    ru: 'В режиме тренировки игра бесплатная и жетоны не тратятся. В таблицу '
+      + 'рекордов такие игры не попадают: там только те, за которые заплатили.',
+  },
+  'arc.practiceScore': {
+    en: 'Practice run — not recorded',
+    ru: 'Тренировка — результат не засчитан',
+  },
+  'arc.g.pinball': { en: 'Orbit Pinball', ru: 'Орбитальный пинбол' },
+  'arc.g.pinball.blurb': {
+    en: 'Flippers, bumpers and a plunger. Keep the ball alive.',
+    ru: 'Флипперы, бамперы и пружина. Не дайте шару упасть.',
+  },
+  'arc.g.billiards': { en: 'Billiards', ru: 'Бильярд' },
+  'arc.g.billiards.blurb': {
+    en: 'Pot every ball in as few shots as you can.',
+    ru: 'Забейте все шары за как можно меньшее число ударов.',
+  },
+  'arc.g.invaders': { en: 'Void Raiders', ru: 'Налёт из пустоты' },
+  'arc.g.invaders.blurb': {
+    en: 'Hold the line against descending waves.',
+    ru: 'Держите оборону против наступающих волн.',
+  },
+  'arc.g.pinball.controls': {
+    en: 'Arrow keys or Z / M to flip, SPACE to launch. On a phone, tap left or right.',
+    ru: 'Стрелки или Z / M — флипперы, ПРОБЕЛ — запуск. На телефоне касайтесь слева или справа.',
+  },
+  'arc.g.billiards.controls': {
+    en: 'Drag back from the cue ball and release. Arrow keys to aim, SPACE to strike.',
+    ru: 'Потяните от битка назад и отпустите. Стрелки — прицел, ПРОБЕЛ — удар.',
+  },
+  'arc.g.invaders.controls': {
+    en: 'Arrow keys or A / D to move, SPACE to fire. On a phone, tap the sides to move and the middle to shoot.',
+    ru: 'Стрелки или A / D — движение, ПРОБЕЛ — огонь. На телефоне касайтесь краёв для движения и середины для выстрела.',
+  },
   'arc.noPayout': {
     en: 'Cabinets pay nothing. The token is the price of admission and the score is the prize.',
     ru: 'Автоматы ничего не выплачивают. Жетон — это плата за вход, а приз — место в таблице.',

@@ -600,6 +600,15 @@ function build(cfg) {
     return arcade.insertToken(db, cfg, user, await U.readJsonBody(req));
   });
 
+  // A free play, for practice mode. Costs nothing and cannot reach the leaderboard, so
+  // there is nothing here to protect but the rate limiter the router already applies.
+  add('POST', '/api/arcade/practice', async (ctx, req) => {
+    const user = requireUser(ctx);
+    checkCsrf(req, ctx);
+    const body = await U.readJsonBody(req);
+    return arcade.practicePlay(db, cfg, user, body.game);
+  });
+
   add('POST', '/api/arcade/score', async (ctx, req) => {
     const user = requireUser(ctx);
     checkCsrf(req, ctx);

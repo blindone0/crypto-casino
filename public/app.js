@@ -452,15 +452,18 @@ const statRow = (key, valueNode) => el('div', { class: 'stat-row' },
  */
 function arcadeInfoPanel() {
   const info = state.arcade || {};
+  const practising = state.wallet === 'demo';
   setKids($('#infoPanel'),
     el('h3', {}, t('arc.title')),
     el('div', { class: 'stat-row' },
       el('span', { class: 'k' }, t('arc.cost')),
-      el('span', { class: 'v' }, `${info.tokenCost ?? '-'} ${info.symbol || ''}`)),
-    el('div', { class: 'stat-row' },
+      el('span', { class: 'v' }, practising
+        ? t('arc.free')
+        : `${info.tokenCost ?? '-'} ${info.symbol || ''}`)),
+    practising ? null : el('div', { class: 'stat-row' },
       el('span', { class: 'k' }, t('arc.balance')),
       el('span', { class: 'v' }, `${info.balance ?? 0} ${info.symbol || ''}`)),
-    el('p', { class: 'hint' }, t('arc.noPayout')));
+    el('p', { class: 'hint' }, practising ? t('arc.practiceNote') : t('arc.noPayout')));
 }
 
 function infoPanel(extra = []) {
@@ -2444,12 +2447,15 @@ function paintArcadeFloor() {
   const info = state.arcade;
   const panel = $('#betPanel');
 
-  setKids(panel, 
+  // In practice mode there is no balance to show and nothing to buy, so offering a token
+  // wallet would be answering a question nobody asked.
+  const practising = state.wallet === 'demo';
+  setKids(panel,
     el('div', { class: 'stat-card' },
-      el('div', { class: 'k' }, t('arc.balance')),
-      el('div', { class: 'v pos' }, `${info.balance} ${info.symbol}`)),
-    el('p', { class: 'hint' }, t('arc.intro')),
-    !info.pubkey
+      el('div', { class: 'k' }, practising ? t('arc.cost') : t('arc.balance')),
+      el('div', { class: 'v pos' }, practising ? t('arc.free') : `${info.balance} ${info.symbol}`)),
+    el('p', { class: 'hint' }, practising ? t('arc.practiceNote') : t('arc.intro')),
+    !practising && !info.pubkey
       ? el('button', { class: 'big', style: 'margin-top:10px', onclick: tokenModal }, t('tok.nav'))
       : null,
   );
@@ -2462,15 +2468,42 @@ function paintArcadeFloor() {
   infoPanel();
 }
 
+/**
+ * A cabinet's name and description come from the translation table, not from the server.
+ *
+ * The server knows the cabinets by key and describes them in English, which was fine
+ * while it was the only language and wrong on the Russian floor. It still sends the
+ * English as a fallback, so a cabinet added server-side shows up named rather than blank.
+ */
+const cabinetName = (game) => {
+  const key = `arc.g.${game.key}`;
+  const out = t(key);
+  return out === key ? game.name : out;
+};
+const cabinetBlurb = (game) => {
+  const key = `arc.g.${game.key}.blurb`;
+  const out = t(key);
+  return out === key ? game.blurb : out;
+};
+/** The same for the control hint, which the cabinet module carries in English. */
+const cabinetControls = (game, mod) => {
+  const key = `arc.g.${game.key}.controls`;
+  const out = t(key);
+  return out === key ? mod.meta.controls : out;
+};
+
 function cabinetCard(game, info) {
   const playable = !!CABINET_MODULES[game.key];
+  const title = cabinetName(game);
   const card = el('div', {
     class: 'cabinet',
     onclick: () => (playable ? insertToken(game) : toast(t('arc.soon'))),
   },
+  // The marquee keeps the English: it is the name painted on the machine, and a
+  // Cyrillic name in a fourteen-character slot of that font is not the same object.
   el('div', { class: 'marquee' }, game.name.toUpperCase().slice(0, 14)),
-  el('h4', {}, game.name),
-  el('div', { class: 'blurb' }, playable ? game.blurb : t('arc.soon')),
+  el('h4', {}, title),
+  el('div', { class: 'blurb' }, playable ? cabinetBlurb(game) : t('arc.soon')),
   el('div', { class: 'stat-row' },
     el('span', { class: 'k' }, t('arc.best')),
     el('span', { class: 'v' }, String(game.mine.best || 0))),
@@ -2490,6 +2523,21 @@ function cabinetCard(game, info) {
  */
 async function insertToken(game) {
   if (!requireLogin()) return;
+
+  // Practice mode plays free. The arcade pays nothing out in any mode — the prize is a
+  // place on the board — so the only thing a free play could take from anybody is that
+  // place, and the server keeps practice scores off it.
+  if (state.wallet === 'demo') {
+    try {
+      const play = await api('/api/arcade/practice', { method: 'POST', body: { game: game.key } });
+      audio.sfx('click');
+      startCabinet(game, play);
+    } catch (e) {
+      toast(e.message, 'bad');
+    }
+    return;
+  }
+
   const info = state.arcade;
   if (!info.pubkey) { toast(t('arc.needTokens'), 'bad'); tokenModal(); return; }
   if (info.balance < info.tokenCost) { toast(t('arc.needTokens'), 'bad'); return; }
@@ -2525,14 +2573,14 @@ async function startCabinet(game, play) {
         el('span', {}, 'SCORE ', scoreOut),
         el('span', {}, `${t('arc.ballsLeft')} `, ballsOut)),
       canvas,
-      el('div', { class: 'arcade-controls' }, mod.meta.controls)),
+      el('div', { class: 'arcade-controls' }, cabinetControls(game, mod))),
   );
 
   setKids($('#betPanel'), 
     el('div', { class: 'stat-card' },
-      el('div', { class: 'k' }, game.name),
+      el('div', { class: 'k' }, cabinetName(game)),
       el('div', { class: 'v' }, scoreOut.textContent)),
-    el('p', { class: 'hint' }, mod.meta.controls),
+    el('p', { class: 'hint' }, cabinetControls(game, mod)),
     el('button', {
       class: 'big', style: 'margin-top:10px',
       onclick: () => { if (state.cabinet) state.cabinet.stop(); renderArcade(); },

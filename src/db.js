@@ -28,6 +28,17 @@ PRAGMA foreign_keys = ON;
 PRAGMA synchronous = FULL;
 `;
 
+/**
+ * The schema as it stood at version 1, and deliberately frozen there.
+ *
+ * Later changes are steps in migrate.js, not edits to this string. That looks like drift
+ * and is the opposite: every database runs exactly the same sequence of steps, so one
+ * created today and one created last year end up identical by construction. Add a column
+ * here as well as in a step and a fresh database gets it twice — the ALTER fails on a
+ * duplicate column and nothing starts.
+ *
+ * To see what the schema actually is right now, ask the database: `.schema` in sqlite3.
+ */
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id                  INTEGER PRIMARY KEY,

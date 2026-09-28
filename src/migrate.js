@@ -61,6 +61,23 @@ const STEPS = [
       db.exec(ctx.schema);
     },
   },
+  {
+    id: 2,
+    name: 'arcade_plays.mode',
+    /**
+     * Practice mode reached the arcade, so a play needs to say which it was.
+     *
+     * crash_bets, mines_games, pref_games and puzzle_games all carry this column already;
+     * the arcade was the one table that never needed it, because until now every play
+     * cost real tugriks. A free play must not set a high score that somebody else paid
+     * for, and the leaderboard reads this to decide.
+     *
+     * Everything already in the table was paid for, which is what the default says.
+     */
+    up(db) {
+      db.exec("ALTER TABLE arcade_plays ADD COLUMN mode TEXT NOT NULL DEFAULT 'real'");
+    },
+  },
 ];
 
 const latest = (steps = STEPS) => steps.reduce((n, s) => Math.max(n, s.id), 0);
