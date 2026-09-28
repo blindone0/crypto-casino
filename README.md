@@ -25,7 +25,7 @@ start and saved to `config.json`.
 ```bash
 node src/server.js                  # start; first run writes config.json
 node tools/admin-token.js           # show the operator token
-npm test                            # 131 tests
+npm test                            # the whole suite
 node tools/simulate.js              # will this actually make money?
 ```
 
@@ -120,6 +120,62 @@ the server, so verification never depends on the server agreeing.
 Crash runs a real shared round loop and pushes updates over Server-Sent Events. No
 WebSocket library needed.
 
+Three more rooms sit outside that table, because they do not take a bet against the house
+and so do not have a house edge at all.
+
+### The arcade
+
+A room of cabinets that cost a token to play and pay nothing back. That is not meanness,
+it is the only honest design: the games run in the player's browser, so a score arrives
+from a machine they control and could have edited. Attaching money to an unverifiable
+number gets farmed the same day. A play costs one token, the score buys a place on a
+leaderboard, and the token sale is the revenue, which is how the arcades this imitates
+actually earned.
+
+Three cabinets: *Orbit Pinball*, *Billiards* and *Void Raiders*. All three are canvas
+physics games with no assets, and all three are tested headlessly against a fake browser
+that advances time only when told to (`test/cabinet-harness.js`). That harness has found
+every physics bug in this project: a plunger whose full power was below escape velocity for
+its own launch lane, a drain counted once per substep so the last ball ended the game six
+times, flippers whose resting tips formed a floor the ball simply sat on. None of those
+were visible on screen.
+
+Inserting a token is signed by the player and burned on the chain, so the operator cannot
+charge an account for plays nobody started.
+
+### Head to head
+
+Chess, Морской бой and Балда, played between two people for tokens, with a rake to the
+house. Unlike the arcade these **can** pay out, because the server holds the board and
+checks every move against the rules before it changes anything. The result is not a number
+a client reported.
+
+| Game        | Held by the server | What is hidden |
+|-------------|--------------------|----------------|
+| Chess       | the position, legal moves, both clocks | nothing; it is a game of perfect information |
+| Морской бой | both fleets, every shot | each fleet, from the other player |
+| Балда       | the grid, the words already spent | nothing |
+
+The chess rules are a complete engine verified with perft against the six standard
+positions. Those counts catch what spot-checks do not: a castling right that survives its
+rook being taken, an en-passant capture taking the wrong square, a pinned piece allowed to
+move.
+
+Морской бой validates a fleet on arrival, because "the client would not send that" stops
+being true the moment there is money on the board, and it never sends a fleet to the
+opponent. The test asserts that by searching the serialised response for the actual ship
+coordinates rather than by trusting that the right fields were picked.
+
+Балда needs a dictionary, which ships in this repository like everything else. It is about
+seventeen hundred common nouns, hand-kept, and that is a real limit rather than something
+to gloss over: enough to play with, not enough to satisfy a serious player. Drop a bigger
+list in `data/balda-ru.txt` and it is merged with the built-in one rather than replacing
+it.
+
+Stakes are escrowed on the token chain. Joining a match means signing a transfer only the
+player can produce; settling means the house signing the pot back out. Both are ordinary
+blocks, so an operator who pays the wrong person leaves the evidence on the chain.
+
 ### Slots
 
 Five reels, three rows, twenty fixed paylines, wilds, scatters and free spins. What makes
@@ -134,10 +190,33 @@ that misses its target**. That guard is not theoretical. An early version had a 
 search ceiling, silently clamped, and produced a 35% RTP machine that looked perfectly
 normal. A test now asserts the closed-form RTP agrees with simulated play.
 
-**Two machines, one engine.** The Machine selector switches between *Golden Vault* and
-*After Dark*, a late-night cocktail-bar skin. Only the artwork and the cabinet palette
-change: the reel strips, the paytable and the published RTP are identical, so a theme is
-never secretly a different game.
+**Five machines, one engine.** The Machine selector switches between *Golden Vault*,
+*After Dark*, *Golden Ring*, *Knife and Smoke* and *The Couch*. Only the artwork and the
+cabinet palette change: the reel strips, the paytable and the published RTP are identical,
+so a theme is never secretly a different game.
+
+#### Why none of this was taken from an existing project
+
+This was built rather than imported, and that was not for want of looking. What is out
+there falls into two piles.
+
+The first is animation. The most popular open-source slot machines are front-ends: reels
+that spin nicely and a paytable that is decorative. The best-known of them is explicit
+about it in its own description, offering to generate "an extremely biased" machine. There
+is no RTP in any of them to speak of, which means there is nothing to reuse for the part
+that actually matters here.
+
+The second is one project that does the maths properly, and cannot be used for a different
+reason. It is MIT-licensed and well built, and what it contains is a reimplementation of
+specific commercial machines from named providers, with scanned reel sets for each. The
+licence on the code says nothing about the games it reproduces. Shipping those would be
+the same mistake as calling the pinball table by the name of the one it is a nod to: the
+mechanics of a slot machine belong to nobody, and a named machine with its reel strips and
+its artwork very much belongs to somebody.
+
+So the symbols here are drawn as SVG in this repository, the reel strips are ours, and the
+paytable is solved rather than copied. That is more work than importing something, and it
+is the only version of this that is both correct and safe to publish.
 
 ### Preferans
 
@@ -397,11 +476,22 @@ src/
   treasury.js      operator profit withdrawal to cold storage
   addrcheck.js     bech32 / base58check address validation
   geo.js           jurisdiction filter
-  games/           dice, limbo, mines, crash, slots, preferans
+  tokenchain.js    the site token: signed, hash-linked, fixed supply
+  arcade.js        token-operated cabinets; scores, never money
+  match.js         staked head-to-head games: lobby, escrow, clocks, settlement
+  chess.js         a complete rules engine, verified with perft
+  seabattle.js     Морской бой: fleet validation and shooting
+  balda.js         Балда: the grid, and the search for a word's path
+  words-ru.js      the Russian dictionary, plus the optional operator override
+  games/           dice, limbo, mines, crash, slots, puzzle, preferans, debertz
   wallet/          mock, manual, bitcoind, monero drivers
 public/            the site: casino, /admin panel, /verify verifier, i18n
-test/             131 tests
-tools/             simulator, preferans calibration, treasury setup, admin token
+  audio.js         the noir radio: instruments, patterns, the scheduler
+  radio.js         its programme: four stations, twelve pieces
+  symbols.js       slot artwork, five themes, drawn as SVG
+  games/           canvas cabinets and the match boards
+test/              the suite; run it with `npm test`
+tools/             simulator, calibration, treasury setup, admin token, token reset
 ```
 
 See `DEPLOY.md` for putting this on a real server, and `GROWTH.md` for launching and promoting it.
