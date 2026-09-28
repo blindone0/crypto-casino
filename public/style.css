@@ -847,7 +847,9 @@ body.couch .bigwin .amount { color: #e8eeff; text-shadow: 0 0 44px rgba(143, 166
 .challenges { display: flex; flex-direction: column; gap: 6px; }
 .challenge {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  /* minmax(0, 1fr) rather than 1fr: a plain 1fr will not shrink below its content, so a
+     long username pushes the stake and the button off a narrow screen. */
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
@@ -855,7 +857,15 @@ body.couch .bigwin .amount { color: #e8eeff; text-shadow: 0 0 44px rgba(143, 166
   border: 1px solid var(--line);
   border-radius: 8px;
 }
+.challenge > div:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .challenge .hint { display: inline; }
+
+@media (max-width: 420px) {
+  /* At phone width the stake and the button get their own line rather than squeezing the
+     names into nothing. */
+  .challenge { grid-template-columns: minmax(0, 1fr) auto; }
+  .challenge button { grid-column: 1 / -1; }
+}
 
 .match-screen { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .match-bar {
@@ -947,10 +957,11 @@ body.couch .bigwin .amount { color: #e8eeff; text-shadow: 0 0 44px rgba(143, 166
 }
 .movelist > div {
   display: grid;
-  grid-template-columns: 32px 1fr 1fr;
+  grid-template-columns: 32px minmax(0, 1fr) minmax(0, 1fr);
   gap: 4px;
   padding: 2px 0;
 }
+.movelist > div > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ------------------------------------------------------------- sea battle */
 .seabattle { display: flex; flex-direction: column; align-items: center; gap: 10px; }
@@ -1026,9 +1037,12 @@ body.couch .bigwin .amount { color: #e8eeff; text-shadow: 0 0 44px rgba(143, 166
 .balda-cell.open:hover { background: #22303f; }
 .balda-cell.picked { border-color: var(--gold); box-shadow: inset 0 0 0 1px var(--gold); }
 
-.balda-controls { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
-.balda-letter { width: 48px; text-align: center; text-transform: uppercase; }
-.balda-word { width: 160px; }
+.balda-controls {
+  display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;
+  max-width: min(88vw, 340px);
+}
+.balda-letter { width: 48px; flex: 0 0 auto; text-align: center; text-transform: uppercase; }
+.balda-word { flex: 1 1 140px; min-width: 0; }
 
 .balda-scores { display: flex; align-items: baseline; gap: 10px; font-size: 13px; }
 .balda-scores .v { font: 600 20px/1 ui-monospace, monospace; }

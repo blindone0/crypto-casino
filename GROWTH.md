@@ -62,6 +62,9 @@ cannot copy:
 - The slot RTP is not a marketing claim, it is solved in the code and asserted by tests.
 - The licence is AGPL, so a player can read the code that is actually running and demand
   the source of any modified version.
+- The token supply is capped in a way anyone can check. Every tugrik was created in the
+  first block of the chain and the verifier rejects a chain that mints anywhere else, so
+  "we cannot print more" is a thing a player confirms rather than a thing you claim.
 
 Most "provably fair" sites publish a hash and hope nobody checks. Make checking the
 product. Put the verifier in the footer, link the repository, and write the one honest
@@ -70,6 +73,34 @@ confirm we are not doing anything else.*
 
 That message reaches a specific audience: people who already distrust casinos. It is a
 small audience, but it is the one you can actually reach for free.
+
+### The rooms that are not gambling
+
+Three parts of the site take no bet against the house, and they are worth more to you than
+their revenue suggests.
+
+**The arcade** sells tokens and pays nothing back. The cabinets are pinball, billiards and
+a wave shooter, and the prize is a leaderboard. That is the honest design, since the games
+run in the player's browser and a score can be edited, but it is also the part of the site
+you can talk about anywhere. It is not a gambling product, so it does not trip the
+advertising policy that closes most of the list in section 1, and it gives someone a reason
+to be on the site on a day they do not want to bet.
+
+**Head to head** is chess, Морской бой and Балда played between two people for tokens with
+a rake. The house is not the counterparty and cannot lose, which makes it the only revenue
+line here with no variance in it at all. It is also the one thing on the site with a
+natural reason to invite somebody: you cannot play alone.
+
+**Practice mode** costs nothing and is a complete, separate play-money ledger. Do not treat
+it as a funnel to be optimised. The people who use it are frequently people who should not
+be depositing, and pushing them is both wrong and, in the markets that matter, the fastest
+route to losing a licence.
+
+### The one number to put in front of people
+
+The house edge, written as a percentage, on the page, for every game. Almost nobody does
+this and the reason is that most operators cannot: their RTP is a supplier's number they
+have never verified. Yours is solved in the code and asserted by a test. Say so.
 
 ---
 
