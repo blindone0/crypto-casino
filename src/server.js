@@ -18,7 +18,9 @@ const treasury = require('./treasury');
 const bankMod = require('./bank');
 const tokenchain = require('./tokenchain');
 const arcade = require('./arcade');
-const match = require('./match');
+// Named `matches`, not `match`: build() declares its own local `match(method, pathname)`
+// for route lookup, and a function declaration shadows the module import inside it.
+const matches = require('./match');
 const geoMod = require('./geo');
 const dice = require('./games/dice');
 const limbo = require('./games/limbo');
@@ -582,54 +584,54 @@ function build(cfg) {
   // beyond which move it would like to make.
   add('GET', '/api/match', async (ctx) => {
     const user = ctx.auth ? ctx.auth.user : null;
-    return match.lobby(db, cfg, user);
+    return matches.lobby(db, cfg, user);
   });
 
   add('GET', '/api/match/one', async (ctx, req) => {
     const url = new URL(req.url, 'http://x');
     const user = ctx.auth ? ctx.auth.user : null;
-    return match.detail(db, cfg, user, url.searchParams.get('id'));
+    return matches.detail(db, cfg, user, url.searchParams.get('id'));
   });
 
   add('POST', '/api/match/create', async (ctx, req) => {
     const user = requireUser(ctx);
     checkCsrf(req, ctx);
-    return match.create(db, cfg, user, await U.readJsonBody(req));
+    return matches.create(db, cfg, user, await U.readJsonBody(req));
   });
 
   add('POST', '/api/match/join', async (ctx, req) => {
     const user = requireUser(ctx);
     checkCsrf(req, ctx);
-    return match.join(db, cfg, user, await U.readJsonBody(req));
+    return matches.join(db, cfg, user, await U.readJsonBody(req));
   });
 
   add('POST', '/api/match/cancel', async (ctx, req) => {
     const user = requireUser(ctx);
     checkCsrf(req, ctx);
-    return match.cancel(db, user, (await U.readJsonBody(req)).id);
+    return matches.cancel(db, user, (await U.readJsonBody(req)).id);
   });
 
   add('POST', '/api/match/move', async (ctx, req) => {
     const user = requireUser(ctx);
     checkCsrf(req, ctx);
-    return match.act(db, cfg, user, await U.readJsonBody(req));
+    return matches.act(db, cfg, user, await U.readJsonBody(req));
   });
 
   add('POST', '/api/match/resign', async (ctx, req) => {
     const user = requireUser(ctx);
     checkCsrf(req, ctx);
-    return match.resign(db, cfg, user, (await U.readJsonBody(req)).id);
+    return matches.resign(db, cfg, user, (await U.readJsonBody(req)).id);
   });
 
   add('POST', '/api/match/timeout', async (ctx, req) => {
     const user = requireUser(ctx);
     checkCsrf(req, ctx);
-    return match.claimTimeout(db, cfg, user, (await U.readJsonBody(req)).id);
+    return matches.claimTimeout(db, cfg, user, (await U.readJsonBody(req)).id);
   });
 
   add('GET', '/api/admin/matches', async (ctx, req) => {
     requireAdmin(req, ctx);
-    return match.stats(db);
+    return matches.stats(db);
   });
 
   // -------------------------------------------------------------- fairness

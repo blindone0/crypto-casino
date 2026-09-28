@@ -25,7 +25,6 @@ const chess = require('./chess');
 const now = () => Math.floor(Date.now() / 1000);
 const nowMs = () => Date.now();
 
-const SEATS = ['host', 'guest'];
 const otherSeat = (seat) => (seat === 'host' ? 'guest' : 'host');
 
 // ----------------------------------------------------------------- the house
@@ -142,7 +141,15 @@ const GAMES = {
     },
 
     act(state, seat, payload) {
-      const played = chess.move(state.fen, String(payload.move || ''), state.history);
+      let played;
+      try {
+        played = chess.move(state.fen, String(payload.move || ''), state.history);
+      } catch (e) {
+        // A move the rules forbid is the player's mistake, not the server's. Anything else
+        // is rethrown untouched, so a genuine fault still surfaces as a fault.
+        if (e.illegalMove) throw new U.BadRequest(e.message);
+        throw e;
+      }
       const next = {
         ...state,
         fen: played.fen,

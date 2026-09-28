@@ -62,6 +62,8 @@ const state = {
   // 'real' or 'demo'. Practice money is a completely separate balance that cannot be
   // deposited to or withdrawn from; it exists so someone with nothing can still learn.
   wallet: 'real', demoBalance: 0,
+  // Head-to-head matches: the lobby, the one being watched, its board and its poll.
+  matchLobby: null, matchId: null, matchView: null, board: null, matchTimer: null,
 };
 
 const UNIT = 1e8;
@@ -2413,11 +2415,329 @@ function showGameOver(game, score, result) {
 }
 
 // ------------------------------------------------------------------- boot
-const GAMES = ['dice', 'limbo', 'mines', 'crash', 'slots', 'puzzle', 'preferans', 'debertz', 'arcade'];
+// ------------------------------------------------------------------ matches
+// Head-to-head games played for tokens.
+//
+// Nothing here knows any rules. The server sends the position and the list of moves it
+// will accept, and the board offers only those. Two rules engines that have to agree is
+// one rules engine too many when there is a stake on the board.
+
+const MATCH_BOARDS = {
+  chess: () => import('./games/chessboard.js'),
+};
+
+/** Poll while a match is live. Matches are turn-based, so a socket would be overkill. */
+function matchPoll(fn) {
+  stopMatchPoll();
+  state.matchTimer = setInterval(fn, 2000);
+}
+function stopMatchPoll() {
+  if (state.matchTimer) { clearInterval(state.matchTimer); state.matchTimer = null; }
+}
+
+async function renderMatch() {
+  stopMatchPoll();
+  state.matchId = null;
+  let info;
+  try { info = await api('/api/match'); } catch (e) {
+    setKids($('#stage'), el('p', { class: 'hint neg' }, e.message));
+    return;
+  }
+  state.matchLobby = info;
+  paintLobby();
+}
+
+function paintLobby() {
+  const info = state.matchLobby;
+  const stake = el('input', {
+    class: 'mono', inputmode: 'numeric', value: String(info.minStake),
+  });
+  const game = el('select', {}, ...info.games.map((g) => el('option', { value: g.key }, g.name)));
+
+  setKids($('#betPanel'),
+    el('div', { class: 'stat-card' },
+      el('div', { class: 'k' }, t('arc.balance')),
+      el('div', { class: 'v pos' }, `${info.balance} ${info.symbol}`)),
+    el('label', { class: 'field' }, el('span', {}, t('match.game')), game),
+    el('label', { class: 'field' }, el('span', {}, t('match.stake')), stake),
+    el('div', { class: 'stat-row' },
+      el('span', { class: 'k' }, t('match.rake')),
+      el('span', { class: 'v' }, `${(info.rake * 100).toFixed(1)}%`)),
+    el('div', { class: 'stat-row' },
+      el('span', { class: 'k' }, t('match.youWin')),
+      el('span', { class: 'v pos' }, String(winnings(Number(stake.value) || 0, info.rake)))),
+    el('button', {
+      class: 'primary big', style: 'margin-top:10px',
+      onclick: () => createChallenge(game.value, Number(stake.value)),
+    }, t('match.challenge')),
+    el('p', { class: 'hint' }, t('match.intro')),
+    !info.pubkey
+      ? el('button', { class: 'big', style: 'margin-top:8px', onclick: tokenModal }, t('tok.nav'))
+      : null);
+
+  stake.oninput = () => {
+    const out = $('#betPanel').querySelectorAll('.stat-row .v')[1];
+    if (out) out.textContent = String(winnings(Number(stake.value) || 0, info.rake));
+  };
+  applyAll($('#betPanel'));
+
+  const row = (m, mine) => el('div', { class: 'challenge' },
+    el('div', {},
+      el('strong', {}, t(`match.g.${m.game}`)),
+      el('span', { class: 'hint' }, ` ${m.host}${m.guest ? ` vs ${m.guest}` : ''}`)),
+    el('div', { class: 'v' }, `${m.stake} ${state.matchLobby.symbol}`),
+    mine && m.status === 'open'
+      ? el('button', { class: 'tiny', onclick: () => cancelChallenge(m.id) }, t('match.cancel'))
+      : null,
+    mine && m.status === 'playing'
+      ? el('button', { class: 'tiny primary', onclick: () => openMatch(m.id) }, t('match.resume'))
+      : null,
+    !mine && m.status === 'open'
+      ? el('button', { class: 'tiny primary', onclick: () => joinChallenge(m) }, t('match.accept'))
+      : null);
+
+  const mineIds = new Set(info.mine.map((m) => m.id));
+  const others = info.open.filter((m) => !mineIds.has(m.id));
+
+  setKids($('#stage'),
+    el('h2', { style: 'text-align:center' }, t('match.title')),
+    info.mine.length
+      ? el('div', {}, el('h3', {}, t('match.yours')),
+        el('div', { class: 'challenges' }, ...info.mine.map((m) => row(m, true))))
+      : null,
+    el('h3', {}, t('match.openTable')),
+    others.length
+      ? el('div', { class: 'challenges' }, ...others.map((m) => row(m, false)))
+      : el('p', { class: 'hint' }, t('match.noneOpen')));
+  infoPanel();
+}
+
+/** What the winner actually takes home, after the house cut. */
+const winnings = (stake, rake) => {
+  const pot = stake * 2;
+  return pot - Math.floor(pot * rake);
+};
+
+/**
+ * Sign a stake into escrow.
+ *
+ * This is an ordinary token transfer to the house key, signed by the player. The operator
+ * cannot produce it, which is the point: nobody can enter you into a match you did not
+ * agree to, and nobody can take your stake twice.
+ */
+async function signStake(amount) {
+  const info = await api('/api/match');
+  state.matchLobby = info;
+  if (!info.pubkey) { toast(t('arc.needTokens'), 'bad'); tokenModal(); return null; }
+  if (info.balance < amount) { toast(t('match.shortOfTokens'), 'bad'); return null; }
+  if (!tokenKey || tokenKey.publicKey !== info.pubkey) {
+    toast(t('arc.needUnlock'), 'warn');
+    tokenModal();
+    return null;
+  }
+  const tx = {
+    from: tokenKey.publicKey, to: info.houseKey, amount, nonce: info.nextNonce,
+  };
+  const sig = await tokenKeys.signTransfer(tokenKey, tx);
+  return { from: tx.from, nonce: tx.nonce, sig };
+}
+
+async function createChallenge(game, stake) {
+  if (!requireLogin()) return;
+  try {
+    const spend = await signStake(stake);
+    if (!spend) return;
+    await api('/api/match/create', { method: 'POST', body: { game, stake, spend } });
+    audio.sfx('click');
+    renderMatch();
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
+async function joinChallenge(m) {
+  if (!requireLogin()) return;
+  try {
+    const spend = await signStake(m.stake);
+    if (!spend) return;
+    await api('/api/match/join', { method: 'POST', body: { id: m.id, spend } });
+    audio.sfx('click');
+    openMatch(m.id);
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
+async function cancelChallenge(id) {
+  try {
+    await api('/api/match/cancel', { method: 'POST', body: { id } });
+    renderMatch();
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
+// ------------------------------------------------------------- the board
+async function openMatch(id) {
+  state.matchId = id;
+  state.board = null;
+  await refreshMatch(true);
+  matchPoll(() => refreshMatch(false));
+}
+
+async function refreshMatch(rebuild) {
+  if (!state.matchId) return;
+  let view;
+  try { view = await api(`/api/match/one?id=${state.matchId}`); } catch (e) {
+    stopMatchPoll();
+    toast(e.message, 'bad');
+    renderMatch();
+    return;
+  }
+  if (rebuild || !state.board) await buildMatchScreen(view);
+  else paintMatch(view);
+}
+
+async function buildMatchScreen(view) {
+  const mod = await MATCH_BOARDS[view.game]();
+  const host = el('div', { class: 'board-host' });
+  setKids($('#stage'),
+    el('div', { class: 'match-screen' },
+      el('div', { class: 'match-bar' },
+        el('span', { id: 'mTop' }, ''),
+        el('span', { class: 'mono', id: 'mTopClock' }, '')),
+      host,
+      el('div', { class: 'match-bar' },
+        el('span', { id: 'mBottom' }, ''),
+        el('span', { class: 'mono', id: 'mBottomClock' }, ''))));
+
+  const mine = view.seat;
+  const orientation = view.view.white === mine ? 'w' : 'b';
+  state.board = mod.board(host, {
+    fen: view.view.fen,
+    legal: view.view.legal,
+    orientation: mine ? orientation : 'w',
+    interactive: !!mine,
+    onMove: (move) => sendMove(move),
+  });
+  paintMatch(view);
+}
+
+const clockText = (ms) => {
+  const total = Math.max(0, Math.round(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+};
+
+function paintMatch(view) {
+  state.matchView = view;
+  const mine = view.seat;
+  const top = mine === 'guest' ? 'host' : 'guest';
+  const bottom = mine === 'guest' ? 'guest' : 'host';
+  const nameOf = (seat) => (seat === 'host' ? view.host : view.guest) || '?';
+
+  const label = (seat) => `${nameOf(seat)}${view.toMove === seat && view.status === 'playing' ? ' •' : ''}`;
+  $('#mTop').textContent = label(top);
+  $('#mBottom').textContent = label(bottom);
+  $('#mTopClock').textContent = clockText(view.clock[top]);
+  $('#mBottomClock').textContent = clockText(view.clock[bottom]);
+
+  const myTurn = view.status === 'playing' && mine && view.toMove === mine;
+  if (state.board) {
+    state.board.update({
+      fen: view.view.fen,
+      legal: myTurn ? view.view.legal : [],
+      interactive: myTurn,
+    });
+  }
+
+  setKids($('#betPanel'),
+    el('div', { class: 'stat-card' },
+      el('div', { class: 'k' }, t('match.stake')),
+      el('div', { class: 'v' }, `${view.stake} ${state.matchLobby?.symbol || ''}`)),
+    el('div', { class: 'stat-row' },
+      el('span', { class: 'k' }, t('match.status')),
+      el('span', { class: 'v' }, matchStatusText(view))),
+    el('div', { class: 'movelist' }, ...pairMoves(view.view.san || [])),
+    view.status === 'playing' && mine
+      ? el('button', {
+        class: 'big', style: 'margin-top:10px',
+        onclick: () => confirmResign(view.id),
+      }, t('match.resign'))
+      : null,
+    view.status === 'playing' && mine
+      ? el('button', {
+        class: 'tiny', style: 'margin-top:6px',
+        onclick: () => claimFlag(view.id),
+      }, t('match.claimTime'))
+      : null,
+    el('button', {
+      class: 'tiny', style: 'margin-top:6px',
+      onclick: () => { stopMatchPoll(); renderMatch(); },
+    }, t('match.backToLobby')));
+  applyAll($('#betPanel'));
+
+  if (view.status !== 'playing') stopMatchPoll();
+}
+
+/** The move list, numbered in pairs the way a scoresheet is written. */
+function pairMoves(san) {
+  const rows = [];
+  for (let i = 0; i < san.length; i += 2) {
+    rows.push(el('div', {},
+      el('span', { class: 'k' }, `${i / 2 + 1}.`),
+      el('span', {}, san[i] || ''),
+      el('span', {}, san[i + 1] || '')));
+  }
+  return rows;
+}
+
+function matchStatusText(view) {
+  if (view.status === 'open') return t('match.waiting');
+  if (view.status === 'cancelled') return t('match.cancelled');
+  if (view.status === 'playing') {
+    return view.toMove === view.seat ? t('match.yourMove') : t('match.theirMove');
+  }
+  const mine = view.seat;
+  const outcome = view.result === 'draw' ? 'draw' : (view.result === mine ? 'won' : 'lost');
+  return `${t(`match.${outcome}`)} — ${t(`match.why.${view.reason}`, {}) || view.reason}`;
+}
+
+async function sendMove(move) {
+  try {
+    await api('/api/match/move', { method: 'POST', body: { id: state.matchId, move } });
+    audio.sfx('card');
+    await refreshMatch(false);
+  } catch (e) {
+    toast(e.message, 'bad');
+    await refreshMatch(false);
+  }
+}
+
+function confirmResign(id) {
+  const body = openModal(t('match.resign'), (b) => b.append(
+    el('p', { class: 'hint' }, t('match.resignSure')),
+  ));
+  addKids(body, el('div', { class: 'row', style: 'margin-top:12px' },
+    el('button', {
+      class: 'primary',
+      onclick: async () => {
+        closeModal();
+        try {
+          await api('/api/match/resign', { method: 'POST', body: { id } });
+          await refreshMatch(false);
+        } catch (e) { toast(e.message, 'bad'); }
+      },
+    }, t('match.resign')),
+    el('button', { onclick: closeModal }, t('common.cancel'))));
+}
+
+async function claimFlag(id) {
+  try {
+    await api('/api/match/timeout', { method: 'POST', body: { id } });
+    await refreshMatch(false);
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
+const GAMES = ['dice', 'limbo', 'mines', 'crash', 'slots', 'puzzle', 'preferans', 'debertz', 'arcade', 'match'];
 
 function renderGame() {
   if (state.es && state.game !== 'crash') { state.es.close(); state.es = null; }
   if (state.cabinet && state.game !== 'arcade') { state.cabinet.stop(); state.cabinet = null; }
+  if (state.game !== 'match') { stopMatchPoll(); state.matchId = null; state.board = null; }
   const nav = $('#navGames');
   setKids(nav, ...GAMES.map((g) => el('button', {
     class: `tiny ${state.game === g ? 'on' : ''}`,
@@ -2433,6 +2753,7 @@ function renderGame() {
   else if (state.game === 'preferans') renderPreferans();
   else if (state.game === 'debertz') renderDebertz();
   else if (state.game === 'arcade') renderArcade();
+  else if (state.game === 'match') renderMatch();
   else renderCrash();
 }
 

@@ -451,7 +451,13 @@ function status(pos, history = null) {
 function move(fen, text, history = null) {
   const pos = parseFen(fen);
   const found = findMove(pos, text);
-  if (!found) throw new Error(`illegal move: ${text}`);
+  if (!found) {
+    // Flagged so callers can tell "the player asked for something the rules forbid", which
+    // is an ordinary client error, from "this engine broke", which is not. Without the
+    // flag the match layer has to match on the message, or report every refused move as a
+    // server fault.
+    throw Object.assign(new Error(`illegal move: ${text}`), { illegalMove: true });
+  }
   const san = toSan(pos, found);
   const next = makeMove(pos, found);
   const nextHistory = history ? [...history, repetitionKey(next)] : null;
