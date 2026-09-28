@@ -28,6 +28,19 @@ function cardEl(card, extra = '') {
   return node;
 }
 
+/**
+ * The nine hand categories, in the order src/holdem.js ranks them.
+ *
+ * The server sends the category as a number rather than its English name, because a table
+ * played in Russian cannot translate prose that arrived already written.
+ */
+const HANDS = {
+  ru: ['старшая карта', 'пара', 'две пары', 'сет', 'стрит',
+    'флеш', 'фулл-хаус', 'каре', 'стрит-флеш'],
+  en: ['high card', 'a pair', 'two pair', 'three of a kind', 'a straight',
+    'a flush', 'a full house', 'four of a kind', 'a straight flush'],
+};
+
 const labels = {
   ru: {
     fold: 'Пас', check: 'Чек', call: 'Колл', raise: 'Рейз', allin: 'Ва-банк',
@@ -103,7 +116,7 @@ export function board(host, opts = {}) {
       const line = el('div', 'row');
       line.append(el('span', 'k', `#${s.seat + 1}`));
       for (const c of s.hole) line.append(cardEl(c, 'small'));
-      line.append(el('span', 'hint', s.hand));
+      line.append(el('span', 'hint', HANDS[state.lang][s.hand] ?? ''));
       box.append(line);
     }
     for (const a of v.showdown.awards) {

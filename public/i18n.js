@@ -242,6 +242,10 @@ const STRINGS = {
   'match.why.last-standing': { en: 'took every chip', ru: 'забрал все фишки' },
   'match.why.fool': { en: 'the fool was found', ru: 'дурак найден' },
   'match.why.no-fool': { en: 'nobody was left holding cards', ru: 'никто не остался с картами' },
+  'match.why.no-progress': {
+    en: 'the cards would not come out — a draw',
+    ru: 'карты перестали выходить — ничья',
+  },
   'durak.attack': { en: 'led', ru: 'ходит' },
   'durak.defend': { en: 'beat it', ru: 'отбил' },
   'durak.pass-on': { en: 'passed it on', ru: 'перевёл' },

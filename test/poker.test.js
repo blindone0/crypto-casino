@@ -387,3 +387,23 @@ test('quitting surrenders a stack without breaking the table', () => {
   // The table either carries on or the hand resolves, but it is never left stuck.
   assert.ok(s.finished || s.toAct >= 0 || s.street === 'showdown');
 });
+
+test('a showdown names hands by category, not in English', () => {
+  // Prose crossing the wire cannot be translated at the other end, so the seat is sent
+  // the category index and names it itself.
+  const holdem = require('../src/holdem');
+  let s = poker.create(3);
+  for (let i = 0; i < 400 && s.street !== 'showdown' && !s.finished; i += 1) {
+    const seat = s.toAct;
+    if (seat < 0) break;
+    const o = poker.view(s, seat).options || {};
+    s = poker.act(s, seat, o.check ? 'check' : (o.call > 0 ? 'call' : 'fold'));
+  }
+  assert.strictEqual(s.street, 'showdown');
+  const shown = poker.view(s, 0).showdown.shown;
+  assert.ok(shown.length >= 2, 'more than one hand was shown');
+  for (const s2 of shown) {
+    assert.strictEqual(typeof s2.hand, 'number', 'the hand is a category, not a word');
+    assert.ok(s2.hand >= 0 && s2.hand < holdem.CATEGORY_NAME.length, 'and one that exists');
+  }
+});

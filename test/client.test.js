@@ -294,3 +294,47 @@ test('nothing asks for a counted noun without a number', () => {
     }
   }
 });
+
+test('the poker board names every hand the evaluator can rank', () => {
+  // The server sends a hand as a category number so each language can name it. That only
+  // works while the two lists agree, and they live in different files.
+  const holdem = require('../src/holdem');
+  const src = read(path.join(PUBLIC, 'games', 'pokerboard.js'));
+  const body = src.slice(src.indexOf('const HANDS = {'));
+  const list = (lang) => {
+    const at = body.indexOf(`${lang}: [`);
+    const close = body.indexOf('],', at);
+    return [...body.slice(at, close).matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  };
+  const en = list('en');
+  const ru = list('ru');
+  assert.strictEqual(en.length, holdem.CATEGORY_NAME.length,
+    'the board names a different number of hands than the evaluator ranks');
+  assert.strictEqual(ru.length, holdem.CATEGORY_NAME.length);
+  // English is the evaluator's own wording, so a reorder on either side shows up here.
+  assert.deepStrictEqual(en, holdem.CATEGORY_NAME);
+});
+
+test('no translation key is defined twice', () => {
+  // A repeated key is not an error in JavaScript: the last one silently wins. Adding
+  // 'match.why.stalemate' for дурак quietly took over the chess wording until this
+  // caught it.
+  const body = I18N.slice(I18N.indexOf('const STRINGS = {'));
+  const seen = new Map();
+  const dupes = [];
+  for (const m of body.matchAll(/^ {2}'([a-zA-Z0-9.\-_]+)':/gm)) {
+    if (seen.has(m[1])) dupes.push(m[1]);
+    seen.set(m[1], true);
+  }
+  assert.deepStrictEqual(dupes, [], 'these keys are defined more than once');
+});
+
+test('every match result reason has wording', () => {
+  // The client renders a result as t('match.why.' + reason), so a reason the server can
+  // emit with no string behind it prints the raw key at the player.
+  const games = read(path.join(__dirname, '..', 'src', 'matchgames.js'));
+  const reasons = new Set([...games.matchAll(/reason: '([a-z-]+)'/g)].map((m) => m[1]));
+  assert.ok(reasons.size >= 5, 'reasons were found');
+  const missing = [...reasons].filter((r) => !STRINGS.has(`match.why.${r}`));
+  assert.deepStrictEqual(missing, [], 'these results would show as a raw key');
+});

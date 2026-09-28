@@ -149,10 +149,19 @@ function score(cards) {
   return pack(CATEGORY.HIGH, ...high);
 }
 
-/** What to call the hand a score represents. */
-const describe = (value) => CATEGORY_NAME[Math.floor(value / (16 ** 5))] || 'nothing';
+/** Which of the nine categories a score falls in. */
+const categoryOf = (value) => Math.floor(value / (16 ** 5));
+
+/**
+ * What to call the hand a score represents, in English.
+ *
+ * Anything shown to a player goes through categoryOf instead: the table is played in more
+ * than one language, and prose crossing the wire cannot be translated at the other end.
+ */
+const describe = (value) => CATEGORY_NAME[categoryOf(value)] || 'nothing';
 
 module.exports = {
   SUITS, RANKS, CATEGORY, CATEGORY_NAME,
   rankOf, suitOf, rankValue, freshDeck, shuffled, straightHigh, score, describe,
+  categoryOf,
 };

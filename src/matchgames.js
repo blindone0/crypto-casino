@@ -388,7 +388,12 @@ const DURAK = {
     if (next.fool === null || next.fool === undefined || next.fool < 0) {
       const all = [];
       for (let i = 0; i < next.hands.length; i += 1) all.push(i);
-      return { state: next, note: play, winners: all, reason: 'no-fool' };
+      // A stalemate is the other way to end with nobody the fool: the cards stopped
+      // coming out and would have gone round for ever. Worth saying so rather than
+      // leaving players to wonder why their game ended level.
+      // Not 'stalemate': chess already uses that word, for a different thing.
+      const why = next.stalemate ? 'no-progress' : 'no-fool';
+      return { state: next, note: play, winners: all, reason: why };
     }
     const winners = allBut(next.fool, next.hands.length);
     return { state: next, note: play, winners, reason: 'fool' };

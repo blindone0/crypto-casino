@@ -334,11 +334,13 @@ test('a finished game offers nothing to anybody', () => {
 
 // ------------------------------------------------------- a whole game, dealt
 test('shuffled games play to an end, and never lose a card doing it', () => {
-  // Дурак has no repetition rule. A table where nobody can beat anything and nobody has a
-  // matching rank to throw in will pass the same cards round for ever, and that is the
-  // game rather than a bug in it. So this asserts the two things that must always hold —
-  // the engine never refuses a move it offered, and no card is created or lost — and that
-  // the great majority of games reach an end, rather than claiming all of them do.
+  // Дурак itself has no repetition rule: a table where nobody can beat anything and
+  // nobody holds a matching rank to throw in passes the same cards round for ever. That
+  // is the game rather than a bug in it, but it is not something a staked match can do,
+  // because both stakes would sit in escrow with no end to pay them out on. The engine
+  // therefore calls a game drawn after STALE_BOUTS bouts in which nothing moved at all.
+  //
+  // So every game now reaches an end, and no card is created or lost getting there.
   let finished = 0;
   for (let game = 0; game < 100; game += 1) {
     let seed = game * 7919 + 13;
@@ -349,10 +351,8 @@ test('shuffled games play to an end, and never lose a card doing it', () => {
     // A simple but properly playing opponent: beat when you can, otherwise take, and
     // throw in every matching rank you hold before finishing a bout.
     //
-    // The throwing-in matters. Without it a table where nobody can beat anything passes
-    // the same few cards round for ever, because no bout ever reaches the discard. That
-    // is a property of the strategy rather than of the rules: дурак has no repetition
-    // rule, and a game between two players who only ever take genuinely does not end.
+    // The throwing-in matters: without it, bouts reach the discard far more rarely and
+    // most of these games end drawn on the no-progress rule instead of finding a fool.
     for (let turn = 0; turn < 4000 && !s.finished; turn += 1) {
       const open = durak.unbeaten(s);
       if (open.length) {
@@ -396,14 +396,93 @@ test('shuffled games play to an end, and never lose a card doing it', () => {
 
     if (!s.finished) continue;
     finished += 1;
+    const left = durak.liveSeats(s);
+    if (s.stalemate) {
+      // A draw on the no-progress rule: the cards stopped coming out, so players are
+      // still holding them and nobody is the fool.
+      assert.strictEqual(s.fool, null, `game ${game} was drawn but named a fool`);
+      assert.ok(left >= 2, `game ${game} was drawn with only ${left} in`);
+      continue;
+    }
     // One left holding cards is the usual end. Zero is the other real one: the last two
     // can go out on the same bout, and then there is no fool and it is a draw.
-    const left = durak.liveSeats(s);
     assert.ok(left <= 1, `game ${game} has ${left} still in`);
     if (left === 1) assert.ok(s.fool >= 0, `game ${game} has a survivor but no fool`);
     else assert.strictEqual(s.fool, null, `game ${game} has nobody left but named a fool`);
   }
-  assert.ok(finished >= 90, `only ${finished} of 100 games reached an end`);
+  assert.strictEqual(finished, 100, 'every game reached an end');
+});
+
+test('a game that cannot progress is drawn rather than played for ever', () => {
+  // The cycle this rule exists for: three seats, the dumb player that only ever beats
+  // with its lowest card or takes. Before the rule these ran until the test gave up.
+  let drawn = 0;
+  for (let game = 0; game < 60; game += 1) {
+    let seed = game * 6151 + 7;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    let s = durak.start(durak.deal(3, rnd));
+    let turns = 0;
+    for (; turns < 5000 && !s.finished; turns += 1) {
+      let acted = false;
+      for (let seat = 0; seat < 3 && !acted; seat += 1) {
+        if (s.out[seat]) continue;
+        const o = durak.options(s, seat);
+        const hand = s.hands[seat];
+        const open = durak.unbeaten(s);
+        const beater = open.length
+          ? hand.find((c) => durak.beats(c, open[0].card, s.trump)) : null;
+        if (o.defend && beater) { s = durak.defend(s, seat, beater); acted = true; } else if (o.take) { s = durak.take(s, seat); acted = true; } else if (o.attack) {
+          const ranks = new Set(durak.tableCards(s).map(durak.rankOf));
+          const card = s.attacks.length ? hand.find((c) => ranks.has(durak.rankOf(c))) : hand[0];
+          if (card) { s = durak.attack(s, seat, card); acted = true; } else if (o.done) { s = durak.done(s, seat); acted = true; }
+        } else if (o.done) { s = durak.done(s, seat); acted = true; }
+      }
+      if (!acted) break;
+    }
+    assert.ok(s.finished, `game ${game} never ended (${turns} moves)`);
+    if (s.stalemate) drawn += 1;
+  }
+  // The point is that they all end; that some of them end drawn is the mechanism.
+  assert.ok(drawn > 0, 'no game exercised the no-progress rule');
+});
+
+test('a normal game never comes close to the no-progress limit', () => {
+  // If a real game were ending on this rule it would be a bug, not a feature, so the
+  // margin matters: a game that finds its fool should never have gone more than a bout
+  // or two without something moving.
+  let worst = 0;
+  for (let game = 0; game < 60; game += 1) {
+    let seed = game * 2741 + 3;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    const seats = 2 + (game % 4);
+    let s = durak.start(durak.deal(seats, rnd));
+    for (let turn = 0; turn < 4000 && !s.finished; turn += 1) {
+      const open = durak.unbeaten(s);
+      if (open.length) {
+        const beater = s.hands[s.defender].find((c) => durak.beats(c, open[0].card, s.trump));
+        s = beater ? durak.defend(s, s.defender, beater) : durak.take(s, s.defender);
+        continue;
+      }
+      if (s.attacks.length === 0) { s = durak.attack(s, s.attacker, s.hands[s.attacker][0]); continue; }
+      let threw = false;
+      for (let seat = 0; seat < seats && !threw; seat += 1) {
+        if (seat === s.defender || s.out[seat] || !durak.options(s, seat).attack) continue;
+        const ranks = new Set(durak.tableCards(s).map(durak.rankOf));
+        const card = s.hands[seat].find((c) => ranks.has(durak.rankOf(c)));
+        if (card) { s = durak.attack(s, seat, card); threw = true; }
+      }
+      if (threw) continue;
+      const waiting = [];
+      for (let seat = 0; seat < seats; seat += 1) {
+        if (seat !== s.defender && !s.out[seat] && !s.passed.includes(seat)) waiting.push(seat);
+      }
+      if (!waiting.length) break;
+      s = durak.done(s, waiting[0]);
+    }
+    if (s.finished && !s.stalemate) worst = Math.max(worst, s.stale || 0);
+  }
+  assert.ok(worst < durak.STALE_BOUTS / 3,
+    `a proper game got within ${durak.STALE_BOUTS - worst} bouts of being called drawn`);
 });
 
 // ------------------------------------------------ played through the match layer
@@ -485,19 +564,20 @@ test('you are shown your own hand and nobody else is', (t) => {
   assert.strictEqual(asNobody.view.hand, null);
 });
 
-test('the fool loses and everybody else splits the pot', (t) => {
-  const { cfg, db, users, keys } = setup();
-  t.after(() => cleanup(cfg, db));
-  const stake = 60 * TUG;
-  const id = started(db, cfg, users, keys, 3, stake);
-
-  // Drive the game with a dumb but legal player.
-  //
-  // It asks every seat what it may do rather than only the one on the clock, because in
-  // дурак more than one player can be entitled to act: once the table is beaten, any
-  // attacker may throw in a card or say they are finished.
+/**
+ * Drive a match to its end with a dumb but legal player.
+ *
+ * It asks every seat what it may do rather than only the one on the clock, because in
+ * дурак more than one player can be entitled to act: once the table is beaten, any
+ * attacker may throw in a card or say they are finished.
+ *
+ * Playing this badly draws about a third of the time -- the cards stop coming out and the
+ * no-progress rule ends it -- so a test that wants a fool has to be prepared to deal
+ * again rather than rely on getting one first time.
+ */
+function playOut(db, cfg, users, id) {
   let out = null;
-  for (let turn = 0; turn < 600 && !out; turn += 1) {
+  for (let turn = 0; turn < 2000 && !out; turn += 1) {
     const board = match.detail(db, cfg, users.alice, id);
     if (board.status !== 'playing') break;
 
@@ -519,21 +599,54 @@ test('the fool loses and everybody else splits the pot', (t) => {
     }
     assert.ok(acted, `nobody could move on turn ${turn}`);
   }
-
   assert.ok(out && out.winners, 'the game finished');
+  return out;
+}
+
+test('every game reaches an end', (t) => {
+  // Before the no-progress rule this looped for ever about a third of the time, which
+  // showed up as a test that failed one run in six and would have been two stakes stuck
+  // in escrow on the live site.
+  const { cfg, db, users, keys } = setup();
+  t.after(() => cleanup(cfg, db));
+  for (let game = 0; game < 12; game += 1) {
+    const out = playOut(db, cfg, users, started(db, cfg, users, keys, 3, 10 * TUG));
+    assert.ok(['fool', 'no-fool', 'no-progress'].includes(out.reason), `odd reason ${out.reason}`);
+  }
+});
+
+test('the fool loses and everybody else splits the pot', (t) => {
+  const { cfg, db, users, keys } = setup();
+  t.after(() => cleanup(cfg, db));
+  const stake = 60 * TUG;
+
+  // Deal again if the dumb player draws: it is the fool payout under test, not the odds
+  // of reaching one. Each attempt is a real match that moves real money, so the balances
+  // are read fresh after the buy-in of the attempt that actually produces a fool.
+  const all = [keys.alice, keys.bob, keys.carol];
+  let out = null;
+  let before = null;
+  for (let attempt = 0; attempt < 30 && !out; attempt += 1) {
+    const id = started(db, cfg, users, keys, 3, stake);
+    const staked = all.map((k) => tc.balanceOf(db, k.pub));
+    const res = playOut(db, cfg, users, id);
+    if (res.reason === 'fool') { out = res; before = staked; }
+  }
+  assert.ok(out, 'a game ended with a fool');
   assert.strictEqual(out.winners.length, 2, 'two of the three won');
-  assert.strictEqual(out.reason, 'fool');
 
   const pot = stake * 3;
   const each = Math.floor((pot - Math.floor(pot * cfg.match.rake)) / 2);
   for (const seat of out.winners) {
-    const key = [keys.alice, keys.bob, keys.carol][seat];
     assert.strictEqual(
-      tc.balanceOf(db, key.pub),
-      cfg.token.welcomeGrant - stake + each,
+      tc.balanceOf(db, all[seat].pub),
+      before[seat] + each,
       `seat ${seat} was not paid`,
     );
   }
+  const fool = [0, 1, 2].find((seat) => !out.winners.includes(seat));
+  assert.strictEqual(tc.balanceOf(db, all[fool].pub), before[fool],
+    'the fool is paid nothing and loses no more than the stake');
 });
 
 test('you cannot act out of turn', (t) => {

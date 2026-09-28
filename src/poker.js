@@ -312,7 +312,7 @@ function settleHand(state) {
 
   const shown = contenders.length > 1
     ? contenders.map((seat) => ({
-      seat, hole: next.hole[seat].slice(), hand: holdem.describe(scores.get(seat)),
+      seat, hole: next.hole[seat].slice(), hand: holdem.categoryOf(scores.get(seat)),
     }))
     : [];
 

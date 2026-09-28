@@ -78,6 +78,8 @@ function deal(seats, random = Math.random) {
     // Who has said they are done adding cards this bout.
     passed: [],
     discarded: 0,
+    // Bouts since the discard pile last grew. See STALE_BOUTS in endBout.
+    stale: 0,
     log: [],
   };
 }
@@ -299,6 +301,9 @@ function done(state, seat) {
 }
 
 // ------------------------------------------------------------- end of a bout
+/** Bouts in which nothing at all moved before a game is called drawn. */
+const STALE_BOUTS = 30;
+
 /**
  * Close the bout: draw back up to six, drop anyone who is out, and hand the attack on.
  *
@@ -307,6 +312,19 @@ function done(state, seat) {
  */
 function endBout(state, { tookIt }) {
   const discarded = tookIt === null ? state.discarded + tableCards(state).length : state.discarded;
+  // A дурак game can cycle. Cards leave play only when a defence succeeds; a bout the
+  // defender takes puts them straight back into a hand, and once nobody is drawing, the
+  // same cards go round for ever. A dumb player left to it loops through 3/8/18, 3/9/17,
+  // 4/8/17 and back with the pile frozen for as long as you care to watch, which would
+  // hold every stake in escrow indefinitely.
+  //
+  // So count the bouts in which nothing moved at all: nothing discarded, nobody out, and
+  // not a card drawn. Any of those three is real progress towards an end; none of them,
+  // thirty bouts running, means there is no end to reach. It is called a draw, in the
+  // spirit of the fifty-move rule.
+  //
+  // Thirty is far beyond any real game, where a bout that discards nothing hands the
+  // whole table to one player and the attackers soon have nothing left to attack with.
 
   const hands = state.hands.map((h) => h.slice());
   const stock = state.stock.slice();
@@ -327,14 +345,26 @@ function endBout(state, { tookIt }) {
     if (!out[s] && hands[s].length === 0 && stock.length === 0) out[s] = true;
   }
 
+  const moved = discarded > state.discarded
+    || out.some((o, i) => o && !state.out[i])
+    || stock.length < state.stock.length;
+  const stale = moved ? 0 : (state.stale || 0) + 1;
+
   const mid = {
-    ...state, hands, stock, out, discarded, attacks: [], passed: [],
+    ...state, hands, stock, out, discarded, stale, attacks: [], passed: [],
   };
 
   const remaining = liveSeats(mid);
   if (remaining <= 1) {
     const fool = mid.out.findIndex((o) => !o);
     return { ...mid, attacker: -1, defender: -1, finished: true, fool: fool < 0 ? null : fool };
+  }
+
+  if (stale >= STALE_BOUTS) {
+    // Nobody is the fool, because nobody lost: the cards would not come out.
+    return {
+      ...mid, attacker: -1, defender: -1, finished: true, fool: null, stalemate: true,
+    };
   }
 
   // Beat everything and you attack next; take the cards and the attack goes past you.
@@ -384,5 +414,5 @@ module.exports = {
   SUITS, RANKS, HAND, MAX_SEATS,
   cardOf, rankOf, suitOf, rankValue, freshDeck, bySuitThenRank,
   deal, start, beats, tableCards, unbeaten, attackLimit, nextLive, liveSeats,
-  attack, defend, passOn, take, done, endBout, options, lowestTrump,
+  attack, defend, passOn, take, done, endBout, options, lowestTrump, STALE_BOUTS,
 };
