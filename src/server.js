@@ -18,6 +18,7 @@ const treasury = require('./treasury');
 const bankMod = require('./bank');
 const tokenchain = require('./tokenchain');
 const arcade = require('./arcade');
+const match = require('./match');
 const geoMod = require('./geo');
 const dice = require('./games/dice');
 const limbo = require('./games/limbo');
@@ -136,6 +137,12 @@ function build(cfg) {
     demo: { enabled: cfg.demo.enabled, startingUnits: cfg.demo.startingUnits },
     token: { enabled: cfg.token.enabled, symbol: cfg.token.symbol },
     arcade: { enabled: cfg.arcade.enabled, tokenCost: cfg.arcade.tokenCost },
+    match: {
+      enabled: cfg.match.enabled,
+      rake: cfg.match.rake,
+      minStake: cfg.match.minStake,
+      maxStake: cfg.match.maxStake,
+    },
     crashCommitment: crash.commitment,
     dice: { minWinCount: dice.MIN_WIN_COUNT, maxWinCount: dice.MAX_WIN_COUNT },
     slots: { rtp: slots.machineFor(cfg.houseEdge.slots).rtp, lines: slots.LINES },
@@ -567,6 +574,62 @@ function build(cfg) {
   add('GET', '/api/admin/arcade', async (ctx, req) => {
     requireAdmin(req, ctx);
     return arcade.stats(db);
+  });
+
+  // --------------------------------------------------------------- matches
+  // Head-to-head games for tokens. Every one of these goes through src/match.js, which
+  // holds the board and checks the move; nothing here trusts the client for anything
+  // beyond which move it would like to make.
+  add('GET', '/api/match', async (ctx) => {
+    const user = ctx.auth ? ctx.auth.user : null;
+    return match.lobby(db, cfg, user);
+  });
+
+  add('GET', '/api/match/one', async (ctx, req) => {
+    const url = new URL(req.url, 'http://x');
+    const user = ctx.auth ? ctx.auth.user : null;
+    return match.detail(db, cfg, user, url.searchParams.get('id'));
+  });
+
+  add('POST', '/api/match/create', async (ctx, req) => {
+    const user = requireUser(ctx);
+    checkCsrf(req, ctx);
+    return match.create(db, cfg, user, await U.readJsonBody(req));
+  });
+
+  add('POST', '/api/match/join', async (ctx, req) => {
+    const user = requireUser(ctx);
+    checkCsrf(req, ctx);
+    return match.join(db, cfg, user, await U.readJsonBody(req));
+  });
+
+  add('POST', '/api/match/cancel', async (ctx, req) => {
+    const user = requireUser(ctx);
+    checkCsrf(req, ctx);
+    return match.cancel(db, user, (await U.readJsonBody(req)).id);
+  });
+
+  add('POST', '/api/match/move', async (ctx, req) => {
+    const user = requireUser(ctx);
+    checkCsrf(req, ctx);
+    return match.act(db, cfg, user, await U.readJsonBody(req));
+  });
+
+  add('POST', '/api/match/resign', async (ctx, req) => {
+    const user = requireUser(ctx);
+    checkCsrf(req, ctx);
+    return match.resign(db, cfg, user, (await U.readJsonBody(req)).id);
+  });
+
+  add('POST', '/api/match/timeout', async (ctx, req) => {
+    const user = requireUser(ctx);
+    checkCsrf(req, ctx);
+    return match.claimTimeout(db, cfg, user, (await U.readJsonBody(req)).id);
+  });
+
+  add('GET', '/api/admin/matches', async (ctx, req) => {
+    requireAdmin(req, ctx);
+    return match.stats(db);
   });
 
   // -------------------------------------------------------------- fairness

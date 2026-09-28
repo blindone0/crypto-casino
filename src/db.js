@@ -269,6 +269,46 @@ CREATE TABLE IF NOT EXISTS arcade_plays (
 CREATE INDEX IF NOT EXISTS ix_arcade_board ON arcade_plays(game, score DESC);
 CREATE INDEX IF NOT EXISTS ix_arcade_user ON arcade_plays(user_id, game);
 
+-- Head-to-head matches played for tokens: chess and the rest. The board lives here, not
+-- in the browser, because the moment a stake rides on the result a client-side rules check
+-- is worth nothing. Stakes are escrowed on the token chain, so the money movements are
+-- blocks anyone can audit rather than a column only the operator can see.
+CREATE TABLE IF NOT EXISTS matches (
+  id          INTEGER PRIMARY KEY,
+  game        TEXT NOT NULL,
+  status      TEXT NOT NULL CHECK (status IN ('open','playing','done','cancelled')),
+  stake       INTEGER NOT NULL,
+  rake        INTEGER NOT NULL DEFAULT 0,
+  host_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  host_key    TEXT NOT NULL,
+  guest_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  guest_key   TEXT,
+  state       TEXT NOT NULL,
+  result      TEXT,
+  reason      TEXT,
+  created_at  INTEGER NOT NULL,
+  started_at  INTEGER,
+  ended_at    INTEGER,
+  -- Milliseconds, and read only from here. A clock the client can edit is not a clock.
+  moved_at_ms INTEGER NOT NULL DEFAULT 0,
+  host_ms     INTEGER NOT NULL DEFAULT 0,
+  guest_ms    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_matches_open ON matches(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS ix_matches_host ON matches(host_id, status);
+CREATE INDEX IF NOT EXISTS ix_matches_guest ON matches(guest_id, status);
+
+CREATE TABLE IF NOT EXISTS match_moves (
+  id         INTEGER PRIMARY KEY,
+  match_id   INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  seat       TEXT NOT NULL CHECK (seat IN ('host','guest')),
+  ply        INTEGER NOT NULL,
+  move       TEXT NOT NULL,
+  note       TEXT,
+  created_at INTEGER NOT NULL,
+  UNIQUE(match_id, ply)
+);
+
 -- Play money. Deliberately NOT in the accounts/ledger tables: demo wins must never be
 -- paid from the bankroll, and demo balances must never count as money owed to players.
 CREATE TABLE IF NOT EXISTS demo_balances (

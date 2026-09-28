@@ -84,6 +84,19 @@ const DEFAULTS = {
     playTtlSeconds: 7200,   // an open play older than this is a stale tab, not a long game
   },
 
+  // ---- MATCHES ----------------------------------------------------------
+  // Head-to-head games played for tokens. Unlike the arcade, these can pay out, because
+  // the server holds the board and checks every move: the result is not a number the
+  // player's machine reported. The rake is the operator's cut of the pot and is the only
+  // place the house takes anything, so it is the number to tune.
+  match: {
+    enabled: true,
+    rake: 0.05,             // taken once from the pot, on every settled match
+    minStake: 10,
+    maxStake: 5000,
+    maxOpenPerUser: 3,      // stops one account papering the lobby with challenges
+  },
+
   // ---- FREE PLAY --------------------------------------------------------
   // Practice mode for people with no money to deposit. Play money is a completely
   // separate ledger: it never touches the bankroll, never counts as a liability, and can
