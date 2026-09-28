@@ -8,11 +8,34 @@ import { verifyChain, compareHeads } from './chainverify.js';
 
 // ---------------------------------------------------------------- plumbing
 const $ = (sel, root = document) => root.querySelector(sel);
+
+/**
+ * Apply a style string one declaration at a time.
+ *
+ * The page is served under `style-src 'self'` with no 'unsafe-inline', so the browser
+ * ignores a style attribute completely — and silently, which is why it looked like it
+ * worked. Every `style:` in this file was doing nothing at all until this was written.
+ *
+ * Going through the CSSOM is not inline CSS and is allowed, so the policy stays exactly
+ * as strict as it was. Splitting on ';' is enough for what this file writes; a value
+ * containing one, such as a data: URI inside url(), would need a real parser, and those
+ * belong in a class anyway.
+ */
+function applyStyle(node, css) {
+  for (const decl of String(css).split(';')) {
+    const at = decl.indexOf(':');
+    if (at < 0) continue;
+    const prop = decl.slice(0, at).trim();
+    if (prop) node.style.setProperty(prop, decl.slice(at + 1).trim());
+  }
+}
+
 const el = (tag, attrs = {}, ...kids) => {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
     if (k === 'class') n.className = v;
     else if (k === 'html') n.innerHTML = v;
+    else if (k === 'style') applyStyle(n, v);
     else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
     else if (v !== null && v !== undefined && v !== false) n.setAttribute(k, v);
   }
@@ -1321,10 +1344,13 @@ async function renderSlots() {
   );
   applyAll(panel);
 
-  setKids($('#stage'), 
+  setKids($('#stage'),
     el('div', { class: 'slot-banner', id: 'slotBanner' }, ''),
     el('div', { class: 'slot-cabinet' },
-      el('div', { class: 'reels', id: 'reels' })),
+      el('div', { class: 'slot-machine-row' },
+        valveWheel('valveL'),
+        el('div', { class: 'reels', id: 'reels' }),
+        valveWheel('valveR'))),
   );
 
   if (!slotInfo) {
@@ -1339,6 +1365,42 @@ async function renderSlots() {
   ]);
 }
 
+/**
+ * The wheel on the end of the drum shaft.
+ *
+ * Dressing, and the point of it: five cylinders turning behind glass could be anything,
+ * but a hand-wheel on a shaft says the thing has ends and an axle and is being driven.
+ * Drawn rather than loaded, like the rest of the artwork -- the policy forbids remote
+ * images, and a wheel is a circle and some spokes.
+ */
+function valveWheel(id) {
+  const box = el('div', { class: 'slot-valve', id });
+  const spokes = Array.from({ length: 6 }, (_, i) =>
+    `<rect x="46" y="14" width="8" height="34" rx="4" fill="url(#vg)"
+           transform="rotate(${i * 60} 50 50)"/>`).join('');
+  box.innerHTML = `
+    <svg viewBox="0 0 100 100" aria-hidden="true">
+      <defs>
+        <linearGradient id="vg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#9fb0bd"/>
+          <stop offset=".5" stop-color="#5c6a76"/>
+          <stop offset="1" stop-color="#2b333b"/>
+        </linearGradient>
+        <radialGradient id="vh" cx=".35" cy=".3">
+          <stop offset="0" stop-color="#d8e2ea"/>
+          <stop offset=".6" stop-color="#6b7986"/>
+          <stop offset="1" stop-color="#232a31"/>
+        </radialGradient>
+      </defs>
+      <circle cx="50" cy="50" r="44" fill="none" stroke="url(#vg)" stroke-width="9"/>
+      <circle cx="50" cy="50" r="44" fill="none" stroke="rgba(255,255,255,.18)" stroke-width="2"/>
+      ${spokes}
+      <circle cx="50" cy="50" r="13" fill="url(#vh)"/>
+      <circle cx="50" cy="50" r="4" fill="#11161b"/>
+    </svg>`;
+  return box;
+}
+
 const blankScreen = () => Array.from({ length: 5 }, (_, i) =>
   [['A', 'K', 'Q'], ['GEM', 'J', 'BELL'], ['WILD', 'A', 'T'], ['K', 'CROWN', 'Q'], ['J', 'T', 'A']][i]);
 
@@ -1350,6 +1412,7 @@ async function doSpin(amount, spin) {
   removeBigWin();
   setReelsSpinning(true);
   audio.sfx('spin');
+  const started = Date.now();
   // Keep the whirr going for as long as the reels are actually turning.
   const whirr = setInterval(() => audio.sfx('spin'), 130);
 
@@ -1357,7 +1420,7 @@ async function doSpin(amount, spin) {
     const out = await api('/api/bet/slots', { method: 'POST', body: { amount: amount.get() } });
     // Stop the reels left to right. The stagger is what makes a spin feel like a spin
     // rather than a screen swap, and it is the moment the last reel matters.
-    await settleReels(out.screen);
+    await settleReels(out.screen, out.stops, started);
     await showSlotResult(out);
     state.user.balance = out.balance;
     setBalance(out.balance, out.profit);
@@ -1377,32 +1440,125 @@ function setReelsSpinning(on) {
     r.classList.toggle('spinning', on);
     if (!on) r.classList.remove('landing');
   }
+  for (const v of document.querySelectorAll('.slot-valve')) {
+    v.classList.toggle('turning', on);
+  }
 }
 
 /** Land each reel in turn, showing its final symbols as it stops. */
-async function settleReels(screen) {
+/**
+ * How long the drums turn before the first one is allowed to stop.
+ *
+ * Not a delay for its own sake. The server answers in a few milliseconds on the same
+ * machine, and a cylinder that starts and stops inside a fifth of a second reads as a
+ * flicker rather than as something turning. The result is already decided and sitting in
+ * hand either way; this is how long it takes to show it.
+ */
+const MIN_SPIN_MS = 780;
+
+async function settleReels(screen, stops = null, started = 0) {
   const reels = [...document.querySelectorAll('#reels .reel')];
-  if (!reels.length) { paintReels(screen); return; }
-  await new Promise((r) => setTimeout(r, 260));
+  if (!reels.length) { paintReels(screen, [], stops); return; }
+  const spun = started ? Date.now() - started : 0;
+  await new Promise((r) => setTimeout(r, Math.max(120, MIN_SPIN_MS - spun)));
   for (const [i, reel] of reels.entries()) {
     reel.classList.remove('spinning');
+    // Rebuilt with the real stop, so the symbols that swing past as it settles are the
+    // ones actually beside the result on the strip.
+    paintReel(reel, screen[i], [], i, stops ? stops[i] : null);
+    // The class goes on after the rebuild, or the browser keeps the old animation.
     reel.classList.add('landing');
-    paintReel(reel, screen[i], []);
     audio.sfx('reelStop');
     await new Promise((r) => setTimeout(r, 130));
   }
 }
 
-function paintReel(reelNode, symbols, litRows) {
-  setKids(reelNode, ...symbols.map((sym, row) => {
-    const cell = el('div', { class: `cell sym-${sym} ${litRows.includes(row) ? 'win' : ''}` });
-    cell.innerHTML = symbolSvg(sym, slotTheme);
-    return cell;
-  }));
+// ------------------------------------------------------------------ the drums
+//
+// A reel is a cylinder of FACES symbols turned about a horizontal axis, with a window
+// showing three of them. Face k sits at rotateX(k * 24deg), so k = +1 is the top row,
+// k = 0 the middle and k = -1 the bottom.
+//
+// The other twelve are not filler. screenFrom() reads the visible rows as
+// strip[stop], strip[stop + 1], strip[stop + 2], so face k is strip[stop + 1 - k] and the
+// symbols coming into view are the ones genuinely next to the result on that reel.
+// Without a stop to work from -- the very first paint, before any spin -- it falls back
+// to repeating what is on screen, which is the only honest thing it can draw.
+const FACES = 15;
+const HALF_FACES = (FACES - 1) / 2;
+
+function faceSymbols(reelIndex, symbols, stop) {
+  const strip = slotInfo && slotInfo.strips && slotInfo.strips[reelIndex];
+  const out = [];
+  for (let k = HALF_FACES; k >= -HALF_FACES; k -= 1) {
+    if (strip && Number.isInteger(stop)) {
+      const at = (((stop + 1 - k) % strip.length) + strip.length) % strip.length;
+      out.push({ k, sym: strip[at] });
+    } else {
+      // Row for k=+1,0,-1 is 0,1,2; anything further round repeats the window.
+      const row = ((1 - k) % symbols.length + symbols.length) % symbols.length;
+      out.push({ k, sym: symbols[row] });
+    }
+  }
+  return out;
+}
+
+/**
+ * Build one drum.
+ *
+ * The three faces in the window carry data-row, because that is how the win highlight and
+ * the payline overlay find them: indexing children stopped meaning anything once a reel
+ * held fifteen faces in a circle instead of three boxes in a column.
+ */
+function paintReel(reelNode, symbols, litRows, reelIndex = 0, stop = null) {
+  const drum = el('div', { class: 'drum' });
+  for (const { k, sym } of faceSymbols(reelIndex, symbols, stop)) {
+    const row = 1 - k;                       // 0, 1, 2 for the three in the window
+    const visible = row >= 0 && row <= 2;
+    // How far round the barrel this face sits decides how much light reaches it. CSS
+    // cannot work that out from --i without abs(), which is too new to rely on, and the
+    // index is right here anyway.
+    const shade = Math.min(1, Math.max(0, (Math.abs(k) - 0.4) / 5)) * 0.72;
+    const face = el('div', {
+      class: `face sym-${sym} ${visible && litRows.includes(row) ? 'win' : ''}`,
+      style: `--i:${k};--shade:${shade.toFixed(3)}`,
+    });
+    if (visible) face.dataset.row = String(row);
+    face.innerHTML = symbolSvg(sym, slotTheme);
+    drum.appendChild(face);
+  }
+
+  const mount = el('div', { class: 'drum-mount' });
+  mount.appendChild(drum);
+  setKids(reelNode,
+    mount,
+    el('div', { class: 'reel-glass' }),
+    el('div', { class: 'reel-cap l' }),
+    el('div', { class: 'reel-cap r' }));
+}
+
+/**
+ * translateZ cannot take a percentage, so the drum radius has to be a real length. This
+ * measures one reel and publishes the symbol size; the CSS does the trigonometry.
+ */
+function sizeDrums() {
+  const box = $('#reels');
+  const reel = box && box.querySelector('.reel');
+  if (!reel) return;
+  const w = reel.getBoundingClientRect().width;
+  if (w > 0) box.style.setProperty('--cell', `${w.toFixed(2)}px`);
+}
+
+let drumResize = null;
+function watchDrums() {
+  if (drumResize || typeof ResizeObserver !== 'function') return;
+  drumResize = new ResizeObserver(() => sizeDrums());
+  const box = $('#reels');
+  if (box) drumResize.observe(box);
 }
 
 /** Draw the 5x3 window, highlighting the cells that form a winning line. */
-function paintReels(screen, wins = []) {
+function paintReels(screen, wins = [], stops = null) {
   const box = $('#reels');
   if (!box) return;
   const lit = new Map();
@@ -1417,9 +1573,11 @@ function paintReels(screen, wins = []) {
   }
   setKids(box, ...screen.map((symbols, ri) => {
     const reel = el('div', { class: 'reel' });
-    paintReel(reel, symbols, lit.get(ri) || []);
+    paintReel(reel, symbols, lit.get(ri) || [], ri, stops ? stops[ri] : null);
     return reel;
   }));
+  sizeDrums();
+  watchDrums();
 }
 
 function clearPaylines() {
@@ -1449,7 +1607,7 @@ function drawPaylines(wins) {
     const rows = slotInfo.paylines[w.line];
     const points = [];
     for (let reel = 0; reel < w.count; reel += 1) {
-      const cell = reels[reel]?.children[rows[reel]];
+      const cell = reels[reel]?.querySelector(`.face[data-row="${rows[reel]}"]`);
       if (!cell) continue;
       const r = cell.getBoundingClientRect();
       points.push(`${(r.left - base.left + r.width / 2).toFixed(1)},${(r.top - base.top + r.height / 2).toFixed(1)}`);
@@ -1481,7 +1639,7 @@ function showBigWin(profit, multiplier) {
 
 async function showSlotResult(out) {
   setReelsSpinning(false);
-  paintReels(out.screen, out.wins);
+  paintReels(out.screen, out.wins, out.stops);
   drawPaylines(out.wins);
   const banner = $('#slotBanner');
   if (!banner) return;
@@ -1492,7 +1650,7 @@ async function showSlotResult(out) {
     // Replay the free spins one at a time so they are visible, not just totalled.
     for (const [i, fs] of out.freeSpins.entries()) {
       await new Promise((r) => setTimeout(r, 520));
-      paintReels(fs.screen, fs.wins);
+      paintReels(fs.screen, fs.wins, fs.stops);
       drawPaylines(fs.wins);
       audio.sfx(fs.wins.length ? 'win' : 'reelStop');
       banner.textContent = t('slots.freeSpinRun', { i: i + 1, n: out.freeSpins.length });

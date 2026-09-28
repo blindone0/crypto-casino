@@ -3,10 +3,26 @@
 import { LANGS, setLocale, getLocale } from './i18n.js';
 
 const $ = (id) => document.getElementById(id);
+
+/**
+ * A style attribute is ignored under this site's `style-src 'self'`, and ignored quietly.
+ * The CSSOM is not inline CSS, so applying the declarations one at a time still works and
+ * the policy does not have to be loosened. Same reasoning as app.js.
+ */
+function applyStyle(node, css) {
+  for (const decl of String(css).split(';')) {
+    const at = decl.indexOf(':');
+    if (at < 0) continue;
+    const prop = decl.slice(0, at).trim();
+    if (prop) node.style.setProperty(prop, decl.slice(at + 1).trim());
+  }
+}
+
 const el = (tag, attrs = {}, ...kids) => {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
     if (k === 'class') n.className = v;
+    else if (k === 'style') applyStyle(n, v);
     else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
     else if (v !== null && v !== undefined && v !== false) n.setAttribute(k, v);
   }

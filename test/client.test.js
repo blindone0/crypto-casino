@@ -338,3 +338,40 @@ test('every match result reason has wording', () => {
   const missing = [...reasons].filter((r) => !STRINGS.has(`match.why.${r}`));
   assert.deepStrictEqual(missing, [], 'these results would show as a raw key');
 });
+
+test('nothing sets a style attribute the policy will ignore', () => {
+  // The page is served under `style-src 'self'` with no 'unsafe-inline', so the browser
+  // drops a style attribute without a word. All forty-six of them in app.js were doing
+  // nothing, which is why the slot drums came out flat: the custom property that told
+  // each face where it sat on the cylinder never arrived.
+  //
+  // el() routes style through the CSSOM now, which the policy allows. What must not come
+  // back is a raw setAttribute('style', ...).
+  const bad = [];
+  for (const file of clientFiles()) {
+    for (const m of read(file).matchAll(/setAttribute\(\s*['"]style['"]/g)) {
+      bad.push(`${path.basename(file)}: setAttribute('style', ...) at ${m.index}`);
+    }
+  }
+  assert.deepStrictEqual(bad, [], 'these would be silently dropped by the CSP');
+});
+
+test('every helper that takes a style: applies it through the CSSOM', () => {
+  // Both el() implementations have to handle it; admin.js had the same hole.
+  for (const name of ['app.js', 'admin.js']) {
+    const src = read(path.join(PUBLIC, name));
+    assert.match(src, /k === 'style'/, `${name}: el() ignores style:`);
+    assert.match(src, /setProperty\(/, `${name}: it does not use the CSSOM`);
+  }
+});
+
+test('the served policy really does forbid inline style', () => {
+  // If this ever gains 'unsafe-inline' the two tests above stop being about anything, so
+  // it is worth pinning what they are defending against.
+  const server = read(path.join(__dirname, '..', 'src', 'server.js'));
+  const csp = server.slice(server.indexOf("'content-security-policy'"));
+  const head = csp.slice(0, 400);
+  assert.match(head, /style-src 'self'/);
+  assert.ok(!/style-src 'self'[^;]*unsafe-inline/.test(head),
+    "style-src has gained 'unsafe-inline'");
+});
