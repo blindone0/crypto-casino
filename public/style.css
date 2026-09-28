@@ -724,6 +724,19 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
 /* The valve: the wheel on the side of the cabinet that turns while the drums do. It is
    dressing, and it is the part that says this is a machine and not a table. */
 
+/* The WebGL reels.
+ *
+ * They sit where the DOM drums are and take their place when the context is available;
+ * the DOM ones stay in the markup as the fallback and are simply hidden, so nothing has
+ * to be rebuilt if the renderer cannot start. */
+.slot-gl {
+  position: absolute; inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  display: block;
+}
+.slot-window.gl .reel { visibility: hidden; }
+
 /* The effects canvas. Above the drums and their glass, below nothing: it is the top of
    the machine and it never takes a click. */
 .slot-fx {

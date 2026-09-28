@@ -610,4 +610,23 @@ export function symbolSvg(key, theme = 'classic') {
   return make ? make() : `<span>${key}</span>`;
 }
 
+/**
+ * The same symbol, but carrying its own gradients.
+ *
+ * On the page the symbols reference the shared defs that ensureSymbolDefs() puts in the
+ * document, which is right: one copy for the whole site. Inside an `<img src="data:...">`
+ * there is no document to share — the SVG is its own isolated one — so every `url(#...)`
+ * fill resolves to nothing and only the flat strokes survive. That is what a slot reel
+ * drawn into a WebGL texture looked like: panels with outlines and no symbols on them.
+ *
+ * The artwork is untouched. This wraps a copy of the defs around it for the callers that
+ * need to rasterise one on its own.
+ */
+export function symbolSvgStandalone(key, theme = 'classic') {
+  const svg = symbolSvg(key, theme);
+  const at = svg.indexOf('>');
+  if (at < 0 || !svg.startsWith('<svg')) return svg;
+  return `${svg.slice(0, at + 1)}${DEFS}${svg.slice(at + 1)}`;
+}
+
 export const SYMBOL_KEYS = Object.keys(CLASSIC);

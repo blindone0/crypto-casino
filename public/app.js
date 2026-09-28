@@ -1,11 +1,12 @@
 import { LANGS, t, setLocale, getLocale, applyAll } from './i18n.js';
-import { ensureSymbolDefs, symbolSvg, THEME_KEYS } from './symbols.js';
+import { ensureSymbolDefs, symbolSvg, symbolSvgStandalone, THEME_KEYS } from './symbols.js';
 import { pictureSvg } from './pictures.js';
 import { createCut } from './jigsaw.js';
 import * as audio from './audio.js';
 import * as tokenKeys from './tokenkeys.js';
 import { verifyChain, compareHeads } from './chainverify.js';
 import { createSparks } from './slotfx.js';
+import { createReels as createGlReels } from './slot3d.js';
 
 // ---------------------------------------------------------------- plumbing
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1374,6 +1375,26 @@ async function renderSlots() {
     try { slotInfo = await api('/api/bet/slots/info'); } catch { /* offline */ }
   }
   paintReels(blankScreen());
+
+  // Real cylinders if the hardware will draw them, the DOM drums if not.
+  const win = $('.slot-window');
+  if (win) {
+    glReels = await buildGlReels(win);
+    win.classList.toggle('gl', !!glReels);
+    if (glReels) {
+      glShow(null);
+      // Size it again once layout has actually happened. Measuring during the build gets
+      // whatever the box was mid-construction — it came out 543px wide inside a 634px
+      // window — and a viewport that size gives the wrong aspect, the wrong number of
+      // rows, and a gap down each side of the machine.
+      requestAnimationFrame(() => { if (glReels) glReels.resize(); });
+      if (typeof ResizeObserver === 'function') {
+        if (glWatch) glWatch.disconnect();
+        glWatch = new ResizeObserver(() => { if (glReels) glReels.resize(); });
+        glWatch.observe(win);
+      }
+    }
+  }
   recalc();
   infoPanel([
     el('div', { class: 'stat-row' },
@@ -1463,6 +1484,7 @@ function setReelsSpinning(on) {
   }
   const lever = $('#slotLever');
   if (lever) lever.classList.toggle('pulled', on);
+  if (glReels) { if (on) glReels.start(); else glReels.stop(); }
 }
 
 /** Land each reel in turn, showing its final symbols as it stops. */
@@ -1488,6 +1510,10 @@ async function settleReels(screen, stops = null, started = 0) {
     paintReel(reel, screen[i], [], i, stops ? stops[i] : null);
     // The class goes on after the rebuild, or the browser keeps the old animation.
     reel.classList.add('landing');
+    if (glReels) {
+      const stop = stops && Number.isInteger(stops[i]) ? stops[i] : 0;
+      glReels.stopAt(i, stop % GL_PER_DRUM, GL_PER_DRUM);
+    }
     audio.sfx('reelStop');
     const foot = reelFoot(reel);
     if (slotFx && foot) {
@@ -1576,7 +1602,11 @@ function sizeDrums() {
 let drumResize = null;
 function watchDrums() {
   if (drumResize || typeof ResizeObserver !== 'function') return;
-  drumResize = new ResizeObserver(() => { sizeDrums(); if (slotFx) slotFx.resize(); });
+  drumResize = new ResizeObserver(() => {
+    sizeDrums();
+    if (slotFx) slotFx.resize();
+    if (glReels) glReels.resize();
+  });
   const box = $('#reels');
   if (box) drumResize.observe(box);
 }
@@ -1608,6 +1638,71 @@ function paintReels(screen, wins = [], stops = null) {
 }
 
 let slotFx = null;
+
+// ---------------------------------------------------------------- the drums
+//
+// When WebGL is available the reels are real cylinders drawn by slot3d.js, and the DOM
+// drums behind them are hidden. When it is not — old hardware, a refused context — the
+// DOM drums stay and everything works as before. The game logic does not know which it
+// got, which is the point: the renderer is a skin over the same screen and stops.
+let glReels = null;
+let glWatch = null;
+
+/** How many symbols go round one drum. Twelve reads well and keeps the texture small. */
+const GL_PER_DRUM = 12;
+
+/**
+ * Paint one symbol into the strip texture.
+ *
+ * The panel behind it matters. The drum is dark and the artwork is mostly line work, so
+ * without a lit panel the symbols come out as outlines floating on a black barrel. The
+ * panel is flat rather than graded for the same reason the DOM faces are: the cylinder
+ * does the shading, and a gradient per cell fights it.
+ */
+function glDrawSymbol(ctx, sym, y, cell, width) {
+  return new Promise((resolve) => {
+    ctx.fillStyle = '#231d15';
+    ctx.fillRect(0, y, width, cell);
+    // Standalone: an <img> is its own document and cannot see the page's shared defs.
+    const svg = symbolSvgStandalone(sym, slotTheme);
+    const img = new Image();
+    const pad = cell * 0.12;
+    img.onload = () => {
+      ctx.drawImage(img, pad, y + pad, width - pad * 2, cell - pad * 2);
+      resolve();
+    };
+    // A symbol that will not load should not stall the whole strip.
+    img.onerror = () => resolve();
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  });
+}
+
+/** The twelve symbols on one drum, taken from that reel's real strip. */
+function glStripFor(reel) {
+  const strip = slotInfo && slotInfo.strips && slotInfo.strips[reel];
+  if (!strip || !strip.length) return ['A', 'K', 'Q', 'J', 'T', 'BELL', 'GEM', 'CROWN', 'WILD', 'SCAT', 'A', 'K'];
+  return Array.from({ length: GL_PER_DRUM }, (_, i) => strip[i % strip.length]);
+}
+
+/** Park the drums on a screen, using the real stops when the server sent them. */
+function glShow(stops) {
+  if (!glReels) return;
+  for (let reel = 0; reel < 5; reel += 1) {
+    const stop = stops && Number.isInteger(stops[reel]) ? stops[reel] : 0;
+    glReels.setStop(reel, stop % GL_PER_DRUM, GL_PER_DRUM);
+  }
+}
+
+async function buildGlReels(window_) {
+  if (glReels) { glReels.dispose(); glReels = null; }
+  const made = createGlReels(window_, { reels: 5, rows: 3, perDrum: GL_PER_DRUM });
+  if (!made) return null;
+  for (let reel = 0; reel < 5; reel += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await made.setStrip(reel, glStripFor(reel), glDrawSymbol);
+  }
+  return made;
+}
 
 /** Where a reel meets the deck, in the effects canvas's own coordinates. */
 function reelFoot(reel) {

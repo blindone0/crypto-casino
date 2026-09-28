@@ -138,12 +138,23 @@ const rotationX = (a) => {
   return new Float32Array([1, 0, 0, 0, 0, c, s, 0, 0, -s, c, 0, 0, 0, 0, 1]);
 };
 
-/** model = translate * rotateX, done by hand because it is two matrices. */
-function modelMatrix(x, angle) {
-  const r = rotationX(angle);
-  const m = new Float32Array(r);
-  m[12] = x;
-  return m;
+/**
+ * translate(x) * scaleX(w) * rotateX(a), written straight out.
+ *
+ * Scaling on X is how a drum gets its width: the mesh is a unit cylinder and each reel
+ * stretches it, so the row can be laid out to whatever the window turns out to be without
+ * rebuilding geometry. X is the axis of rotation, so the scale and the rotation do not
+ * interfere and the normals stay correct.
+ */
+function modelMatrix(x, angle, halfWidth) {
+  const c = Math.cos(angle);
+  const sn = Math.sin(angle);
+  return new Float32Array([
+    halfWidth, 0, 0, 0,
+    0, c, sn, 0,
+    0, -sn, c, 0,
+    x, 0, 0, 1,
+  ]);
 }
 
 /**
@@ -237,12 +248,36 @@ export function createReels(host, opts = {}) {
 
   // A drum wide enough that five sit side by side across the window with a small gap, and
   // a radius that puts `rows` symbols across the visible face.
-  const halfW = 0.46;
-  const radius = (perDrum / (Math.PI * 2)) * (2 * halfW) * (3 / rows) * 0.52;
-  const mesh = cylinder(gl, halfW, radius);
+  // A unit cylinder. Everything about how big a drum is and where it sits is decided at
+  // resize, from the window, and applied through the model matrix.
+  const mesh = cylinder(gl, 1, 1);
+
+  // Where the camera has to sit for exactly `rows` symbols to fill the height.
+  //
+  // The obvious answer — make the view as tall as the arc those symbols cover — is wrong,
+  // and wrong in a way that shows: it puts the camera far enough back that the whole
+  // front of the barrel fits in frame and you see five or six rows instead of three.
+  //
+  // A point at angle t on a unit drum sits at y = sin t, and its distance from the camera
+  // is camZ - cos t. What lands on screen is the ratio of those, not the height alone, so
+  // the top row reaches the top edge when
+  //
+  //     sin t / (camZ - cos t) = tan(fovy / 2)
+  //
+  // which solves for camZ directly. Perspective is the whole difference: the near face of
+  // the barrel is closer than its centre, so it projects larger than a flat calculation
+  // expects.
+  const FOVY = 0.62;
+  const edge = (rows * Math.PI) / perDrum;
+  const camZ = Math.cos(edge) + Math.sin(edge) / Math.tan(FOVY / 2);
+  // The view height at the drum's front face, which is what the row has to be laid out in.
+  const viewH = 2 * (camZ - 1) * Math.tan(FOVY / 2);
+  let pitch = 0.95;
+  let halfW = 0.44;
 
   const drums = Array.from({ length: reels }, (_, i) => ({
-    x: (i - (reels - 1) / 2) * (halfW * 2 + 0.06),
+    seat: i,
+    x: 0,
     angle: 0,
     spin: 0,
     tex: null,
@@ -253,14 +288,28 @@ export function createReels(host, opts = {}) {
   let running = false;
 
   function resize() {
-    const r = host.getBoundingClientRect();
-    if (!r.width || !r.height) return;
+    // offsetWidth, not getBoundingClientRect.
+    //
+    // The cabinet this sits in is rotated in 3D, and getBoundingClientRect reports the
+    // projected box on screen — which is bigger than the element's own layout box and
+    // gets projected a second time when the canvas inside it is drawn. Sizing from it
+    // makes the canvas larger than the window it is supposed to fill: too much barrel in
+    // frame, and a gap down each side of the machine.
+    const w = host.clientWidth;
+    const h = host.clientHeight;
+    if (!w || !h) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.round(r.width * dpr);
-    canvas.height = Math.round(r.height * dpr);
-    canvas.style.width = `${r.width}px`;
-    canvas.style.height = `${r.height}px`;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    canvas.style.width = `${w}px`;
+    canvas.style.height = `${h}px`;
     gl.viewport(0, 0, canvas.width, canvas.height);
+
+    // The visible width at the front of the barrel, divided between the reels.
+    const aspect = w / Math.max(1, h);
+    pitch = (viewH * aspect) / reels;
+    halfW = pitch * 0.47;
+    for (const d of drums) d.x = (d.seat - (reels - 1) / 2) * pitch;
   }
   resize();
 
@@ -268,13 +317,19 @@ export function createReels(host, opts = {}) {
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.enable(gl.DEPTH_TEST);
-    gl.enable(gl.CULL_FACE);
-    gl.cullFace(gl.BACK);
+    // No face culling.
+    //
+    // The strip winding round a cylinder comes out backwards, so culling BACK removed the
+    // near surface and left the inside of the far half showing through — which looks like
+    // a drum with twice as many rows on it, at the wrong size, and took a while to
+    // recognise for what it was. Depth testing already picks the nearer surface, and five
+    // low-poly barrels are not worth the fragility of getting the winding exactly right.
+    gl.disable(gl.CULL_FACE);
     gl.useProgram(prog);
 
     const aspect = canvas.width / Math.max(1, canvas.height);
-    gl.uniformMatrix4fv(loc.proj, false, perspective(0.62, aspect, 0.1, 40));
-    gl.uniformMatrix4fv(loc.view, false, translation(0, 0, -3.15));
+    gl.uniformMatrix4fv(loc.proj, false, perspective(FOVY, aspect, 0.1, 40));
+    gl.uniformMatrix4fv(loc.view, false, translation(0, 0, -camZ));
 
     const bind = (b, l) => {
       gl.bindBuffer(gl.ARRAY_BUFFER, b.buffer);
@@ -291,7 +346,7 @@ export function createReels(host, opts = {}) {
       gl.bindTexture(gl.TEXTURE_2D, d.tex);
       gl.uniform1i(loc.tex, 0);
       gl.uniform1f(loc.dim, d.dim);
-      gl.uniformMatrix4fv(loc.model, false, modelMatrix(d.x, d.angle));
+      gl.uniformMatrix4fv(loc.model, false, modelMatrix(d.x, d.angle, halfW));
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, mesh.count);
     }
   }
@@ -318,6 +373,16 @@ export function createReels(host, opts = {}) {
 
   return {
     get element() { return canvas; },
+    /** What the layout actually resolved to. For calibrating the framing by measurement. */
+    debug() {
+      return {
+        w: canvas.width, h: canvas.height,
+        aspect: canvas.width / canvas.height,
+        camZ, viewH, pitch, halfW,
+        span: pitch * (reels - 1) + halfW * 2,
+        halfViewAtFace: (camZ - 1) * Math.tan(FOVY / 2) * (canvas.width / canvas.height),
+      };
+    },
     resize() { resize(); draw(); },
 
     /** Hand a drum its strip. `symbols` is the reel's own order. */
