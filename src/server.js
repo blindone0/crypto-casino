@@ -1106,7 +1106,28 @@ function build(cfg) {
     }
     crash.start();
     stopPoller = walletApi.startPoller(db, cfg, driver);
-    sweeper = setInterval(() => limits.sweep(db), 600000);
+
+    // Rate-limit rows, and tables nobody is coming back to.
+    //
+    // Run once on the way up as well as on the timer: a server that was down for a day
+    // comes back to challenges that expired while it was off, and those stakes should be
+    // released now rather than ten minutes from now.
+    const housekeeping = () => {
+      limits.sweep(db);
+      try {
+        const swept = matches.sweep(db, cfg);
+        const touched = swept.expired + swept.resolved + swept.refunded + swept.failed;
+        if (touched && level >= LEVELS.info) {
+          console.log(`  match sweep: ${swept.expired} expired, ${swept.resolved} settled, `
+            + `${swept.refunded} refunded, ${swept.failed} failed`);
+        }
+      } catch (e) {
+        // Housekeeping must never take the server down with it.
+        console.error(`  match sweep failed: ${e.message}`);
+      }
+    };
+    housekeeping();
+    sweeper = setInterval(housekeeping, 600000);
     sweeper.unref?.();
 
     return new Promise((resolve) => {

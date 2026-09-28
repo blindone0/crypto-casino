@@ -402,27 +402,56 @@ function claimTimeout(db, cfg, user, id) {
     if (!match) throw new U.NotFound('no such match');
     if (match.status !== 'playing') throw new U.BadRequest('that match is not in play');
     if (seatOf(db, match.id, user) === null) throw new U.Forbidden('you are not in that match');
-    const plugin = gameFor(match.game);
-    const state = JSON.parse(match.state);
 
-    // Still setting up, so the game clock is not running and a separate deadline applies.
-    if (plugin.clockRuns && !plugin.clockRuns(state)) {
-      if (now() - match.started_at < cfg.match.setupSeconds) {
-        throw new U.BadRequest('they still have time to set up');
-      }
-      const winners = plugin.resultOnSetupTimeout
-        ? plugin.resultOnSetupTimeout(state, match.seats) : null;
-      // Nobody turned up. Nobody won anything, so nobody is charged for it.
-      if (!winners || !winners.length) return refund(db, match, 'abandoned');
-      return settle(db, cfg, match, winners, 'no-setup');
-    }
-
-    const waiting = plugin.toMove(state);
-    if (waiting === null) throw new U.BadRequest('nobody is on the clock');
-    const clock = chargeClock(db, match, waiting);
-    if (!clock.flagged) throw new U.BadRequest('their clock has not run out');
-    return settle(db, cfg, match, plugin.resultOnTimeout(state, waiting, match.seats), 'timeout');
+    const out = timeoutOutcome(db, cfg, match);
+    if (!out.ready) throw new U.BadRequest(out.why);
+    return applyOutcome(db, cfg, match, out);
   });
+}
+
+/**
+ * Whether a playing match has run out of time, and what that means if it has.
+ *
+ * Kept in one place because two things ask the question: a player claiming a win on the
+ * clock, and the sweeper cleaning up after a table everybody walked away from. They have
+ * to agree — a game that a player could have claimed must end the same way when the
+ * server notices instead, or the result would depend on who was watching.
+ *
+ * Returns `{ ready: false, why }` while the game is still live, or `{ ready: true,
+ * winners, reason }` once it is over. A null `winners` means nobody won: refund.
+ */
+function timeoutOutcome(db, cfg, match) {
+  const plugin = gameFor(match.game);
+  const state = JSON.parse(match.state);
+
+  // Still setting up, so the game clock is not running and a separate deadline applies.
+  if (plugin.clockRuns && !plugin.clockRuns(state)) {
+    if (now() - match.started_at < cfg.match.setupSeconds) {
+      return { ready: false, why: 'they still have time to set up' };
+    }
+    const winners = plugin.resultOnSetupTimeout
+      ? plugin.resultOnSetupTimeout(state, match.seats) : null;
+    // Nobody turned up. Nobody won anything, so nobody is charged for it.
+    if (!winners || !winners.length) return { ready: true, winners: null, reason: 'abandoned' };
+    return { ready: true, winners, reason: 'no-setup' };
+  }
+
+  const waiting = plugin.toMove(state);
+  if (waiting === null) return { ready: false, why: 'nobody is on the clock' };
+  if (!chargeClock(db, match, waiting).flagged) {
+    return { ready: false, why: 'their clock has not run out' };
+  }
+  return {
+    ready: true,
+    winners: plugin.resultOnTimeout(state, waiting, match.seats),
+    reason: 'timeout',
+  };
+}
+
+/** Carry out what timeoutOutcome decided. Must be called inside a transaction. */
+function applyOutcome(db, cfg, match, out) {
+  if (!out.winners || !out.winners.length) return refund(db, match, out.reason);
+  return settle(db, cfg, match, out.winners, out.reason);
 }
 
 // -------------------------------------------------------------------- views
@@ -513,8 +542,77 @@ function stats(db) {
   };
 }
 
+// ----------------------------------------------------------- housekeeping
+/**
+ * What the house is holding, and what it owes.
+ *
+ * Every live stake sits at the house key until its match ends, so the house must hold at
+ * least the sum of them or it cannot pay its own tables out. It will normally hold more:
+ * the same key is the bankroll for the tugrik casino games and collects the rake, so this
+ * is a floor rather than an equality. `spare` is what is genuinely the house's own.
+ *
+ * `ok` going false is a solvency alarm, not an accounting rounding difference. It means
+ * stakes were taken and paid away, or paid out twice.
+ */
+function escrowHealth(db) {
+  const owed = db.get(
+    `SELECT COALESCE(SUM(m.stake * (SELECT COUNT(*) FROM match_seats s WHERE s.match_id = m.id)), 0)
+       AS n FROM matches m WHERE m.status IN ('open','playing')`,
+  ).n;
+  const held = tokenchain.balanceOf(db, houseKey(db).publicRaw);
+  return { held, owed, spare: held - owed, ok: held >= owed };
+}
+
+/**
+ * Close out tables that nobody is coming back to.
+ *
+ * Two things strand a stake. A challenge nobody accepts holds the host's stake until the
+ * host returns to cancel it, and a game both players abandon holds every stake until
+ * somebody claims the clock — which nobody is left to do. Either way the tokens sit at
+ * the house key with no result to release them, and no amount of waiting fixes it.
+ *
+ * Each match is settled in its own transaction so that one that cannot be resolved does
+ * not roll back the ones that can. Safe to call at any time: a match that is still live
+ * simply is not touched.
+ */
+function sweep(db, cfg, at = now()) {
+  const done = { expired: 0, resolved: 0, refunded: 0, failed: 0 };
+
+  const stale = db.all(
+    "SELECT * FROM matches WHERE status='open' AND created_at <= ?",
+    at - cfg.match.openExpirySeconds,
+  );
+  for (const match of stale) {
+    try {
+      db.tx(() => refund(db, match, 'expired'));
+      done.expired += 1;
+    } catch { done.failed += 1; }
+  }
+
+  // Milliseconds here: moved_at_ms is the only clock the match layer trusts.
+  const quiet = db.all(
+    "SELECT * FROM matches WHERE status='playing' AND moved_at_ms <= ?",
+    (at - cfg.match.abandonSeconds) * 1000,
+  );
+  for (const match of quiet) {
+    try {
+      db.tx(() => {
+        const out = timeoutOutcome(db, cfg, match);
+        // Nobody is on the clock and nobody has moved for hours: there is no result to
+        // reach, so everyone takes their stake back rather than the house keeping it.
+        const call = out.ready ? out : { winners: null, reason: 'abandoned' };
+        applyOutcome(db, cfg, match, call);
+        if (call.winners && call.winners.length) done.resolved += 1;
+        else done.refunded += 1;
+      });
+    } catch { done.failed += 1; }
+  }
+  return done;
+}
+
 module.exports = {
   GAMES, gameFor, houseKey, houseTransfer, escrow,
   create, join, cancel, act, resign, claimTimeout,
   lobby, detail, summary, settle, refund, stats, seatOf, seatsOf,
+  timeoutOutcome, sweep, escrowHealth,
 };

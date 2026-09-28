@@ -134,6 +134,18 @@ const DEFAULTS = {
     // How long a game that has to be set up (placing a fleet) waits before the player who
     // did turn up can claim it. Without a deadline an absent player holds both stakes.
     setupSeconds: 180,
+    // A challenge nobody accepts is cancelled and every stake refunded after this long.
+    // Without it the stake sits in escrow until the host remembers to come back and press
+    // cancel, which is to say for ever.
+    openExpirySeconds: 24 * 3600,
+    // How long a game sits with nobody moving before the server settles it unasked.
+    //
+    // Claiming a timeout is the players' job and this does not replace it: the clock
+    // decides the result either way. This is for the case where there is nobody left to
+    // claim, because every side closed the tab, and the stakes would otherwise be held
+    // for ever. It is deliberately far longer than any clock, so a live game is never
+    // touched by it.
+    abandonSeconds: 3600,
   },
 
   // ---- FREE PLAY --------------------------------------------------------
