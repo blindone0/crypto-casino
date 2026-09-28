@@ -21,6 +21,7 @@ const crypto = require('node:crypto');
 const U = require('./util');
 const tokenchain = require('./tokenchain');
 const chess = require('./chess');
+const seabattle = require('./seabattle');
 
 const now = () => Math.floor(Date.now() / 1000);
 const nowMs = () => Date.now();
@@ -113,7 +114,13 @@ function escrow(db, spend, amount) {
  *               Returns { state, note, result?, reason? }; a result ends the match.
  * view()        what one seat is allowed to see. Battleship needs this to be less than
  *               the whole state, which is why it exists at all.
- * resultOnTimeout() who wins when a clock runs out.
+ * canAct()      optional: who may act now, when that is not simply whose turn it is.
+ *               Both players place their fleets at once, in any order.
+ * clockRuns()   optional: whether the game clock is ticking. It does not tick while the
+ *               players are still setting up.
+ * resultOnTimeout()      who wins when a clock runs out.
+ * resultOnSetupTimeout() optional: who wins when somebody never sets up at all. Without
+ *               it, a player who walks away before the first move holds both stakes.
  */
 const GAMES = {
   chess: {
@@ -185,6 +192,104 @@ const GAMES = {
       const onlyKing = kept.length === 1;
       const kingAndMinor = kept.length === 2 && kept.some((p) => 'nbNB'.includes(p));
       return (onlyKing || kingAndMinor) ? 'draw' : otherSeat(seat);
+    },
+  },
+
+  seabattle: {
+    key: 'seabattle',
+    name: 'Sea Battle',
+    clockMs: 8 * 60 * 1000,
+    incrementMs: 3 * 1000,
+
+    create() {
+      return {
+        phase: 'setup',
+        boards: { host: null, guest: null },
+        turn: crypto.randomInt(2) === 0 ? 'host' : 'guest',
+        log: [],
+      };
+    },
+
+    toMove(state) {
+      return state.phase === 'play' ? state.turn : null;
+    },
+
+    // During setup both players act, in either order, and neither waits for the other.
+    canAct(state, seat) {
+      if (state.phase === 'setup') return !state.boards[seat];
+      return state.turn === seat;
+    },
+
+    // Nobody should lose time they are not being given the chance to use. The clock
+    // starts when the shooting does.
+    clockRuns(state) {
+      return state.phase === 'play';
+    },
+
+    act(state, seat, payload) {
+      if (state.phase === 'setup') {
+        // Shooting is not an option yet, and saying so beats complaining about a fleet
+        // the player was not trying to send.
+        if (payload.fleet === undefined) {
+          throw new U.BadRequest('place your fleet before you shoot');
+        }
+        const fleet = seabattle.parseFleet(payload.fleet);
+        const boards = { ...state.boards, [seat]: seabattle.emptyBoard(fleet) };
+        const ready = !!boards.host && !!boards.guest;
+        return {
+          state: { ...state, boards, phase: ready ? 'play' : 'setup' },
+          note: 'fleet',
+        };
+      }
+
+      const target = otherSeat(seat);
+      const shot = seabattle.fire(state.boards[target], Number(payload.cell));
+      const boards = { ...state.boards, [target]: shot.board };
+      // A hit shoots again. That is the Russian rule, and it is what gives the game its
+      // shape: a good run can take a whole fleet apart without the other side moving.
+      const turn = shot.outcome === 'miss' ? target : seat;
+      const next = {
+        ...state,
+        boards,
+        turn,
+        log: [...state.log, { seat, cell: Number(payload.cell), outcome: shot.outcome }],
+      };
+      if (seabattle.afloat(shot.board) === 0) {
+        return { state: next, note: shot.outcome, result: seat, reason: 'fleet-sunk' };
+      }
+      return { state: next, note: shot.outcome };
+    },
+
+    view(state, seat) {
+      const mine = seat ? state.boards[seat] : null;
+      const theirSeat = seat ? otherSeat(seat) : null;
+      const theirs = theirSeat ? state.boards[theirSeat] : null;
+      return {
+        phase: state.phase,
+        turn: state.turn,
+        size: seabattle.SIZE,
+        fleet: seabattle.FLEET,
+        placed: { host: !!state.boards.host, guest: !!state.boards.guest },
+        // Own board in full; the opponent's only as far as it has been shot at. Ships
+        // nobody has found are not in this response at all, so there is nothing for a
+        // modified client to read ahead.
+        own: mine ? seabattle.boardView(mine, true) : null,
+        theirs: theirs ? seabattle.boardView(theirs, false) : null,
+        log: state.log.slice(-12),
+      };
+    },
+
+    resultOnTimeout(state, seat) {
+      return otherSeat(seat);
+    },
+
+    // Whoever did set up wins. If neither did, nobody has won anything and the stakes go
+    // back untouched.
+    resultOnSetupTimeout(state) {
+      const host = !!state.boards.host;
+      const guest = !!state.boards.guest;
+      if (host === guest) return null;
+      return host ? 'host' : 'guest';
     },
   },
 };
@@ -348,12 +453,14 @@ function act(db, cfg, user, { id, ...payload }) {
 
     const plugin = gameFor(match.game);
     const state = JSON.parse(match.state);
-    if (plugin.toMove(state) !== seat) throw new U.BadRequest('not your turn');
+    const allowed = plugin.canAct ? plugin.canAct(state, seat) : plugin.toMove(state) === seat;
+    if (!allowed) throw new U.BadRequest('not your turn');
 
-    // The clock is charged before the move is applied, so a move made after the flag has
-    // fallen cannot save the player who made it.
-    const clock = chargeClock(match, seat);
-    if (clock.flagged) {
+    // The clock is charged before the move is applied, so a move sent after the flag has
+    // fallen cannot save the player who sent it. It does not run during setup.
+    const ticking = plugin.clockRuns ? plugin.clockRuns(state) : true;
+    const clock = ticking ? chargeClock(match, seat) : null;
+    if (clock && clock.flagged) {
       const result = plugin.resultOnTimeout(state, seat);
       return { ...settle(db, cfg, match, result, 'timeout'), flagged: seat };
     }
@@ -365,10 +472,17 @@ function act(db, cfg, user, { id, ...payload }) {
        VALUES(?,?,?,?,?,?)`,
       match.id, seat, ply, JSON.stringify(payload), outcome.note || null, now(),
     );
-    db.run(
-      `UPDATE matches SET state=?, ${clock.column}=?, moved_at_ms=? WHERE id=?`,
-      JSON.stringify(outcome.state), clock.left + plugin.incrementMs, nowMs(), match.id,
-    );
+    if (clock) {
+      db.run(
+        `UPDATE matches SET state=?, ${clock.column}=?, moved_at_ms=? WHERE id=?`,
+        JSON.stringify(outcome.state), clock.left + plugin.incrementMs, nowMs(), match.id,
+      );
+    } else {
+      // Setup spends nobody's clock, but the clock must start from the moment play does,
+      // or the first mover is charged for however long the other side took to set up.
+      db.run('UPDATE matches SET state=?, moved_at_ms=? WHERE id=?',
+        JSON.stringify(outcome.state), nowMs(), match.id);
+    }
 
     if (outcome.result) {
       const fresh = db.get('SELECT * FROM matches WHERE id=?', match.id);
@@ -404,6 +518,18 @@ function claimTimeout(db, cfg, user, id) {
     if (!seatOf(match, user)) throw new U.Forbidden('you are not in that match');
     const plugin = gameFor(match.game);
     const state = JSON.parse(match.state);
+
+    // Still setting up, so the game clock is not running and a separate deadline applies.
+    if (plugin.clockRuns && !plugin.clockRuns(state)) {
+      if (now() - match.started_at < cfg.match.setupSeconds) {
+        throw new U.BadRequest('they still have time to set up');
+      }
+      const result = plugin.resultOnSetupTimeout ? plugin.resultOnSetupTimeout(state) : null;
+      // Neither of them turned up. Nobody won anything, so nobody is charged for it.
+      if (!result) return refund(db, match, 'abandoned');
+      return settle(db, cfg, match, result, 'no-setup');
+    }
+
     const waiting = plugin.toMove(state);
     const clock = chargeClock(match, waiting);
     if (!clock.flagged) throw new U.BadRequest('their clock has not run out');
@@ -416,9 +542,10 @@ const clockNow = (match, seat) => {
   if (match.status !== 'playing') return match[seat === 'host' ? 'host_ms' : 'guest_ms'];
   const plugin = gameFor(match.game);
   const state = JSON.parse(match.state);
-  const running = plugin.toMove(state) === seat;
   const raw = match[seat === 'host' ? 'host_ms' : 'guest_ms'];
-  return running ? Math.max(0, raw - (nowMs() - match.moved_at_ms)) : raw;
+  const ticking = plugin.clockRuns ? plugin.clockRuns(state) : true;
+  if (!ticking || plugin.toMove(state) !== seat) return raw;
+  return Math.max(0, raw - (nowMs() - match.moved_at_ms));
 };
 
 function summary(db, match) {

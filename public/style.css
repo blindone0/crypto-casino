@@ -905,3 +905,53 @@ body.russian .bigwin .amount { color: #ffe0a8; text-shadow: 0 0 44px rgba(232, 1
   gap: 4px;
   padding: 2px 0;
 }
+
+/* ------------------------------------------------------------- sea battle */
+.seabattle { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.sea-title { margin: 0; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-dim); }
+.sea-pair { display: flex; flex-wrap: wrap; gap: 18px; justify-content: center; }
+.sea-side { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+
+.sea-grid {
+  display: grid;
+  grid-template-columns: 14px repeat(10, 1fr);
+  gap: 1px;
+  width: min(88vw, 320px);
+}
+.sea-grid .coord {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  font-style: normal;
+  opacity: .45;
+}
+.sea-cell {
+  aspect-ratio: 1;
+  background: #161b22;
+  border: 1px solid #232a33;
+  border-radius: 2px;
+}
+.sea-grid.live .sea-cell:not(.hit):not(.miss) { cursor: crosshair; }
+.sea-grid.live .sea-cell:not(.hit):not(.miss):hover { background: #22303f; }
+.sea-cell.ship { background: #3a4756; border-color: #4d5c6d; }
+.sea-cell.sunk { background: #5a2a2a; border-color: #7a3a3a; }
+.sea-cell.miss { background: #12161c; }
+.sea-cell.miss::after {
+  content: '';
+  display: block;
+  margin: 40% auto;
+  width: 20%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .28);
+}
+.sea-cell.hit { background: #7a2f2f; border-color: #a04141; }
+.sea-cell.hit::after { content: '\00d7'; display: block; text-align: center; font-size: 12px; line-height: 1; color: #ffd9d9; }
+
+.sea-left { font-size: 11px; color: var(--text-dim); letter-spacing: .06em; }
+.fleet-row { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.ship-chip { display: flex; gap: 2px; padding: 5px 6px; }
+.ship-chip .seg { width: 8px; height: 8px; background: #4d5c6d; border-radius: 1px; }
+.ship-chip.on { border-color: var(--gold); }
+.ship-chip.on .seg { background: var(--gold); }

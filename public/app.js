@@ -2424,6 +2424,7 @@ function showGameOver(game, score, result) {
 
 const MATCH_BOARDS = {
   chess: () => import('./games/chessboard.js'),
+  seabattle: () => import('./games/seabattleboard.js'),
 };
 
 /** Poll while a match is live. Matches are turn-based, so a socket would be overkill. */
@@ -2605,14 +2606,12 @@ async function buildMatchScreen(view) {
         el('span', { id: 'mBottom' }, ''),
         el('span', { class: 'mono', id: 'mBottomClock' }, ''))));
 
-  const mine = view.seat;
-  const orientation = view.view.white === mine ? 'w' : 'b';
   state.board = mod.board(host, {
-    fen: view.view.fen,
-    legal: view.view.legal,
-    orientation: mine ? orientation : 'w',
-    interactive: !!mine,
-    onMove: (move) => sendMove(move),
+    view: view.view,
+    seat: view.seat,
+    myTurn: view.status === 'playing' && !!view.seat && view.toMove === view.seat,
+    lang: getLocale(),
+    onAct: (action) => sendAction(action),
   });
   paintMatch(view);
 }
@@ -2635,14 +2634,11 @@ function paintMatch(view) {
   $('#mTopClock').textContent = clockText(view.clock[top]);
   $('#mBottomClock').textContent = clockText(view.clock[bottom]);
 
-  const myTurn = view.status === 'playing' && mine && view.toMove === mine;
-  if (state.board) {
-    state.board.update({
-      fen: view.view.fen,
-      legal: myTurn ? view.view.legal : [],
-      interactive: myTurn,
-    });
-  }
+  // Setting up is not "your turn", but it is something you may do, so the board is told
+  // to accept input for it too. Морской бой needs this; chess never hits the second case.
+  const canAct = view.status === 'playing' && !!mine
+    && (view.toMove === mine || (view.view.phase === 'setup' && !view.view.placed?.[mine]));
+  if (state.board) state.board.update({ view: view.view, seat: mine, myTurn: canAct });
 
   setKids($('#betPanel'),
     el('div', { class: 'stat-card' },
@@ -2651,7 +2647,9 @@ function paintMatch(view) {
     el('div', { class: 'stat-row' },
       el('span', { class: 'k' }, t('match.status')),
       el('span', { class: 'v' }, matchStatusText(view))),
-    el('div', { class: 'movelist' }, ...pairMoves(view.view.san || [])),
+    view.game === 'chess'
+      ? el('div', { class: 'movelist' }, ...pairMoves(view.view.san || []))
+      : el('div', { class: 'movelist' }, ...shotLog(view)),
     view.status === 'playing' && mine
       ? el('button', {
         class: 'big', style: 'margin-top:10px',
@@ -2696,9 +2694,25 @@ function matchStatusText(view) {
   return `${t(`match.${outcome}`)} — ${t(`match.why.${view.reason}`, {}) || view.reason}`;
 }
 
-async function sendMove(move) {
+/** The shot log, newest first, for the games that have shots rather than moves. */
+function shotLog(view) {
+  const rows = (view.view.log || []).slice().reverse();
+  return rows.map((entry) => el('div', {},
+    el('span', { class: 'k' }, entry.seat === view.seat ? '\u2794' : '\u2190'),
+    el('span', {}, cellName(entry.cell, view.view.size || 10)),
+    el('span', { class: entry.outcome === 'miss' ? '' : 'pos' }, t(`match.shot.${entry.outcome}`))));
+}
+
+const SEA_LETTERS = '\u0410\u0411\u0412\u0413\u0414\u0415\u0416\u0417\u0418\u041a';
+const cellName = (cell, size) => `${SEA_LETTERS[cell % size] || '?'}${Math.floor(cell / size) + 1}`;
+
+/**
+ * Send one action. Whatever the board handed back goes straight through: the server is
+ * the thing that decides whether it was allowed, and it will say so if it was not.
+ */
+async function sendAction(action) {
   try {
-    await api('/api/match/move', { method: 'POST', body: { id: state.matchId, move } });
+    await api('/api/match/move', { method: 'POST', body: { id: state.matchId, ...action } });
     audio.sfx('card');
     await refreshMatch(false);
   } catch (e) {

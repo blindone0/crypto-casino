@@ -42,17 +42,26 @@ const el = (tag, cls, text) => {
 /**
  * Draw a position into `host` and return a handle.
  *
- * `legal` is the list of coordinate moves the server will accept. `onMove` is called with
- * one of them, never with anything else. `orientation` is the colour at the bottom.
+ * Every board in the match room takes the same four things: the view the server sent, the
+ * seat the viewer occupies, whether it is their turn, and a callback that sends one action
+ * back. Keeping the shape identical is what lets the match screen treat chess and Морской
+ * бой as the same thing.
+ *
+ * `view.legal` is the list of moves the server will accept, and this board will not offer
+ * anything outside it.
  */
 export function board(host, opts = {}) {
+  const read = (o) => ({
+    fen: o.view?.fen || '',
+    legal: o.myTurn ? (o.view?.legal || []) : [],
+    orientation: o.seat && o.view?.white === o.seat ? 'w' : (o.seat ? 'b' : 'w'),
+    interactive: !!o.myTurn,
+  });
+
   const state = {
-    fen: opts.fen || '',
-    legal: opts.legal || [],
-    orientation: opts.orientation === 'b' ? 'b' : 'w',
-    lastMove: opts.lastMove || null,
-    interactive: opts.interactive !== false,
-    onMove: opts.onMove || (() => {}),
+    ...read(opts),
+    lastMove: null,
+    onMove: (move) => (opts.onAct || (() => {}))({ move }),
     selected: null,
     pending: null, // a promotion waiting for the player to choose a piece
   };
@@ -154,7 +163,7 @@ export function board(host, opts = {}) {
   return {
     /** Show a new position. Clears any half-made move, which is no longer meaningful. */
     update(next) {
-      Object.assign(state, next);
+      Object.assign(state, read({ ...opts, ...next }));
       state.selected = null;
       state.pending = null;
       draw();

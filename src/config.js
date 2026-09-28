@@ -95,6 +95,9 @@ const DEFAULTS = {
     minStake: 10,
     maxStake: 5000,
     maxOpenPerUser: 3,      // stops one account papering the lobby with challenges
+    // How long a game that has to be set up (placing a fleet) waits before the player who
+    // did turn up can claim it. Without a deadline an absent player holds both stakes.
+    setupSeconds: 180,
   },
 
   // ---- FREE PLAY --------------------------------------------------------
