@@ -23,6 +23,7 @@ const arcade = require('./arcade');
 const matches = require('./match');
 const geoMod = require('./geo');
 const dice = require('./games/dice');
+const bones = require('./games/bones');
 const limbo = require('./games/limbo');
 const mines = require('./games/mines');
 const slots = require('./games/slots');
@@ -321,6 +322,20 @@ function build(cfg) {
     const body = await U.readJsonBody(req);
     return dice.play(gameCtx(ctx, body.spend), body);
   });
+
+  add('POST', '/api/bet/bones', async (ctx, req) => {
+    checkCsrf(req, ctx);
+    const body = await U.readJsonBody(req);
+    return bones.play(gameCtx(ctx, body.spend), body);
+  });
+
+  // The whole board, so the client can print the prices without guessing at them.
+  add('GET', '/api/bones/table', async (ctx) => ({
+    table: bones.payTable(ctx.cfg),
+    min: bones.MIN_SUM,
+    max: bones.MAX_SUM,
+    totalWays: bones.TOTAL_WAYS,
+  }));
 
   add('POST', '/api/bet/limbo', async (ctx, req) => {
     checkCsrf(req, ctx);

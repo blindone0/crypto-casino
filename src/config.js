@@ -28,6 +28,10 @@ const DEFAULTS = {
   // Raise it for more margin per bet, lower it to compete on price.
   houseEdge: {
     dice: 0.01,
+    // Кости, the classic two-d6 game. Same edge as dice because it is the same kind of
+    // bet — a known chance at a known price — and charging more for the prettier one
+    // would be charging for the animation.
+    bones: 0.01,
     limbo: 0.01,
     crash: 0.01,
     mines: 0.01,
