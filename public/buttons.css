@@ -1,0 +1,363 @@
+/* ============================================================================
+   GAME BUTTONS — the materials, and the rules they follow
+   ============================================================================
+
+   The brief was that each game's button should be built in that game's own
+   visual language: real 3D buttons with depth and travel, soft tactile ones in
+   the spirit of the PS3 toy-game titles, and other distinct treatments.
+
+   THE SHAPE OF THE SOLUTION
+
+   Ten richly-materialled 3D objects do not fit in a 45px header, and should
+   not: that bar was reclaimed from the games and giving it back would undo the
+   work. So there are two surfaces.
+
+     the header    stays 45px. Each pill carries its game's identity in the
+                   small — its own accent and its own pressed state — and
+                   nothing more. No shadows, no textures, no height.
+     the picker    is where the designed buttons live, at a size where the work
+                   is visible. It is also the right home screen on a phone,
+                   where a horizontal strip of ten tiny pills is the weakest
+                   thing on the page.
+
+   THE GUIDELINES
+
+   Five materials dress ten buttons. That is deliberate: a texture is reusable
+   in a way that a picture of a button is not, so the cost of a new game is a
+   line naming which material it wears, not a new asset.
+
+     brass     lacquered wood and polished metal   slots, arcade
+     tile      pressed ceramic with a hard bevel   mines, puzzle
+     glass     cold, emissive, lit from within     crash, limbo
+     resin     moulded, rounded, heavy             dice
+     cotton    woven felt with a stitched seam     preferans, debertz, match
+
+   Depth scale. Every button is the same object seen in the same light, so the
+   numbers are shared rather than tuned per material:
+
+     resting lift   6px   the shadow the button casts on the board
+     press travel   4px   how far the face actually moves down
+     bevel          2px   the lit top edge and the dark bottom edge
+     key light      from above and slightly left, matching the slot cabinet
+
+   Press is a state, not an animation. The face moves down, the cast shadow
+   shrinks to meet it, and the lit bevel narrows — because that is what happens
+   when a real object is pushed into a surface. Nothing scales, because scaling
+   reads as a sticker being squashed rather than a thing being pressed.
+
+   Cotton is the exception that proves the rule: it compresses rather than
+   travels, because felt does. Its press squashes the face and deepens the
+   inner shadow instead of moving the whole object.
+
+   Colour comes from one custom property per game, --g-hue, and every material
+   derives its own tints from it. Adding a game means choosing a hue and a
+   material; it never means writing new shadow stacks.
+
+   The tilt from parallax.js is read here too, so on a phone the whole picker
+   leans with the device and the buttons catch the light as it moves. That is
+   what makes them read as objects rather than as pictures of objects, and it
+   costs nothing once the module exists.
+
+   Nothing here touches public/symbols.js or public/pictures.js. Those are
+   constants; this is all material and light.
+   ========================================================================= */
+
+.picker {
+  --lift: 6px;
+  --travel: 4px;
+  --bevel: 2px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(152px, 1fr));
+  gap: 16px;
+  perspective: 900px;
+  perspective-origin: calc(50% + var(--tilt-y, 0) * 0.5%) 40%;
+}
+
+/* The button itself. Everything below is a material laid over this. */
+.gbtn {
+  --g-hue: 42;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 2px;
+  min-height: 104px;
+  padding: 14px 14px 12px;
+  border: 0;
+  border-radius: 14px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+  font: inherit;
+  transform-style: preserve-3d;
+  /* The lean follows the device, and the buttons lean slightly less than the
+     surface they sit on, which is what separates them from it. */
+  transform:
+    rotateX(calc(var(--tilt-x, 0) * -0.35deg))
+    rotateY(calc(var(--tilt-y, 0) * 0.5deg))
+    translateY(0);
+  transition: transform .14s cubic-bezier(.2, .7, .3, 1), box-shadow .14s ease, filter .14s ease;
+}
+
+.gbtn .g-name {
+  font-family: var(--serif);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  position: relative;
+  z-index: 2;
+}
+.gbtn .g-kind {
+  font-size: 10px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  opacity: .62;
+  position: relative;
+  z-index: 2;
+}
+
+/* The face, which is what actually carries the material. A separate layer from
+   the button so it can move independently of the cast shadow. */
+.gbtn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  z-index: 0;
+  transition: inherit;
+}
+
+/* The cast shadow. Its own layer so it can shrink as the face descends —
+   a shadow that stayed put would say the light moved, not the button. */
+.gbtn::after {
+  content: '';
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: calc(var(--lift) * -0.9);
+  height: 18px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(0, 0, 0, .85), rgba(0, 0, 0, 0));
+  z-index: -1;
+  transition: inherit;
+}
+
+.gbtn:active,
+.gbtn.on:active { transform: translateY(var(--travel)); }
+.gbtn:active::after { opacity: .45; bottom: calc(var(--lift) * -0.15); }
+
+@media (hover: hover) {
+  .gbtn:hover { filter: brightness(1.08); }
+}
+
+/* The current game reads as already pressed, because it is. */
+.gbtn.on {
+  transform: translateY(calc(var(--travel) * 0.6));
+}
+.gbtn.on::after { opacity: .5; }
+
+/* ---------------------------------------------------------------- brass ---
+   Lacquered cabinet wood under polished metal, lit like the slot machine it
+   belongs to. The diagonal streaks are the brushed grain; the seams are where
+   two pieces of stock meet. */
+.gbtn.m-brass::before {
+  background:
+    linear-gradient(103deg, rgba(255, 255, 255, .13) 0 2%, rgba(0, 0, 0, 0) 2% 6%) ,
+    repeating-linear-gradient(97deg,
+      rgba(255, 246, 214, .05) 0 3px, rgba(0, 0, 0, .05) 3px 7px),
+    linear-gradient(165deg,
+      hsl(var(--g-hue) 54% 42%) 0%,
+      hsl(var(--g-hue) 48% 27%) 38%,
+      hsl(var(--g-hue) 44% 17%) 70%,
+      hsl(var(--g-hue) 40% 11%) 100%);
+  box-shadow:
+    inset 0 var(--bevel) 0 hsl(var(--g-hue) 70% 68% / .55),
+    inset 0 calc(var(--bevel) * -1) 0 rgba(0, 0, 0, .6),
+    inset 0 0 0 1px rgba(0, 0, 0, .45);
+}
+.gbtn.m-brass { color: #fdf3d9; }
+
+/* ----------------------------------------------------------------- tile ---
+   Pressed ceramic with a hard bevel: the one material where the edge is the
+   whole character, so the highlight sits on a crisp line rather than a
+   gradient. */
+.gbtn.m-tile::before {
+  background:
+    /* the recessed field, set in from the bevel */
+    linear-gradient(180deg, rgba(0, 0, 0, .28), rgba(0, 0, 0, 0) 30%) padding-box,
+    linear-gradient(180deg,
+      hsl(var(--g-hue) 30% 31%) 0%,
+      hsl(var(--g-hue) 26% 20%) 52%,
+      hsl(var(--g-hue) 28% 14%) 100%);
+  border: 3px solid transparent;
+  box-shadow:
+    inset 0 3px 0 hsl(var(--g-hue) 34% 54%),
+    inset 3px 0 0 hsl(var(--g-hue) 30% 40% / .75),
+    inset -3px 0 0 rgba(0, 0, 0, .55),
+    inset 0 -3px 0 rgba(0, 0, 0, .8),
+    inset 0 6px 12px rgba(0, 0, 0, .35);
+}
+
+/* ---------------------------------------------------------------- glass ---
+   Cold and lit from inside, for the two games that are a line on a chart. The
+   inner glow sits low so the face reads as a pane with something behind it. */
+.gbtn.m-glass::before {
+  background:
+    radial-gradient(120% 80% at 50% 118%,
+      hsl(var(--g-hue) 88% 58% / .42) 0%, rgba(0, 0, 0, 0) 62%),
+    linear-gradient(168deg,
+      rgba(255, 255, 255, .10) 0%, rgba(255, 255, 255, .02) 34%, rgba(0, 0, 0, .28) 100%),
+    linear-gradient(180deg, #131b21 0%, #0b1015 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .22),
+    inset 0 0 0 1px hsl(var(--g-hue) 60% 50% / .30),
+    inset 0 -14px 26px hsl(var(--g-hue) 80% 50% / .16);
+}
+.gbtn.m-glass .g-name { text-shadow: 0 0 12px hsl(var(--g-hue) 90% 60% / .55); }
+
+/* ---------------------------------------------------------------- resin ---
+   Moulded and heavy, the way a die is: rounded everywhere, one soft highlight
+   near the top left, no hard edges anywhere. */
+.gbtn.m-resin { border-radius: 20px; }
+.gbtn.m-resin::before {
+  background:
+    /* the specular bloom, high and left like every other light on the site */
+    radial-gradient(58% 42% at 28% 14%, rgba(255, 255, 255, .34), rgba(255, 255, 255, 0) 64%),
+    /* the body falling away at every edge, which is what makes it read as a solid
+       rather than as a panel with a gradient on it */
+    radial-gradient(130% 120% at 50% 32%,
+      hsl(var(--g-hue) 44% 42%) 0%,
+      hsl(var(--g-hue) 40% 26%) 52%,
+      hsl(var(--g-hue) 38% 15%) 100%);
+  box-shadow:
+    inset 0 4px 0 rgba(255, 255, 255, .20),
+    inset 0 -7px 16px rgba(0, 0, 0, .58),
+    inset 6px 0 14px rgba(0, 0, 0, .28),
+    inset -6px 0 14px rgba(0, 0, 0, .28),
+    inset 0 0 0 1px rgba(0, 0, 0, .4);
+}
+
+/* --------------------------------------------------------------- cotton ---
+   The one that was asked for by name.
+   Felt, with a stitched seam set in from the edge and a soft inner shadow so
+   the surface reads as compressible. The weave is two crossed repeating
+   gradients rather than an image: it stays sharp at any size, recolours with
+   the hue, and costs nothing to ship.
+
+   Its press is different from every other material on purpose. Cloth does not
+   travel on a post — it squashes — so the face compresses and the inner shadow
+   deepens instead of the whole object moving down. */
+.gbtn.m-cotton::before {
+  background:
+    repeating-linear-gradient(90deg,
+      rgba(255, 255, 255, .045) 0 1px, rgba(0, 0, 0, .05) 1px 3px),
+    repeating-linear-gradient(0deg,
+      rgba(255, 255, 255, .035) 0 1px, rgba(0, 0, 0, .05) 1px 3px),
+    linear-gradient(168deg,
+      hsl(var(--g-hue) 26% 30%) 0%,
+      hsl(var(--g-hue) 24% 21%) 60%,
+      hsl(var(--g-hue) 22% 16%) 100%);
+  box-shadow:
+    inset 0 2px 5px rgba(255, 255, 255, .10),
+    inset 0 -6px 14px rgba(0, 0, 0, .42),
+    inset 0 0 0 1px rgba(0, 0, 0, .35);
+}
+/* The stitched seam. A dashed border set in from the edge is exactly what a
+   sewn seam is, so it is drawn as one rather than imitated with a gradient. */
+.gbtn.m-cotton .g-seam {
+  position: absolute;
+  inset: 7px;
+  border: 2px dashed hsl(var(--g-hue) 34% 72% / .58);
+  border-radius: 10px;
+  z-index: 1;
+  pointer-events: none;
+  transition: inherit;
+  /* The trench the thread sits in. Without it the dashes read as a dotted border rather
+     than as stitching pulled through cloth. */
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, .55));
+}
+.gbtn.m-cotton:active { transform: translateY(2px) scaleY(.985); }
+.gbtn.m-cotton:active::before {
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, .3),
+    inset 0 -3px 16px rgba(0, 0, 0, .55),
+    inset 0 0 0 1px rgba(0, 0, 0, .4);
+}
+.gbtn.m-cotton:active .g-seam { inset: 7px; opacity: .8; }
+
+/* ------------------------------------------------------- the header pills ---
+   The same identities at a size where only colour survives. No depth, no
+   texture, no extra height: the bar stays 45px. */
+header.top nav#navGames button {
+  --g-hue: 42;
+  position: relative;
+  color: var(--text-dim);
+  background: transparent;
+  border-color: transparent;
+  transition: color .12s ease, background .12s ease;
+}
+header.top nav#navGames button::after {
+  content: '';
+  position: absolute;
+  left: 10px; right: 10px; bottom: 3px;
+  height: 2px;
+  border-radius: 2px;
+  background: hsl(var(--g-hue) 62% 55%);
+  opacity: 0;
+  transition: opacity .12s ease;
+}
+@media (hover: hover) {
+  header.top nav#navGames button:hover { color: var(--text); }
+  header.top nav#navGames button:hover::after { opacity: .45; }
+}
+header.top nav#navGames button.on {
+  color: hsl(var(--g-hue) 70% 72%);
+  background: rgba(255, 255, 255, .05);
+}
+header.top nav#navGames button.on::after { opacity: 1; }
+
+/* The way back to the picker, at the head of the nav. Three bars drawn in a grid rather
+   than an icon font: the CSP blocks external anything, and a 2x2 of squares is what a
+   "all of them" control looks like everywhere. */
+.nav-home { padding-left: 9px; padding-right: 9px; }
+.nav-home-grid {
+  display: block;
+  width: 12px; height: 12px;
+  background:
+    linear-gradient(currentColor, currentColor) 0 0 / 5px 5px no-repeat,
+    linear-gradient(currentColor, currentColor) 7px 0 / 5px 5px no-repeat,
+    linear-gradient(currentColor, currentColor) 0 7px / 5px 5px no-repeat,
+    linear-gradient(currentColor, currentColor) 7px 7px / 5px 5px no-repeat;
+  opacity: .75;
+}
+.nav-home.on .nav-home-grid { opacity: 1; }
+.nav-home::after { display: none; }
+
+/* ------------------------------------------------------- the risk levels ---
+   Four choices where a free slider used to be. The edge is identical at all
+   four — the multiplier is (1 - edge) / chance — so this is about making the
+   choice legible rather than about changing the odds.
+
+   They read hotter left to right, which is the only cue that needs no words:
+   the colour says what the level costs you in certainty. */
+.risk-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.risk-row .risk {
+  flex: 1 1 0;
+  min-width: 62px;
+  border-color: transparent;
+  background: var(--bg-input);
+  color: var(--text-dim);
+  transition: color .12s ease, background .12s ease, border-color .12s ease;
+}
+.risk-row .risk:nth-child(1) { --r-hue: 150; }
+.risk-row .risk:nth-child(2) { --r-hue: 46; }
+.risk-row .risk:nth-child(3) { --r-hue: 24; }
+.risk-row .risk:nth-child(4) { --r-hue: 2; }
+.risk-row .risk.on {
+  color: hsl(var(--r-hue) 80% 78%);
+  background: hsl(var(--r-hue) 50% 22%);
+  border-color: hsl(var(--r-hue) 60% 42%);
+}
+@media (hover: hover) {
+  .risk-row .risk:hover:not(.on) { color: var(--text); }
+}

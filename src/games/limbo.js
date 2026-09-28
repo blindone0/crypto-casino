@@ -33,7 +33,9 @@ function play({ db, cfg, user, bank }, body) {
 
     const drawn = fair.limboMultiplier(seed.seed, user.client_seed, nonce, edge);
     const won = drawn >= target;
-    const payout = won ? U.mulUnits(wager, target) : 0;
+    const raw = won ? U.mulUnits(wager, target) : 0;
+    // Same as dice: bounded by what the house actually holds. See the note there.
+    const { payout, capped } = bank.capPayout(wager, raw);
 
     const betId = bank.settle({
       user,
@@ -45,7 +47,7 @@ function play({ db, cfg, user, bank }, body) {
       seedId: seed.id,
       nonce,
       clientSeed: user.client_seed,
-      detail: { target, drawn, chance },
+      detail: { target, drawn, chance, capped },
     });
 
     return {

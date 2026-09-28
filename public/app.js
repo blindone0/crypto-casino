@@ -99,6 +99,15 @@ const state = {
 
 const UNIT = 1e8;
 const fmt = (units, dp = 8) => (Number(units) / UNIT).toFixed(dp);
+/**
+ * Truncate to two places, the way the server does.
+ *
+ * The epsilon matters: `0.99 / 0.05` is exactly 19.8 in arithmetic but 19.799999999999997
+ * in a double, and a plain floor turns that into 19.79. This has to match src/fair.js
+ * `floor2` character for character, because a panel that quotes a different multiplier
+ * from the one the server pays is worse than one that quotes nothing.
+ */
+const floor2 = (x) => Math.floor(x * 100 + 1e-9) / 100;
 const fmtShort = (units) => {
   const n = Number(units) / UNIT;
   if (Math.abs(n) >= 1000) return n.toFixed(2);
@@ -662,8 +671,37 @@ function infoPanel(extra = []) {
 function renderDice() {
   const panel = $('#betPanel');
   const amount = amountControl();
-  // The slider is win chance in hundredths of a percent; the threshold derives from it.
-  const chance = el('input', { type: 'range', min: '100', max: '9500', step: '1', value: '5000' });
+
+  // Four levels instead of a free slider.
+  //
+  // Not a fairness fix — the edge is identical at every win chance, because the multiplier
+  // is (1 - edge) / chance and so the expected return is (1 - edge) wherever the dial sits.
+  // It is a better control: a choice between four named risks is something a person can
+  // make, and a number between 1.00 and 95.00 is something they have to work out.
+  //
+  // `chance` is still the value the rest of the panel reads, so nothing downstream had to
+  // learn about levels. The server is unchanged and still refuses anything outside its own
+  // 1%-95% range, because the interface must never be the only thing enforcing a rule.
+  const chance = el('input', { type: 'hidden', value: '5000' });
+  const levels = [
+    { key: 'safe', chance: 7500 },
+    { key: 'normal', chance: 5000 },
+    { key: 'risky', chance: 2500 },
+    { key: 'wild', chance: 500 },
+  ];
+  const levelRow = el('div', { class: 'risk-row' });
+  const paintLevels = () => {
+    for (const b of levelRow.children) {
+      b.classList.toggle('on', b.dataset.chance === chance.value);
+    }
+  };
+  setKids(levelRow, ...levels.map((lv) => el('button', {
+    class: 'tiny risk',
+    type: 'button',
+    'data-chance': String(lv.chance),
+    onclick: () => { chance.value = String(lv.chance); paintLevels(); recalc(); },
+  }, t(`risk.${lv.key}`))));
+
   const mode = el('select', {},
     el('option', { value: 'under' }, t('dice.under')),
     el('option', { value: 'over' }, t('dice.over')));
@@ -679,7 +717,7 @@ function renderDice() {
 
   const recalc = () => {
     const c = Number(chance.value) / 10000;
-    const mult = Math.floor(((1 - state.cfg.houseEdge.dice) / c) * 100) / 100;
+    const mult = floor2((1 - state.cfg.houseEdge.dice) / c);
     thresholdOut.value = (target() / 100).toFixed(2);
     chanceOut.textContent = `${(c * 100).toFixed(2)}%`;
     multOut.textContent = `${mult.toFixed(2)}×`;
@@ -693,7 +731,6 @@ function renderDice() {
     const lbl = $('#diceThresholdLabel');
     if (lbl) lbl.textContent = t(mode.value === 'over' ? 'dice.targetOver' : 'dice.target');
   };
-  chance.addEventListener('input', recalc);
   mode.addEventListener('change', recalc);
   amount.input.addEventListener('input', recalc);
 
@@ -721,8 +758,10 @@ function renderDice() {
     amount.node,
     el('label', { class: 'field' }, el('span', { 'data-i18n': 'dice.mode' }), mode),
     el('label', { class: 'field' },
+      el('span', { 'data-i18n': 'risk.label' }), levelRow),
+    // The threshold and the chance are shown, not set: they are what the level means.
+    el('label', { class: 'field' },
       el('span', { id: 'diceThresholdLabel' }, t('dice.target')), thresholdOut),
-    el('label', { class: 'field' }, el('span', { 'data-i18n': 'bet.chance' }), chance),
     statRow('bet.chance', chanceOut),
     statRow('bet.multiplier', multOut),
     statRow('bet.profit', profitOut),
@@ -741,6 +780,7 @@ function renderDice() {
       el('span', {}, '75'), el('span', {}, '99.99')),
   );
   infoPanel();
+  paintLevels();
   recalc();
 }
 
@@ -764,7 +804,7 @@ function renderLimbo() {
   const go = el('button', { class: 'primary big', 'data-i18n': 'bet.place' });
 
   const recalc = () => {
-    const tg = Math.max(1.01, Math.floor(Number(target.value) * 100) / 100 || 1.01);
+    const tg = Math.max(1.01, floor2(Number(target.value)) || 1.01);
     const c = (1 - state.cfg.houseEdge.limbo) / tg;
     chanceOut.textContent = `${(c * 100).toFixed(4)}%`;
     const amt = Number(amount.get()) || 0;
@@ -3525,21 +3565,92 @@ async function claimFlag(id) {
 // land on. The rest follow in the order they were built.
 const GAMES = ['slots', 'dice', 'limbo', 'mines', 'crash', 'puzzle', 'preferans', 'debertz', 'arcade', 'match'];
 
+/**
+ * What each game is made of.
+ *
+ * `m` is one of five materials defined in buttons.css and `hue` is the single number every
+ * one of them derives its tints from. Adding a game is a line here, not a new shadow
+ * stack — which is the whole reason there are five materials rather than ten designs.
+ *
+ * See the header of public/buttons.css for the depth scale and why the cotton ones press
+ * differently from the rest.
+ */
+const GAME_SKIN = {
+  slots:     { m: 'brass',  hue: 42 },   // the cabinet's own lacquer and brass
+  arcade:    { m: 'brass',  hue: 14 },   // moulded plastic over a dark bezel
+  mines:     { m: 'tile',   hue: 210 },  // a pressed tile that actually depresses
+  puzzle:    { m: 'tile',   hue: 268 },  // cut card stock
+  crash:     { m: 'glass',  hue: 152 },  // a line on a chart, lit from within
+  limbo:     { m: 'glass',  hue: 190 },
+  dice:      { m: 'resin',  hue: 8 },    // moulded, rounded, heavy
+  preferans: { m: 'cotton', hue: 158 },  // felt table
+  debertz:   { m: 'cotton', hue: 128 },
+  match:     { m: 'cotton', hue: 32 },
+};
+const skinOf = (g) => GAME_SKIN[g] || { m: 'tile', hue: 42 };
+
+/**
+ * The game picker.
+ *
+ * The header can hold ten names; it cannot hold ten objects, and it should not try — that
+ * bar was reclaimed from the games. This is where the materials live, at a size where the
+ * work is visible, and it is the right first screen on a phone, where a strip of ten tiny
+ * pills is the weakest thing on the page.
+ *
+ * Slots stays the default landing, so this is somewhere you go rather than a gate you
+ * pass through.
+ */
+function renderPicker() {
+  setKids($('#betPanel'));
+  setKids($('#infoPanel'));
+  const tiles = GAMES.map((g) => {
+    const skin = skinOf(g);
+    return el('button', {
+      class: `gbtn m-${skin.m} ${state.game === g ? 'on' : ''}`,
+      style: `--g-hue:${skin.hue}`,
+      onclick: () => { state.game = g; renderGame(); },
+    },
+    // Cotton is the only material with a sewn seam, so it is the only one that gets the
+    // element for it rather than every button carrying a node it never shows.
+    skin.m === 'cotton' ? el('span', { class: 'g-seam' }) : null,
+    el('span', { class: 'g-kind' }, t(`pick.kind.${skin.m}`)),
+    el('span', { class: 'g-name' }, t(`game.${g}`)));
+  });
+  setKids($('#stage'),
+    el('h3', { style: 'margin-bottom:14px' }, t('pick.title')),
+    el('div', { class: 'picker' }, ...tiles));
+
+  // The picker tilts with the device too, so the buttons catch the light as it moves.
+  if (state.parallax) state.parallax.stop();
+  state.parallax = startParallax($('.picker'));
+}
+
 function renderGame() {
   if (state.es && state.game !== 'crash') { state.es.close(); state.es = null; }
   if (state.cabinet && state.game !== 'arcade') { state.cabinet.stop(); state.cabinet = null; }
   // The stage it was publishing onto is about to be replaced, so the loop has nothing
   // left to drive.
-  if (state.parallax && state.game !== 'slots') { state.parallax.stop(); state.parallax = null; }
+  if (state.parallax && !['slots', 'games'].includes(state.game)) { state.parallax.stop(); state.parallax = null; }
   if (state.game !== 'match') { stopMatchPoll(); state.matchId = null; state.board = null; }
   const nav = $('#navGames');
-  setKids(nav, ...GAMES.map((g) => el('button', {
+  // Only the hue travels up here. The bar is 45px and staying that way, so the pills get
+  // their game's colour and its underline and nothing else — no depth, no texture, no
+  // height. The material lives in the picker, where it can actually be seen.
+  // A way into the picker, at the head of the nav where a home button belongs.
+  const home = el('button', {
+    class: `tiny nav-home ${state.game === 'games' ? 'on' : ''}`,
+    'data-i18n-title': 'pick.title',
+    onclick: () => { state.game = 'games'; renderGame(); },
+  }, el('span', { class: 'nav-home-grid', 'aria-hidden': 'true' }));
+
+  setKids(nav, home, ...GAMES.map((g) => el('button', {
     class: `tiny ${state.game === g ? 'on' : ''}`,
-    style: state.game === g ? 'background:var(--panel);border-color:var(--line)' : 'background:transparent;border-color:transparent;color:var(--text-dim)',
+    style: `--g-hue:${skinOf(g).hue}`,
     onclick: () => { state.game = g; renderGame(); },
   }, t(`game.${g}`))));
 
-  if (state.game === 'dice') renderDice();
+  if (state.game === 'games') renderPicker();
+  else if (state.game === 'dice') renderDice();
   else if (state.game === 'limbo') renderLimbo();
   else if (state.game === 'mines') { state.mines = null; renderMines(); loadMinesState(); }
   else if (state.game === 'slots') renderSlots();

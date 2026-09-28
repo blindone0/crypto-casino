@@ -131,7 +131,20 @@ function minesMultiplier(mineCount, picks, edge) {
 
 // ------------------------------------------------------------------ util
 /** Truncate to 2dp, always downward, so rounding never leaks money to the player. */
-const floor2 = (x) => Math.floor(x * 100) / 100;
+/**
+ * Truncate to two decimal places, tolerating float representation error.
+ *
+ * The epsilon is not a fudge: without it, a multiplier that is mathematically exact gets
+ * rounded *down* by a whole cent because of how IEEE doubles store it. A 5% win chance at
+ * a 1% edge is exactly 19.8, but `0.99 / 0.05` evaluates to 19.799999999999997, and a
+ * plain floor turned that into 19.79 — costing the player 0.05% of their expected return
+ * on that bet, and always in the house's favour.
+ *
+ * Truncation is still the rule everywhere else: a multiplier is never rounded *up* into
+ * money the house did not intend to offer. This only recognises a value that was already
+ * on the boundary.
+ */
+const floor2 = (x) => Math.floor(x * 100 + 1e-9) / 100;
 
 const sha256hex = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const newServerSeed = () => crypto.randomBytes(32).toString('hex');

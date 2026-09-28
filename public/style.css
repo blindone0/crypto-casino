@@ -228,6 +228,9 @@ input[type=range] { padding: 0; accent-color: var(--gold); }
 }
 
 .layout { display: grid; grid-template-columns: 330px 1fr; gap: 18px; align-items: start; }
+/* A panel with nothing in it is not a panel, it is a rectangle. The picker has no bet
+   controls, so both would otherwise sit beside it as empty boxes. */
+.panel:empty { display: none; }
 .panel {
   background: linear-gradient(180deg, var(--panel) 0%, #141210 100%);
   border: 1px solid var(--line);
