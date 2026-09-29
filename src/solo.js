@@ -33,6 +33,7 @@
 const U = require('./util');
 const { GAMES } = require('./matchgames');
 const bots = require('./bots');
+const events = require('./events');
 
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -119,6 +120,10 @@ function start(db, cfg, user, game) {
     user.id, game, seats, JSON.stringify(state), at, at,
   );
   const id = db.get('SELECT last_insert_rowid() AS id').id;
+  events.emit(db, cfg, {
+    g: 'solo', r: id, k: 'o', a: [game, seats], userId: user.id,
+    pubkey: db.get('SELECT pubkey FROM token_keys WHERE user_id=?', user.id)?.pubkey || null,
+  });
   return advance(db, cfg, db.get('SELECT * FROM solo_games WHERE id=?', id), plugin);
 }
 
@@ -158,14 +163,14 @@ function botMove(plugin, state, seat, cfg, game) {
   const payload = bots.choose(game, view, seat, cfg);
   if (payload) {
     try {
-      return plugin.act(state, seat, payload, cfg);
+      return { out: plugin.act(state, seat, payload, cfg), payload };
     } catch {
       // Fall through and improvise.
     }
   }
   for (const attempt of fallbacks(game, view)) {
     try {
-      return plugin.act(state, seat, attempt, cfg);
+      return { out: plugin.act(state, seat, attempt, cfg), payload: attempt };
     } catch {
       // keep trying
     }
@@ -200,8 +205,12 @@ function fallbacks(game, view) {
 }
 
 /** Write the position back, and finish the row if the game ended. */
-function save(db, row, state, outcome) {
+function save(db, cfg, row, state, outcome) {
   const finished = outcome && outcome.winners;
+  if (finished) {
+    events.emit(db, cfg, { g: 'solo', r: row.id, k: 'f', a: [outcome.winners, outcome.reason || null] });
+    events.close(db, { g: 'solo', r: row.id });
+  }
   db.run(
     `UPDATE solo_games SET state=?, status=?, winners=?, reason=?, updated_at=? WHERE id=?`,
     JSON.stringify(state),
@@ -226,7 +235,7 @@ function catchUp(db, cfg, row, plugin) {
   const decide = (view, seat) => bots.choose(row.game, view, seat, cfg);
   const out = plugin.catchUp(parse(row), decide);
   if (!out) return row;
-  return save(db, row, out.state, out.winners ? out : null);
+  return save(db, cfg, row, out.state, out.winners ? out : null);
 }
 
 /**
@@ -251,11 +260,13 @@ function advance(db, cfg, row, plugin) {
 
     const moved = botMove(plugin, state, who[0], cfg, row.game);
     if (!moved) break;                           // nothing legal at all; do not spin
-    state = moved.state || state;
-    if (moved.winners) { outcome = moved; break; }
+    // The machines' moves go on the record too, or the replay has holes in it.
+    events.emit(db, cfg, { g: 'solo', r: row.id, k: 'p', a: [who[0], moved.payload] });
+    state = moved.out.state || state;
+    if (moved.out.winners) { outcome = moved.out; break; }
   }
 
-  const saved = save(db, row, state, outcome);
+  const saved = save(db, cfg, row, state, outcome);
   return render(saved, plugin);
 }
 
@@ -284,7 +295,9 @@ function move(db, cfg, user, game, payload) {
     if (!who.includes(PLAYER)) throw new U.BadRequest('not your turn');
 
     const out = plugin.act(state, PLAYER, payload, cfg);
-    const after = save(db, live, out.state || state, out.winners ? out : null);
+    // A sync — a Tron board asking how the race stands — is not a move and not recorded.
+    if (out.note !== 'sync') events.emit(db, cfg, { g: 'solo', r: live.id, k: 'p', a: [PLAYER, payload] });
+    const after = save(db, cfg, live, out.state || state, out.winners ? out : null);
     if (out.winners) return render(after, plugin);
     return advance(db, cfg, after, plugin);
   });
@@ -302,6 +315,8 @@ function quit(db, user, game) {
     "UPDATE solo_games SET status='done', reason='quit', updated_at=? WHERE id=?",
     now(), row.id,
   );
+  events.emit(db, {}, { g: 'solo', r: row.id, k: 'q', a: [] });
+  events.close(db, { g: 'solo', r: row.id });
   return { ok: true };
 }
 

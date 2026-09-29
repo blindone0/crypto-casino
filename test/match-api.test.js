@@ -385,3 +385,46 @@ test('a Tron match over HTTP: two riders, a stream that nudges, one crash, the s
   const bobNow = await bob.client.call('/api/match');
   assert.strictEqual(bobNow.data.balance, cfg.token.welcomeGrant - 100 * TUG);
 });
+
+test('a match is on the record: the table as it filled, every move, the result', async (t) => {
+  const { cfg, app, base } = await boot();
+  t.after(async () => { await app.stop(); cleanup(cfg, app.db); });
+  const events = require('../src/events');
+
+  const alice = await player(base, 'alice');
+  const bob = await player(base, 'bob');
+  const made = await alice.client.call('/api/match/create', {
+    method: 'POST', body: { game: 'chess', stake: 100 * TUG, spend: await stake(alice, 100 * TUG) },
+  });
+  const id = made.data.id;
+  assert.deepStrictEqual(events.history(app.db, 'match', id), [], 'an open table is not yet a round');
+
+  const joined = await bob.client.call('/api/match/join', {
+    method: 'POST', body: { id, spend: await stake(bob, 100 * TUG) },
+  });
+  assert.strictEqual(joined.status, 200);
+  const players = [alice, bob];
+  for (const m of ['f2f3', 'e7e5', 'g2g4', 'd8h4']) {
+    const { data: view } = await alice.client.call(`/api/match/one?id=${id}`);
+    const res = await players[view.toMove].client.call('/api/match/move', {
+      method: 'POST', body: { id, move: m },
+    });
+    assert.strictEqual(res.status, 200, `move ${m}: ${JSON.stringify(res.data)}`);
+  }
+
+  const log = events.history(app.db, 'match', id);
+  assert.deepStrictEqual(log.map((e) => e.k), ['o', 'p', 'p', 'p', 'p', 'f']);
+  assert.strictEqual(log[0].a[0], 'chess');
+  assert.strictEqual(log[0].a[1], 100 * TUG);
+  assert.strictEqual(log[0].a[2].length, 2, 'both seats, by key');
+  assert.strictEqual(log[1].a[1], 0, 'the ply');
+  assert.strictEqual(log[2].a[1], 1);
+  assert.deepStrictEqual(log[4].a[2], { move: 'd8h4' });
+  assert.strictEqual(log[5].a[1], 'checkmate');
+  assert.ok(events.round(app.db, 'match', id).closed_at > 0);
+
+  // On the chain, once flushed: the same story from the blocks alone.
+  events.flush(app.db, cfg, { force: true });
+  assert.deepStrictEqual(events.fromChain(app.db, 'match', id).map((e) => e.k), log.map((e) => e.k));
+  assert.ok(tc.verifyChain(app.db).ok);
+});

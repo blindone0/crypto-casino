@@ -16,6 +16,7 @@
 // started.
 const crypto = require('node:crypto');
 const U = require('./util');
+const events = require('./events');
 const tokenchain = require('./tokenchain');
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -129,6 +130,12 @@ function insertToken(db, cfg, user, spend) {
        VALUES(?,?,?,?,?,0,'open','real',?)`,
       user.id, clean.from, game.key, ticket, cost, now(),
     );
+    // On the record: the cabinet and what it cost. Not the ticket, which is the one
+    // secret a play has.
+    events.emit(db, cfg, {
+      g: 'arcade', r: db.get('SELECT last_insert_rowid() AS id').id, k: 'o', a: [game.key, cost],
+      userId: user.id, pubkey: clean.from,
+    });
     return {
       ticket,
       game: game.key,
@@ -165,6 +172,10 @@ function practicePlay(db, cfg, user, gameKey) {
        VALUES(?,'',?,?,0,0,'open','practice',?)`,
       user.id, game.key, ticket, now(),
     );
+    events.emit(db, cfg, {
+      g: 'arcade', r: db.get('SELECT last_insert_rowid() AS id').id, k: 'o', a: [game.key, 0],
+      userId: user.id,
+    });
     return { ticket, game: game.key, cost: 0, mode: 'practice' };
   });
 }
@@ -194,6 +205,8 @@ function submitScore(db, cfg, user, { ticket, score }) {
 
     db.run("UPDATE arcade_plays SET score=?, state=?, ended_at=? WHERE id=?",
       capped, stale ? 'expired' : 'done', now(), play.id);
+    events.emit(db, cfg, { g: 'arcade', r: play.id, k: stale ? 'x' : 'f', a: [capped] });
+    events.close(db, { g: 'arcade', r: play.id });
 
     if (stale) throw new U.BadRequest('that play expired; insert another token');
 

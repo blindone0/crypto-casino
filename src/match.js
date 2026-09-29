@@ -23,6 +23,7 @@
 const crypto = require('node:crypto');
 const U = require('./util');
 const tokenchain = require('./tokenchain');
+const events = require('./events');
 const { GAMES } = require('./matchgames');
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -232,6 +233,8 @@ function settle(db, cfg, match, winners, reason) {
     "UPDATE matches SET status='done', result=?, reason=?, rake=?, ended_at=? WHERE id=?",
     JSON.stringify(list), reason, kept, now(), match.id,
   );
+  events.emit(db, cfg, { g: 'match', r: match.id, k: 'f', a: [list, reason, pot, kept] });
+  events.close(db, { g: 'match', r: match.id });
   db.audit('system', 'match.settled', {
     match: match.id, game: match.game, winners: list, reason, pot, rake: kept,
   });
@@ -245,6 +248,10 @@ function refund(db, match, reason) {
   if (txs.length) tokenchain.appendBlock(db, txs);
   db.run("UPDATE matches SET status='cancelled', reason=?, ended_at=? WHERE id=?",
     reason, now(), match.id);
+  if (match.status === 'playing') {
+    events.emit(db, {}, { g: 'match', r: match.id, k: 'x', a: [reason] });
+    events.close(db, { g: 'match', r: match.id });
+  }
   return { cancelled: true, reason };
 }
 
@@ -350,6 +357,15 @@ function join(db, cfg, user, { id, spend }) {
       "UPDATE matches SET status='playing', state=?, started_at=?, moved_at_ms=? WHERE id=?",
       JSON.stringify(state), now(), nowMs(), match.id,
     );
+    // On the record: who sat where, for what. One round per table across every game,
+    // since a match id is unique on its own.
+    events.emit(db, cfg, {
+      g: 'match',
+      r: match.id,
+      k: 'o',
+      a: [match.game, match.stake, seatsOf(db, match.id).map((s) => s.pubkey.slice(0, 8))],
+      userId: match.host_id,
+    });
     return { id: match.id, game: match.game, seated: filled, of: match.seats, started: true };
   });
 }
@@ -395,6 +411,7 @@ function act(db, cfg, user, { id, ...payload }) {
        VALUES(?,?,?,?,?,?)`,
       match.id, seat, ply, JSON.stringify(payload), outcome.note || null, now(),
     );
+    events.emit(db, cfg, { g: 'match', r: match.id, k: 'p', a: [seat, ply, payload] });
     if (clock) {
       db.run('UPDATE match_seats SET ms=? WHERE match_id=? AND seat=?',
         clock.left + plugin.incrementMs, match.id, seat);

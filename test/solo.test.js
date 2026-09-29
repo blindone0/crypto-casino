@@ -218,3 +218,31 @@ test('a game that does not exist is refused', (t) => {
   assert.throws(() => solo.start(db, cfg, user, 'roulette'), /no such game/);
   assert.throws(() => solo.move(db, cfg, user, 'chess', {}), /no game in progress/);
 });
+
+// ---------------------------------------------------------------- the record
+const events = require('../src/events');
+
+test('a solo game is on the record: opened, every move by every seat, finished', (t) => {
+  const { cfg, db, user } = setup();
+  t.after(() => cleanup(cfg, db));
+  const { out } = playOut(db, cfg, user, 'chess');
+  assert.strictEqual(out.status, 'done');
+
+  const log = events.history(db, 'solo', out.id);
+  assert.strictEqual(log[0].k, 'o');
+  assert.deepStrictEqual(log[0].a.slice(0, 2), ['chess', 2]);
+  assert.strictEqual(log[log.length - 1].k, 'f');
+  assert.deepStrictEqual(log[log.length - 1].a[0], out.winners);
+  const moves = log.filter((e) => e.k === 'p');
+  assert.ok(moves.length >= 2);
+  assert.ok(moves.some((e) => e.a[0] === solo.PLAYER), 'the player\'s moves');
+  assert.ok(moves.some((e) => e.a[0] !== solo.PLAYER), 'and the machine\'s, or the replay has holes');
+  assert.ok(events.round(db, 'solo', out.id).closed_at > 0);
+
+  // Walking away is on the record too.
+  const again = solo.start(db, cfg, user, 'chess');
+  solo.quit(db, user, 'chess');
+  const quit = events.history(db, 'solo', again.id);
+  assert.strictEqual(quit[quit.length - 1].k, 'q');
+  assert.ok(events.round(db, 'solo', again.id).closed_at > 0);
+});

@@ -11,6 +11,7 @@
 //   so the operator cannot react to how much money is on the table.
 const crypto = require('node:crypto');
 const U = require('../util');
+const events = require('../events');
 const fair = require('../fair');
 const ledger = require('../ledger');
 
@@ -154,13 +155,17 @@ function createCrash({ db, cfg, bankFor, logger = console }) {
     const crashPoint = fair.crashPoint(seed, 0, cfg.houseEdge.crash, salt);
     const seedHash = fair.sha256hex(seed);
 
-    db.tx(() => {
+    const id = db.tx(() => {
       db.run(
         'INSERT INTO crash_rounds(seed,seed_hash,nonce,crash_point,state,started_at) VALUES(?,?,?,?,?,?)',
         seed, seedHash, meta.cursor, crashPoint, 'betting', now(),
       );
+      const roundId = db.get('SELECT last_insert_rowid() AS id').id;
+      // On the record before a single bet: the hash of the seed that decides the round,
+      // so the reveal at the end is checkable against what was promised at the start.
+      events.emit(db, cfg, { g: 'crash', r: roundId, k: 'o', a: [seedHash, meta.cursor] });
+      return roundId;
     });
-    const id = db.get('SELECT last_insert_rowid() AS id').id;
 
     round = {
       id,
@@ -229,6 +234,10 @@ function createCrash({ db, cfg, bankFor, logger = console }) {
 
     db.run("UPDATE crash_bets SET state='won', cashed_at=?, payout=? WHERE id=?",
       atMultiplier, payout, bet.id);
+    const key = db.get('SELECT pubkey FROM token_keys WHERE user_id=?', bet.user_id);
+    events.emit(db, cfg, {
+      g: 'crash', r: round.id, k: 'c', a: [key ? key.pubkey.slice(0, 8) : null, atMultiplier, payout],
+    });
     bank.settle({
       user,
       game: 'crash',
@@ -246,6 +255,7 @@ function createCrash({ db, cfg, bankFor, logger = console }) {
         capped: payout < raw,
       },
       stakeTaken: true,
+      logged: true,
     });
     return payout;
   }
@@ -257,6 +267,8 @@ function createCrash({ db, cfg, bankFor, logger = console }) {
 
     db.tx(() => {
       db.run("UPDATE crash_rounds SET state='ended', ended_at=? WHERE id=?", now(), r.id);
+      events.emit(db, cfg, { g: 'crash', r: r.id, k: 'f', a: [r.crashPoint, r.seed] });
+      events.close(db, { g: 'crash', r: r.id });
       const losers = db.all("SELECT * FROM crash_bets WHERE round_id=? AND state='placed'", r.id);
       for (const bet of losers) {
         const user = db.get('SELECT * FROM users WHERE id=?', bet.user_id);
@@ -273,6 +285,7 @@ function createCrash({ db, cfg, bankFor, logger = console }) {
           clientSeed: salt,
           detail: { roundId: r.id, crashPoint: r.crashPoint, busted: true },
           stakeTaken: true,
+          logged: true,
         });
       }
     });
@@ -321,6 +334,9 @@ function createCrash({ db, cfg, bankFor, logger = console }) {
          VALUES(?,?,?,?,?,'placed',?,?)`,
         round.id, user.id, wager, auto, maxPayout, bank.mode, now(),
       );
+      events.emit(db, cfg, {
+        g: 'crash', r: round.id, k: 'p', a: [String(spend.from).slice(0, 8), wager, auto],
+      });
       const out = {
         roundId: round.id,
         wager,
@@ -387,10 +403,13 @@ function createCrash({ db, cfg, bankFor, logger = console }) {
             clientSeed: salt,
             detail: { roundId: r.id, refunded: true, reason: 'server restart' },
             stakeTaken: true,
+            logged: true,
           });
           db.run("UPDATE crash_bets SET state='lost', payout=? WHERE id=?", b.wager, b.id);
         }
         db.run("UPDATE crash_rounds SET state='ended', ended_at=? WHERE id=?", now(), r.id);
+        events.emit(db, cfg, { g: 'crash', r: r.id, k: 'x', a: ['server restart', bets.length] });
+        events.close(db, { g: 'crash', r: r.id });
       }
       if (stale.length) db.audit('system', 'crash.recover', { rounds: stale.length });
     });

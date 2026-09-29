@@ -26,6 +26,8 @@
 const U = require('../util');
 const fair = require('../fair');
 const auth = require('../auth');
+const events = require('../events');
+const tokenchain = require('../tokenchain');
 
 const SUITS = ['S', 'C', 'D', 'H'];
 const RANKS = ['7', '8', '9', 'T', 'J', 'Q', 'K', 'A'];
@@ -445,6 +447,15 @@ function start({ db, cfg, user, bank }, body) {
       bank.mode, seed.id, nonce, user.client_seed, now(),
     );
     const g = activeGame(db, user.id);
+    // On the record: the stake, the deal hashed, and the upcard, which is face up anyway.
+    events.emit(db, cfg, {
+      g: 'debertz',
+      r: g.id,
+      k: 'o',
+      a: [wager, tokenchain.sha256(tokenchain.canonical(d.hands)), d.upcard],
+      userId: user.id,
+      pubkey: tokenchain.keyFor(db, user.id)?.pubkey || null,
+    });
     return {
       ...view(db, cfg, g),
       serverSeedHash: seed.seed_hash,
@@ -465,6 +476,7 @@ function chooseTrump({ db, cfg, user, bankFor }, body) {
     // The opponent leads the first trick, which is part of what naming trumps costs.
     db.run("UPDATE debertz_games SET trump=?, state='playing', turn=?, last_winner=? WHERE id=?",
       trump, BOT, BOT, g.id);
+    events.emit(db, cfg, { g: 'debertz', r: g.id, k: 'p', a: [PLAYER, 'trump', trump] });
     return runBot({ db, cfg, user, bankFor }, db.get('SELECT * FROM debertz_games WHERE id=?', g.id));
   });
 }
@@ -489,6 +501,7 @@ function playCard({ db, cfg, user, bankFor }, body) {
     st.trick.push({ seat: PLAYER, card });
     db.run('UPDATE debertz_games SET hands=?, trick=?, turn=? WHERE id=?',
       JSON.stringify(st.hands), JSON.stringify(st.trick), BOT, g.id);
+    events.emit(db, cfg, { g: 'debertz', r: g.id, k: 'p', a: [PLAYER, 'card', card] });
 
     return runBot({ db, cfg, user, bankFor }, db.get('SELECT * FROM debertz_games WHERE id=?', g.id));
   });
@@ -539,6 +552,8 @@ function runBot(ctx, game) {
     st.trick.push({ seat: BOT, card: played });
     db.run('UPDATE debertz_games SET hands=?, trick=?, turn=? WHERE id=?',
       JSON.stringify(st.hands), JSON.stringify(st.trick), PLAYER, g.id);
+    // The opponent's plays too, or the replay has holes in it.
+    events.emit(db, cfg, { g: 'debertz', r: g.id, k: 'p', a: [BOT, 'card', played] });
     g = db.get('SELECT * FROM debertz_games WHERE id=?', g.id);
   }
 }
@@ -565,6 +580,11 @@ function settle({ db, cfg, user, bankFor }, g) {
 
   db.run("UPDATE debertz_games SET state='done', payout=?, ended_at=? WHERE id=?",
     payout, now(), g.id);
+  // The deal, revealed: hashed on the record when the hand opened, now in the clear.
+  events.emit(db, cfg, {
+    g: 'debertz', r: g.id, k: 'f', a: [band, multiplier, payout, result.totals, dealt.hands],
+  });
+  events.close(db, { g: 'debertz', r: g.id });
 
   bank.settle({
     user,
@@ -581,6 +601,7 @@ function settle({ db, cfg, user, bankFor }, g) {
       bete: result.bete, band, multiplier, melds: result.meldPoints, bella: result.bella,
     },
     stakeTaken: true,
+    logged: true,
   });
 
   const fresh = db.get('SELECT * FROM debertz_games WHERE id=?', g.id);

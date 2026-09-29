@@ -329,6 +329,8 @@ function payoutTable(edge, distribution = TRICK_DISTRIBUTION) {
 const U = require('../util');
 const ledger = require('../ledger');
 const auth = require('../auth');
+const events = require('../events');
+const tokenchain = require('../tokenchain');
 
 const PLAYER = 0;
 const now = () => Math.floor(Date.now() / 1000);
@@ -399,6 +401,16 @@ function start({ db, cfg, user, bank }, body) {
       bank.mode, seed.id, nonce, user.client_seed, now(),
     );
     const g = activeGame(db, user.id);
+    // On the record: the stake, and a commitment to the deal — every hand and the talon,
+    // hashed. The deal itself is revealed when the hand is settled.
+    events.emit(db, cfg, {
+      g: 'preferans',
+      r: g.id,
+      k: 'o',
+      a: [wager, tokenchain.sha256(tokenchain.canonical(d.hands)), tokenchain.sha256(tokenchain.canonical(d.talon))],
+      userId: user.id,
+      pubkey: tokenchain.keyFor(db, user.id)?.pubkey || null,
+    });
     return {
       ...view(db, cfg, g),
       serverSeedHash: seed.seed_hash,
@@ -420,6 +432,7 @@ function chooseTrump({ db, cfg, user }, body) {
     s.hands[PLAYER] = sortHand([...s.hands[PLAYER], ...s.talon]);
     db.run("UPDATE pref_games SET trump=?, hands=?, state='discard' WHERE id=?",
       trump, JSON.stringify(s.hands), g.id);
+    events.emit(db, cfg, { g: 'preferans', r: g.id, k: 'p', a: [PLAYER, 'trump', trump] });
     return view(db, cfg, db.get('SELECT * FROM pref_games WHERE id=?', g.id));
   });
 }
@@ -444,6 +457,7 @@ function discard({ db, cfg, user, bankFor }, body) {
       "UPDATE pref_games SET hands=?, state='playing', leader=1, trick='[]', trick_no=0 WHERE id=?",
       JSON.stringify(s.hands), g.id,
     );
+    events.emit(db, cfg, { g: 'preferans', r: g.id, k: 'p', a: [PLAYER, 'discard', cards] });
     // The defender on the declarer's left leads, so the bots move before the player does.
     return runBots({ db, cfg, user, bankFor }, db.get('SELECT * FROM pref_games WHERE id=?', g.id));
   });
@@ -473,6 +487,7 @@ function playCard({ db, cfg, user, bankFor }, body) {
     s.trick.push({ seat: PLAYER, card });
     db.run('UPDATE pref_games SET hands=?, trick=? WHERE id=?',
       JSON.stringify(s.hands), JSON.stringify(s.trick), g.id);
+    events.emit(db, cfg, { g: 'preferans', r: g.id, k: 'p', a: [PLAYER, 'card', card] });
 
     return runBots({ db, cfg, user, bankFor }, db.get('SELECT * FROM pref_games WHERE id=?', g.id));
   });
@@ -536,6 +551,8 @@ function runBots(ctx, game) {
     s.trick.push({ seat, card: played });
     db.run('UPDATE pref_games SET hands=?, trick=? WHERE id=?',
       JSON.stringify(s.hands), JSON.stringify(s.trick), g.id);
+    // The bots' plays too, or the replay has holes in it.
+    events.emit(db, cfg, { g: 'preferans', r: g.id, k: 'p', a: [seat, 'card', played] });
     g = db.get('SELECT * FROM pref_games WHERE id=?', g.id);
   }
 }
@@ -553,6 +570,14 @@ function settle({ db, cfg, user, bankFor }, g) {
 
   db.run("UPDATE pref_games SET state='done', payout=?, ended_at=? WHERE id=?",
     payout, now(), g.id);
+  // The deal, revealed: hashed on the record when the hand opened, now in the clear.
+  const dealt = deal(
+    db.get('SELECT seed FROM server_seeds WHERE id=?', g.seed_id).seed, g.client_seed, g.nonce,
+  );
+  events.emit(db, cfg, {
+    g: 'preferans', r: g.id, k: 'f', a: [tricks, multiplier, payout, s.tricksWon, dealt.hands, dealt.talon],
+  });
+  events.close(db, { g: 'preferans', r: g.id });
 
   bank.settle({
     user,
@@ -566,6 +591,7 @@ function settle({ db, cfg, user, bankFor }, g) {
     clientSeed: g.client_seed,
     detail: { tricks, trump: g.trump, multiplier, tricksWon: s.tricksWon },
     stakeTaken: true,
+    logged: true,
   });
 
   const fresh = db.get('SELECT * FROM pref_games WHERE id=?', g.id);
