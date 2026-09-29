@@ -59,6 +59,7 @@ uniform float uRowHalf;  // half a symbol, in v
 uniform float uBlur;     // vertical smear while the drum is turning, in v
 uniform vec2 uTexel;     // one texel of the strip, in uv - for the emboss below
 uniform vec3 uAccent;    // the theme's colour, for the glow on a winning symbol
+uniform float uRelief;   // how much of the emboss below: 1 for line art, 0 for photographs
 
 varying vec3 vNormal;
 varying vec2 vUV;
@@ -88,14 +89,12 @@ void main() {
   // square root per fragment for a value fixed at compile time.
   vec3 key = vec3(-0.2488332, 0.7464997, 0.6171064);
   float d = max(dot(n, key), 0.0);
-  float fill = max(dot(n, vec3(0.0, -1.0, 0.2)), 0.0) * 0.16;
-  float sheen = pow(max(dot(n, vec3(0.0, 0.4103647, 0.9119215)), 0.0), 8.0) * 0.10;
+  float fill = max(dot(n, vec3(0.0, -1.0, 0.2)), 0.0) * 0.10;
 
-  // Straight at the viewer, so the highlight sits on the payline where the glass would
-  // catch it, and 0.18 rather than 0.75. Under it a broad, soft gloss across the middle
-  // of the face: the lamp over the machine on a glossy printed strip, which is what
-  // says the strip is wrapped round something.
-  float spec = pow(max(n.z, 0.0), 48.0) * 0.18 + pow(max(n.z, 0.0), 10.0) * 0.14;
+  // The one highlight: a narrow line of the lamp on the strip at the payline, faint.
+  // Everything broader than this washed the symbols out - a printed strip is not a
+  // mirror, and the picture on it is what the light is for.
+  float spec = pow(max(n.z, 0.0), 70.0) * 0.05;
 
   vec4 tex = strip(vUV);
 
@@ -116,8 +115,9 @@ void main() {
   float hX = dot(texture2D(uTex, vUV + vec2(uTexel.x, 0.0)).rgb, vec3(0.299, 0.587, 0.114));
   float hY = dot(texture2D(uTex, vUV + vec2(0.0, uTexel.y)).rgb, vec3(0.299, 0.587, 0.114));
 
-  // Fade the relief out as the blur comes in, and with it the crawling.
-  float relief = 0.85 * (1.0 - smoothstep(0.0, 0.004, uBlur));
+  // Fade the relief out as the blur comes in, and with it the crawling. A photograph
+  // is not a height field: for the rendered packs uRelief is zero and none of this runs.
+  float relief = 0.85 * uRelief * (1.0 - smoothstep(0.0, 0.004, uBlur));
   vec3 bumped = normalize(n + vec3((hC - hX) * relief, (hC - hY) * relief, 0.0));
 
   // How much this texel is actually an edge. Away from one the gradient is ~0 and the
@@ -136,33 +136,32 @@ void main() {
   float edge = pow(max(dot(bumped, normalize(key + vec3(0.0, 0.0, 1.0))), 0.0), 40.0)
              * 0.40 * edgeAmt;
 
-  vec3 lit = tex.rgb * (0.34 + 0.78 * diff + fill + sheen) + spec + edge;
+  // The picture, lit gently: mostly its own colour, a little more where the lamp falls.
+  vec3 lit = tex.rgb * (0.72 + 0.42 * diff + fill) + spec + edge;
 
   // How square-on this part of the barrel is. The payline faces the viewer and the rows
   // above and below fall away from it, so letting brightness follow that gives the drum
-  // depth and puts the eye where the win is read.
+  // depth and puts the eye where the win is read. Steep: the rows fall into shadow,
+  // which is the barrel.
   float facing = max(n.z, 0.0);
-  // Steeper than it was: on a dark printed strip the old 0.68 floor left the top and
-  // bottom rows as bright as the payline, and five flat columns of pictures is what
-  // that looks like. The rows now fall away into shadow, which is the barrel.
-  lit *= mix(0.40, 1.0, pow(facing, 1.6));
+  lit *= mix(0.32, 1.0, pow(facing, 1.5));
 
-  // Along the axis, which vUV.x measures and nothing used before. Darkening towards each
-  // end seats the drum between its neighbours instead of leaving five flat panels butted
-  // together, and is where the gap between barrels comes from.
-  float ends = smoothstep(0.0, 0.12, vUV.x) * smoothstep(1.0, 0.88, vUV.x);
-  lit *= mix(0.30, 1.0, ends);
+  // Along the axis, which vUV.x measures. Darkening towards each end seats the drum
+  // between its neighbours instead of leaving five flat panels butted together, and is
+  // where the gap between barrels comes from.
+  float ends = smoothstep(0.0, 0.10, vUV.x) * smoothstep(1.0, 0.90, vUV.x);
+  lit *= mix(0.22, 1.0, ends);
 
   // A cool edge where the barrel turns away, so it reads as round at the top and bottom
-  // of the window rather than stopping dead.
-  lit += vec3(0.16, 0.19, 0.26) * pow(1.0 - facing, 4.0) * 0.5;
+  // of the window rather than stopping dead. Faint.
+  lit += vec3(0.10, 0.12, 0.18) * pow(1.0 - facing, 4.0) * 0.3;
 
   // A winning symbol lights up on the drum itself. Wrapped distance, because the band
   // can straddle the seam where v rolls over.
   if (uWinV >= 0.0) {
     float dv = abs(fract(vUV.y - uWinV + 0.5) - 0.5);
     float band = smoothstep(uRowHalf, uRowHalf * 0.35, dv);
-    lit += tex.rgb * band * 1.25 + uAccent * band * 0.42;
+    lit += tex.rgb * band * 0.9 + uAccent * band * 0.30;
   }
   gl_FragColor = vec4(tonemap(lit * uDim), tex.a);
 }`;
@@ -338,8 +337,10 @@ export function createReels(host, opts = {}) {
     blur: gl.getUniformLocation(prog, 'uBlur'),
     texel: gl.getUniformLocation(prog, 'uTexel'),
     accent: gl.getUniformLocation(prog, 'uAccent'),
+    relief: gl.getUniformLocation(prog, 'uRelief'),
   };
   let accent = [1.0, 0.78, 0.32];
+  let relief = 1;
 
   // A drum wide enough that five sit side by side across the window with a small gap, and
   // a radius that puts `rows` symbols across the visible face.
@@ -499,6 +500,7 @@ export function createReels(host, opts = {}) {
       // (0,0) makes the emboss sample itself three times and vanish.
       gl.uniform2f(loc.texel, 2 / STRIP_W, 2 / STRIP_H);
       gl.uniform3fv(loc.accent, accent);
+      gl.uniform1f(loc.relief, relief);
       gl.uniformMatrix4fv(loc.model, false, modelMatrix(d.x, d.angle, halfW));
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, mesh.count);
     }
@@ -579,6 +581,12 @@ export function createReels(host, opts = {}) {
     /** The theme's colour, which a winning symbol glows with. */
     setAccent(rgb) {
       if (Array.isArray(rgb) && rgb.length === 3) accent = rgb.slice();
+      draw();
+    },
+
+    /** How much emboss the strip gets: 1 for line art, 0 for a rendered pack. */
+    setRelief(amount) {
+      relief = Math.max(0, Math.min(1, Number(amount) || 0));
       draw();
     },
 

@@ -151,13 +151,15 @@ uniform vec2 uTilt;
 uniform float uAspect;
 void main() {
   vec2 uv = vUV;
+  // Barely there. The pane used to carry a broad bright band and a lit room, and both
+  // lay across the symbols like a film; now it is a thread of light that moves with the
+  // viewer and a little brightening where the glass meets the frame, and nothing else.
   float d = uv.x * 0.9 + uv.y * 0.45 - 0.58 - uTilt.y * 0.03 + uTilt.x * 0.01;
-  float band = exp(-d * d * 70.0) * 0.20;
-  float ex = pow(abs(uv.x * 2.0 - 1.0), 6.0);
-  float ey = pow(abs(uv.y * 2.0 - 1.0), 8.0);
-  float fres = (ex + ey) * 0.24;
-  vec2 p = vec2((uv.x - 0.24 + uTilt.y * 0.004) * uAspect, uv.y - 0.78 - uTilt.x * 0.004);
-  float room = exp(-dot(p, p) * 18.0) * 0.07;
+  float band = exp(-d * d * 260.0) * 0.045;
+  float ex = pow(abs(uv.x * 2.0 - 1.0), 8.0);
+  float ey = pow(abs(uv.y * 2.0 - 1.0), 10.0);
+  float fres = (ex + ey) * 0.06;
+  float room = 0.0;
   vec3 c = vec3(0.90, 0.95, 1.0) * (band + fres) + vec3(1.0, 0.95, 0.85) * room;
   float a = clamp(max(c.r, max(c.g, c.b)), 0.0, 1.0);
   gl_FragColor = vec4(c, a);

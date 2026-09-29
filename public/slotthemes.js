@@ -16,9 +16,9 @@ export const SLOT_THEMES = {
     bezel: 'brass',
     accent: [1.0, 0.78, 0.32],                  // the LEDs and the win glow
     lamp: [1.0, 0.26, 0.14],                    // the spin button
-    band: ['#262148', '#0f0d24', '#070613'],    // the printed strip: top, middle, bottom
+    band: ['#15132c', '#0a0919', '#050410'],    // the printed strip: top, middle, bottom
     frame: '#e2bd63',                           // the hairline round each cell
-    glow: 'rgba(255, 214, 120, 0.16)',          // the light behind a symbol
+    glow: 'rgba(255, 214, 120, 0.10)',          // the light behind a symbol
     marquee: {
       glow: [1.0, 0.78, 0.40],
       text: ['#fff3cd', '#e2bd63', '#9a7526'],
@@ -30,9 +30,9 @@ export const SLOT_THEMES = {
     bezel: 'steel',
     accent: [1.0, 0.31, 0.64],                  // neon pink
     lamp: [0.25, 0.85, 0.95],                   // and a cyan button
-    band: ['#2a1050', '#150827', '#0a0414'],
+    band: ['#1c0b34', '#0e0519', '#07030d'],
     frame: '#3fd8f0',
-    glow: 'rgba(255, 79, 163, 0.18)',
+    glow: 'rgba(255, 79, 163, 0.12)',
     marquee: {
       glow: [1.0, 0.35, 0.70],
       text: ['#ffd6f0', '#ff4fa3', '#a1105c'],
@@ -44,9 +44,9 @@ export const SLOT_THEMES = {
     bezel: 'brass',
     accent: [1.0, 0.66, 0.24],                  // amber
     lamp: [1.0, 0.20, 0.10],
-    band: ['#2c0d08', '#150503', '#0a0202'],
+    band: ['#1e0906', '#0f0403', '#070201'],
     frame: '#e8a83c',
-    glow: 'rgba(232, 168, 60, 0.16)',
+    glow: 'rgba(232, 168, 60, 0.10)',
     marquee: {
       glow: [1.0, 0.60, 0.25],
       text: ['#ffe7b0', '#e8a83c', '#8a4a10'],
@@ -58,9 +58,9 @@ export const SLOT_THEMES = {
     bezel: 'steel',
     accent: [0.82, 0.88, 0.96],                 // cold white
     lamp: [1.0, 0.85, 0.60],                    // one warm thing on the machine
-    band: ['#1c2026', '#0e1115', '#06080a'],
+    band: ['#171a20', '#0c0e12', '#060708'],
     frame: '#cfd8e4',
-    glow: 'rgba(214, 226, 240, 0.12)',
+    glow: 'rgba(214, 226, 240, 0.08)',
     marquee: {
       glow: [0.85, 0.90, 1.0],
       text: ['#f4f6fa', '#b9c2d0', '#78828f'],
@@ -72,9 +72,9 @@ export const SLOT_THEMES = {
     bezel: 'brass',
     accent: [0.56, 0.65, 0.91],
     lamp: [1.0, 0.85, 0.45],                    // moon gold
-    band: ['#131a33', '#0b1022', '#05070f'],
+    band: ['#0d1330', '#080c1c', '#04060e'],
     frame: '#8fa6e8',
-    glow: 'rgba(143, 166, 232, 0.16)',
+    glow: 'rgba(143, 166, 232, 0.10)',
     marquee: {
       glow: [0.60, 0.70, 1.0],
       text: ['#e9eeff', '#8fa6e8', '#3a4a8a'],

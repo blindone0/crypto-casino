@@ -13,6 +13,7 @@ import { createReels as createGlReels } from './slot3d.js';
 import { createCabinet } from './cabinet3d.js';
 import { slotPalette } from './slotthemes.js';
 import { cellPainter } from './slotstrip.js';
+import { PACKS } from './slotpacks.js';
 import { createDice } from './dice3d.js';
 import { createTable } from './cards3d.js';
 import { startParallax } from './parallax.js';
@@ -1928,7 +1929,11 @@ async function settleReels(screen, stops = null, started = 0) {
     if (glReels) {
       const stop = stops && Number.isInteger(stops[i]) ? stops[i] : 0;
       glStops[i] = stop % GL_PER_DRUM;
-      glReels.stopAt(i, stop % GL_PER_DRUM);
+      // The drum's twelve are rebuilt round the real stop while it is still turning
+      // (a blur, so the swap is invisible), then it is brought down onto it.
+      // eslint-disable-next-line no-await-in-loop
+      await glReels.setStrip(i, glStripFor(i, stop), glDrawSymbol);
+      if (glReels) glReels.stopAt(i, stop % GL_PER_DRUM);
     }
     audio.sfx('reelStop');
     const foot = reelFoot(reel);
@@ -2180,11 +2185,26 @@ function glDrawSymbol(ctx, sym, y, cell, width, extra) {
   return glPainter(ctx, sym, y, cell, width, extra);
 }
 
-/** The twelve symbols on one drum, taken from that reel's real strip. */
-function glStripFor(reel) {
+/**
+ * The twelve symbols on one drum: a window of that reel's real strip around `stop`.
+ *
+ * The server's strips are thirty-two long and a drum holds twelve, and for a long time
+ * the drum held the FIRST twelve, with the stop taken modulo twelve. The maths was
+ * right and the picture was wrong: on two spins in three the drum showed symbols other
+ * than the ones that paid. So the drum is rebuilt around every stop before it lands -
+ * position (stop + 1) mod 12, which stopAt() parks on the payline, carries strip[stop +
+ * 1], and the six before and five after it carry the strip's real neighbours, so what
+ * swings past as the reel settles is what is actually next to the result.
+ */
+function glStripFor(reel, stop = 0) {
   const strip = slotInfo && slotInfo.strips && slotInfo.strips[reel];
   if (!strip || !strip.length) return ['A', 'K', 'Q', 'J', 'T', 'BELL', 'GEM', 'CROWN', 'WILD', 'SCAT', 'A', 'K'];
-  return Array.from({ length: GL_PER_DRUM }, (_, i) => strip[i % strip.length]);
+  const n = strip.length;
+  const p = (((stop + 1) % GL_PER_DRUM) + GL_PER_DRUM) % GL_PER_DRUM;
+  return Array.from({ length: GL_PER_DRUM }, (_, i) => {
+    const d = ((i - p + 6 + GL_PER_DRUM * 2) % GL_PER_DRUM) - 6;     // -6 .. 5 from the centre
+    return strip[(((stop + 1 + d) % n) + n) % n];
+  });
 }
 
 /** Park the drums on a screen, using the real stops when the server sent them. */
@@ -2205,9 +2225,12 @@ async function buildGlReels(window_) {
   const made = createGlReels(window_, { reels: 5, rows: 3, perDrum: GL_PER_DRUM });
   if (!made) return null;
   made.setAccent(slotPalette(slotTheme).accent);
+  // The emboss reads luminance as height, which is right for line art and noise on a
+  // photograph: off for a theme with a rendered pack.
+  made.setRelief(PACKS[slotTheme] ? 0 : 1);
   for (let reel = 0; reel < 5; reel += 1) {
     // eslint-disable-next-line no-await-in-loop
-    await made.setStrip(reel, glStripFor(reel), glDrawSymbol);
+    await made.setStrip(reel, glStripFor(reel, glStops[reel]), glDrawSymbol);
   }
   return made;
 }

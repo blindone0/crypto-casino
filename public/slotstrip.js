@@ -63,65 +63,83 @@ export async function symbolBitmap(sym, theme) {
  * stretches it into the texture, which the drum then squashes back to what was drawn.
  */
 export function cellPainter(theme, palette, bitmap = symbolBitmap) {
-  return async function paint(ctx, sym, y, cell, width, extra = {}) {
-    const k = extra.aspect > 0 ? extra.aspect : 0.7;
+  // Every finished cell, by symbol and size: the strip is rebuilt around the real stop
+  // on every spin, twelve cells a drum, and that must cost a few drawImage calls, not
+  // sixty renders.
+  const cache = new Map();
+
+  /** One cell, drawn once, in the drum's own shape and then stretched into the strip. */
+  async function render(sym, cell, width, k) {
+    const out = document.createElement('canvas');
+    out.width = width;
+    out.height = Math.ceil(cell);
+    const ctx = out.getContext('2d');
     const H = cell;
     const W = cell * k;
-    ctx.save();
-    ctx.translate(0, y);
     ctx.scale(width / W, 1);
 
-    // The plate.
+    // The plate: deep, near black, in the theme's colour, darker still towards the
+    // drum's edges. A printed strip, not a lit panel - the symbol is the bright thing.
     const plate = ctx.createLinearGradient(0, 0, 0, H);
     plate.addColorStop(0, palette.band[0]);
     plate.addColorStop(0.5, palette.band[1]);
     plate.addColorStop(1, palette.band[2]);
     ctx.fillStyle = plate;
     ctx.fillRect(0, 0, W, H);
-
-    // The light behind the symbol: round on the drum.
-    const cx = W / 2;
-    const cy = H / 2;
-    const halo = ctx.createRadialGradient(cx, cy, W * 0.05, cx, cy, W * 0.62);
-    halo.addColorStop(0, palette.glow);
-    halo.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = halo;
+    const sides = ctx.createLinearGradient(0, 0, W, 0);
+    sides.addColorStop(0, 'rgba(0,0,0,0.45)');
+    sides.addColorStop(0.18, 'rgba(0,0,0,0)');
+    sides.addColorStop(0.82, 'rgba(0,0,0,0)');
+    sides.addColorStop(1, 'rgba(0,0,0,0.45)');
+    ctx.fillStyle = sides;
     ctx.fillRect(0, 0, W, H);
 
-    // The symbol, square on the drum, with a shadow under it. A rendered symbol, cut out
-    // to alpha, takes most of the cell's width; the drawn artwork carries a plate of its
-    // own and sits a little smaller.
+    // A breath of the theme's colour behind the symbol, so it sits in light rather than
+    // on black - faint, and round on the drum.
+    const cx = W / 2;
+    const cy = H / 2;
+    const glow = ctx.createRadialGradient(cx, cy, W * 0.08, cx, cy, W * 0.55);
+    glow.addColorStop(0, palette.glow);
+    glow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, W, H);
+
+    // The symbol: square on the drum, as large as the cell allows, over a soft dark
+    // shadow. A rendered symbol is cut out to alpha and takes nearly the whole cell; the
+    // drawn artwork carries a plate of its own and sits a little smaller.
     const b = await bitmap(sym, theme);
     if (b && b.img) {
-      const side = Math.min(W * (b.alpha ? 0.88 : 0.76), H * 0.8);
+      const side = Math.min(W * (b.alpha ? 0.94 : 0.8), H * (b.alpha ? 0.88 : 0.78));
       const scale = Math.min(side / b.sw, side / b.sh);
       const dw = b.sw * scale;
       const dh = b.sh * scale;
       ctx.save();
-      ctx.shadowColor = 'rgba(0,0,0,0.6)';
-      ctx.shadowBlur = H * 0.04;
-      ctx.shadowOffsetY = H * 0.02;
+      ctx.shadowColor = 'rgba(0,0,0,0.7)';
+      ctx.shadowBlur = H * 0.05;
+      ctx.shadowOffsetY = H * 0.025;
       if (b.whole) ctx.drawImage(b.img, cx - dw / 2, cy - dh / 2, dw, dh);
       else ctx.drawImage(b.img, b.sx, b.sy, b.sw, b.sh, cx - dw / 2, cy - dh / 2, dw, dh);
       ctx.restore();
     }
 
-    // A sheen across the top of the cell, as a printed strip under glass has.
-    const sheen = ctx.createLinearGradient(0, 0, W * 0.6, H * 0.7);
-    sheen.addColorStop(0, 'rgba(255,255,255,0.09)');
-    sheen.addColorStop(0.45, 'rgba(255,255,255,0.02)');
-    sheen.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = sheen;
-    ctx.fillRect(0, 0, W, H);
-
-    // The seams of the strip: a fine bright line where one cell meets the next and a dark
-    // one below it, and nothing down the sides - a reel is one printed band, not a
-    // column of cards.
-    const seam = Math.max(1.5, H * 0.006);
-    ctx.fillStyle = 'rgba(255,255,255,0.16)';
-    ctx.fillRect(0, 0, W, seam);
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    // The seam between cells: a hair of dark, and nothing down the sides - a reel is one
+    // printed band, not a column of cards.
+    const seam = Math.max(1.5, H * 0.005);
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
     ctx.fillRect(0, H - seam, W, seam);
-    ctx.restore();
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    ctx.fillRect(0, 0, W, seam);
+    return out;
+  }
+
+  return async function paint(ctx, sym, y, cell, width, extra = {}) {
+    const k = extra.aspect > 0 ? extra.aspect : 0.7;
+    const key = `${sym}|${width}|${Math.round(cell)}|${k.toFixed(3)}`;
+    let c = cache.get(key);
+    if (!c) {
+      c = render(sym, cell, width, k);
+      cache.set(key, c);
+    }
+    ctx.drawImage(await c, 0, y);
   };
 }

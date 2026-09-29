@@ -981,6 +981,11 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
  * is what the canvas cannot draw, stay.
  */
 .slot-window.gl .reel { visibility: hidden; }
+/* A wider window. The reel box's shape decides the drum cell's: three rows fill the
+   window's height whatever it is, so a taller window makes a narrower drum and a
+   symbol that fills only two thirds of its row. At 1 : 2.4 the cell is nearly square on
+   the drum and the symbol takes almost all of it. */
+.slot-window.gl .reel { aspect-ratio: 1 / 2.4; }
 /* What stands where a WebGL table should be when the browser will not give one: a
    sentence, not a flat imitation of the table. Inside the slot window it covers the
    window; elsewhere it is the block the renderer would have been. */
