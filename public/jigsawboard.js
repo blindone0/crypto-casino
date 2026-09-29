@@ -39,7 +39,7 @@
 // already says. The server recomputes the finished arrangement and checks it, and the
 // clock is the server's.
 
-import { createCut } from './jigsaw.js';
+import { createCut, adjacent as adjacentOn, canPlace as canPlaceOn } from './jigsaw.js';
 
 const svgEl = (tag, attrs = {}) => {
   const n = document.createElementNS('http://www.w3.org/2000/svg', tag);
@@ -319,6 +319,10 @@ export function board(host, {
   let done = false;
 
   function settled() {
+    // Welds are repainted here rather than at each call site. Every path that changes the
+    // board ends up in `settled`, and the first version painted only on drop — so
+    // tap-to-place, which is the primary gesture on a phone, never welded anything.
+    paintWelds();
     onMove(arrangement(), placedCount(), pieces);
     if (!done && isSolved()) {
       done = true;
@@ -355,6 +359,8 @@ export function board(host, {
 
   // ------------------------------------------------------------------ drag
   let drag = null;
+  // The welded cluster travelling with the current drag, captured on pointerdown.
+  let drag_group = null;
 
   /** Board coordinates for a pointer, through the SVG's own letterboxed transform. */
   function toBoard(e) {
@@ -371,6 +377,62 @@ export function board(host, {
         && e.clientY >= r.top && e.clientY <= r.bottom,
       scale,
     };
+  }
+
+  // --------------------------------------------------------- joining pieces
+  //
+  // The rules are pure functions in jigsaw.js, tested without a board. These bind them
+  // to this board's grid and state.
+  const adjacent = (a, b) => adjacentOn(a, b, cols);
+  const canPlace = (piece, slot) => canPlaceOn(piece, slot, slotOf, cols);
+
+  /** A piece is correctly placed when it is in the slot it was cut from. */
+  const isHome = (piece) => slotOf[piece] === piece;
+
+  /**
+   * The cluster a piece belongs to: itself plus everything correctly joined to it.
+   *
+   * Computed by flood fill rather than kept in a union-find. The board is at most a few
+   * hundred pieces and this runs on pointerdown, not per frame — and a derived answer
+   * cannot drift out of step with `slotOf`, which is the bug class the file header
+   * already warns about. The same reasoning the inverse mapping was given.
+   *
+   * Only home pieces weld. Two pieces that merely happen to be adjacent in the wrong
+   * place are not joined; they are two loose pieces that touch.
+   */
+  function clusterOf(piece) {
+    if (!isHome(piece)) return [piece];
+    const seen = new Set([piece]);
+    const queue = [piece];
+    while (queue.length) {
+      const cur = queue.pop();
+      for (let other = 0; other < pieces; other += 1) {
+        if (seen.has(other) || !isHome(other)) continue;
+        if (adjacent(slotOf[cur], slotOf[other])) { seen.add(other); queue.push(other); }
+      }
+    }
+    return [...seen];
+  }
+
+  /** Mark every piece that is welded to at least one neighbour. */
+  function paintWelds() {
+    for (let p = 0; p < pieces; p += 1) {
+      const node = nodes[p];
+      if (!node) continue;
+      const welded = isHome(p) && clusterOf(p).length > 1;
+      node.classList.toggle('jig-welded', welded);
+    }
+  }
+
+  /** A refused drop: shake it, then put it back where it came from. */
+  function reject(piece) {
+    const node = trayNodes.get(piece) || nodes[piece];
+    if (!node) return;
+    node.classList.remove('jig-reject');
+    // Reflow, or the class re-added in the same frame never restarts the animation.
+    void node.getBoundingClientRect();
+    node.classList.add('jig-reject');
+    setTimeout(() => node.classList.remove('jig-reject'), 320);
   }
 
   const slotAt = (x, y) => {
@@ -450,8 +512,16 @@ export function board(host, {
       const to = slotXY(slotOf[piece]);
       drag.dx = at.x - to.x;
       drag.dy = at.y - to.y;
-      nodes[piece].classList.add('jig-held');
-      svg.appendChild(nodes[piece]);
+      // Everything welded to this piece comes with it. Captured once, here, rather than
+      // recomputed per move: the cluster must not change shape mid-gesture just because
+      // the pieces are momentarily drawn somewhere else.
+      drag_group = clusterOf(piece);
+      for (const member of drag_group) {
+        nodes[member].classList.add('jig-held');
+        svg.appendChild(nodes[member]);
+      }
+    } else {
+      drag_group = null;
     }
     // Attempted, not required: this throws when there is no live pointer with that id.
     try { holder.setPointerCapture?.(e.pointerId); } catch { /* no live pointer */ }
@@ -476,20 +546,37 @@ export function board(host, {
     // the piece's art was cut out of the picture, and comes off the corner to give the
     // translate.
     const at = toBoard(e);
-    const from = slotXY(drag.piece);
-    nodes[drag.piece].setAttribute('transform',
-      `translate(${(at.x - drag.dx - from.x).toFixed(2)} ${(at.y - drag.dy - from.y).toFixed(2)})`);
+    const tx = at.x - drag.dx;
+    const ty = at.y - drag.dy;
+    const anchorSlot = slotXY(slotOf[drag.piece]);
+    const members = drag_group && drag_group.length > 1 ? drag_group : [drag.piece];
+    for (const member of members) {
+      // Each member keeps its offset from the piece under the pointer, so the cluster
+      // stays rigid instead of collapsing onto the dragged piece.
+      const mine = slotXY(slotOf[member]);
+      const from = slotXY(member);
+      nodes[member].setAttribute('transform',
+        `translate(${(tx + (mine.x - anchorSlot.x) - from.x).toFixed(2)} `
+        + `${(ty + (mine.y - anchorSlot.y) - from.y).toFixed(2)})`);
+    }
   }
 
   function endDrag(e) {
     // One drag, one ending: a captured pointer's `up` arrives twice.
     if (!drag || drag.pointerId !== e.pointerId) return;
     const { piece, fromTray, moved, ghost, dx, dy } = drag;
+    // Taken into a local and cleared in the same breath as `drag`, for the same reason:
+    // this runs twice for a captured pointer, and a group left standing would be carried
+    // into the NEXT gesture and move pieces nobody touched.
+    const group = drag_group;
     drag = null;
+    drag_group = null;
 
     ghost?.remove();
     trayNodes.get(piece)?.classList.remove('jig-lifted');
-    nodes[piece].classList.remove('jig-held');
+    for (const member of (group && group.length ? group : [piece])) {
+      nodes[member]?.classList.remove('jig-held');
+    }
     try { e.target.releasePointerCapture?.(e.pointerId); } catch { /* never captured */ }
 
     if (!moved) {
@@ -521,9 +608,35 @@ export function board(host, {
 
     if (target === null) {
       if (!fromTray) returnToTray(piece);
-    } else {
-      putOnBoard(piece, target);
+      settled();
+      return;
     }
+
+    // A welded cluster does not move, and that is not a limitation.
+    //
+    // `clusterOf` only welds pieces that are HOME — in the slot they were cut from. So a
+    // cluster is by definition a solved fragment of the picture, and dragging it
+    // somewhere else would take pieces that are right and make them wrong. Real pieces
+    // behave the same way: once a corner is assembled you slide the whole tray, not the
+    // corner.
+    //
+    // The drag still carried the cluster visually, so it has to be put back.
+    if (group && group.length > 1) {
+      for (const member of group) place(member, true);
+      reject(piece);
+      settled();
+      return;
+    }
+
+    if (!canPlace(piece, target)) {
+      // It cannot belong there. Back where it came from, with a shake that says so.
+      if (fromTray) reject(piece);
+      else { place(piece, true); reject(piece); }
+      settled();
+      return;
+    }
+
+    putOnBoard(piece, target);
     settled();
   }
 

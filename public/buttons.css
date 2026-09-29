@@ -502,6 +502,29 @@ header.top nav#navGames button.on::after { opacity: 1; }
   .jig-piece:not(.jig-held):hover .jig-edge { stroke: rgba(217, 180, 90, .5); }
 }
 
+/* Welded: a piece joined to at least one neighbour in the finished picture.
+   The seam between joined pieces goes quiet, so an assembled corner reads as one
+   object rather than as four pieces that happen to touch — which is the whole point
+   of them being welded, and the cue that they will not come apart. */
+.jig-piece.jig-welded .jig-edge { stroke: rgba(217, 180, 90, .22); }
+
+/* Refused. A piece that cannot belong where it was dropped shakes and goes back.
+   Short and small: this is a correction, not a punishment, and a drop that bounces
+   hard reads as a bug rather than as a rule. */
+.jig-piece.jig-reject, .jig-tray-piece.jig-reject { animation: jig-nope .3s ease-out; }
+@keyframes jig-nope {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-5px); }
+  45% { transform: translateX(4px); }
+  70% { transform: translateX(-2px); }
+}
+
+/* The shake is a nicety; the piece going back is the information, and that happens
+   either way. */
+@media (prefers-reduced-motion: reduce) {
+  .jig-piece.jig-reject, .jig-tray-piece.jig-reject { animation: none; }
+}
+
 /* Finished. The seams fade rather than vanish, so it still reads as a jigsaw. */
 .jig-board.jig-solved .jig-edge {
   stroke: rgba(217, 180, 90, .28);

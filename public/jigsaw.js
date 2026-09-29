@@ -141,4 +141,52 @@ function createCut({ cols, rows, width, height, seed = 1, jitter = true }) {
   return { path, cellWidth: cw, cellHeight: ch };
 }
 
-export { createCut, edgeSegments, lcg };
+
+// ------------------------------------------------------------- placement rules
+//
+// Pure, so they are tested without a board (test/jigsaw-rules.test.js). `slotOf[p]` is
+// the slot piece p sits in, or null while it is in the tray; `cols` is the grid width.
+// A piece knows the slot it was cut from — the geometry requires that anyway — and these
+// two facts are the whole of both rules.
+
+/**
+ * Do two slots touch, orthogonally, on a cols-wide grid?
+ *
+ * Column arithmetic, not index arithmetic: slots 9 and 10 on a ten-wide board differ by
+ * one and are opposite ends of two different rows. Treating them as neighbours would
+ * weld the board into a spiral.
+ */
+function adjacent(a, b, cols) {
+  const dr = Math.abs(Math.floor(a / cols) - Math.floor(b / cols));
+  const dc = Math.abs((a % cols) - (b % cols));
+  return dr + dc === 1;
+}
+
+/**
+ * May `piece` go in `slot`, given where everything else is?
+ *
+ * Its own slot, always. Otherwise only where it would genuinely join something already
+ * down: some placed piece must sit next to the slot, AND be its neighbour in the picture,
+ * AND sit on the same side of it on the board as in the picture. That last clause does
+ * the work — without it a piece could "join" a neighbour on the wrong side.
+ *
+ * Deliberately does NOT require the slot to be the correct one. Building outward from a
+ * corner by trial is how a jigsaw is solved; what this refuses is nonsense.
+ */
+function canPlace(piece, slot, slotOf, cols) {
+  if (slot === piece) return true;
+  if (slotOf.some((s, p) => s === slot && p !== piece)) return false;
+  const row = (i) => Math.floor(i / cols);
+  const col = (i) => i % cols;
+  for (let other = 0; other < slotOf.length; other += 1) {
+    if (other === piece) continue;
+    const at = slotOf[other];
+    if (at === null) continue;
+    if (!adjacent(at, slot, cols)) continue;
+    if (row(at) - row(slot) === row(other) - row(piece)
+      && col(at) - col(slot) === col(other) - col(piece)) return true;
+  }
+  return false;
+}
+
+export { createCut, edgeSegments, lcg, adjacent, canPlace };
