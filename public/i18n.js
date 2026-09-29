@@ -326,6 +326,7 @@ const STRINGS = {
   // A cabinet may name its own HUD label through meta.hud; this is Pong's, in place of
   // "Balls left", which Pong does not have.
   'arc.g.pong.hud': { en: 'Points to 11', ru: 'Очков до 11' },
+  'arc.g.invaders.hud': { en: 'Lives', ru: 'Жизни' },
 
   // ---- site token
   // ---- matches

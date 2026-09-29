@@ -39,12 +39,10 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 
-const HOST = process.env.COMFY_HOST || 'http://127.0.0.1:8188';
-const COMFY = process.env.COMFY_DIR || 'D:\\ai\\comfyui';
-
-// Juggernaut is the photoreal checkpoint of the two installed; the anime one is for the
-// jigsaw pictures and would give a die a cel-shaded surface.
-const MODEL = process.env.COMFY_MODEL || 'juggernaut-xl-v9.safetensors';
+// The ComfyUI plumbing — host, model, the queue-poll-fetch loop, the Python that has
+// Pillow — is shared with tools/generate-invaders.js and lives in tools/comfy.js.
+const comfy = require('./comfy');
+const { HOST, MODEL } = comfy;
 
 /** Square, and a power of two, because it is going onto geometry and will be mipmapped. */
 const SIZE = 1024;
@@ -139,84 +137,6 @@ const MATERIALS = {
   },
 };
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function api(pathname, options) {
-  const res = await fetch(`${HOST}${pathname}`, options);
-  if (!res.ok) throw new Error(`${pathname} -> ${res.status} ${res.statusText}`);
-  return res;
-}
-
-/** One SDXL text-to-image graph, in ComfyUI's API format. */
-function workflow(positive, seed) {
-  return {
-    4: { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: MODEL } },
-    5: {
-      class_type: 'EmptyLatentImage',
-      inputs: { width: SIZE, height: SIZE, batch_size: 1 },
-    },
-    6: { class_type: 'CLIPTextEncode', inputs: { text: positive, clip: ['4', 1] } },
-    7: { class_type: 'CLIPTextEncode', inputs: { text: NEGATIVE, clip: ['4', 1] } },
-    3: {
-      class_type: 'KSampler',
-      inputs: {
-        seed,
-        // More steps than the jigsaw pictures use. A material is judged close up and on
-        // a curved surface, where the mush a low step count leaves is obvious.
-        steps: 36,
-        cfg: 4.5,
-        sampler_name: 'dpmpp_2m',
-        scheduler: 'karras',
-        denoise: 1,
-        model: ['4', 0],
-        positive: ['6', 0],
-        negative: ['7', 0],
-        latent_image: ['5', 0],
-      },
-    },
-    8: { class_type: 'VAEDecode', inputs: { samples: ['3', 0], vae: ['4', 2] } },
-    9: { class_type: 'SaveImage', inputs: { filename_prefix: 'material', images: ['8', 0] } },
-  };
-}
-
-async function run(positive, seed) {
-  const body = JSON.stringify({ prompt: workflow(positive, seed), client_id: 'casino-mat' });
-  const queued = await (await api('/prompt', {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body,
-  })).json();
-  const id = queued.prompt_id;
-
-  for (let i = 0; i < 900; i += 1) {
-    await sleep(1000);
-    const entry = (await (await api(`/history/${id}`)).json())[id];
-    if (!entry) continue;
-    if (entry.status && entry.status.status_str === 'error') {
-      throw new Error('ComfyUI reported an error for this prompt');
-    }
-    const images = [];
-    for (const node of Object.values(entry.outputs || {})) {
-      for (const img of node.images || []) images.push(img);
-    }
-    if (images.length) return images[0];
-  }
-  throw new Error('timed out waiting for ComfyUI');
-}
-
-async function fetchImage(img, to) {
-  const q = new URLSearchParams({
-    filename: img.filename, subfolder: img.subfolder || '', type: img.type || 'output',
-  });
-  fs.writeFileSync(to, Buffer.from(await (await api(`/view?${q}`)).arrayBuffer()));
-}
-
-const python = () => {
-  const py = path.join(COMFY, 'venv', 'Scripts', 'python.exe');
-  if (!fs.existsSync(py)) {
-    throw new Error(`no python at ${py} — is ComfyUI installed at ${COMFY}?`);
-  }
-  return py;
-};
-
 /**
  * Make it tile, and derive a roughness map from it.
  *
@@ -302,7 +222,7 @@ rough.save(rough_out, "JPEG", quality=rough_q, optimize=True)
 
 print(f"{tiled.size[0]}x{tiled.size[1]}")
 `;
-  return execFileSync(python(), ['-c', script, pngPath, colourOut, roughOut,
+  return execFileSync(comfy.python(), ['-c', script, pngPath, colourOut, roughOut,
     String(OUT_EDGE), String(JPEG_QUALITY), String(ROUGH_QUALITY)],
     { encoding: 'utf8' }).trim();
 }
@@ -361,7 +281,7 @@ for i, value in enumerate(range(1, 7)):
 atlas.save(out, "PNG", optimize=True)
 print(f"{atlas.size[0]}x{atlas.size[1]}")
 `;
-  return execFileSync(python(), ['-c', script, outPath, String(faceSize)],
+  return execFileSync(comfy.python(), ['-c', script, outPath, String(faceSize)],
     { encoding: 'utf8' }).trim();
 }
 
@@ -588,7 +508,7 @@ for row, (base, rim, lift) in enumerate((
 atlas.save(out, 'PNG', optimize=True)
 print(str(atlas.size[0]) + 'x' + str(atlas.size[1]))
 `;
-  return execFileSync(python(), ['-c', script, outPath, String(cell)],
+  return execFileSync(comfy.python(), ['-c', script, outPath, String(cell)],
     { encoding: 'utf8' }).trim();
 }
 
@@ -814,7 +734,7 @@ for i, img in enumerate((gem, bomb)):
 atlas.save(out, "PNG", optimize=True)
 print(str(atlas.size[0]) + "x" + str(atlas.size[1]))
 `;
-  return execFileSync(python(), ['-c', script, outPath, String(cell)],
+  return execFileSync(comfy.python(), ['-c', script, outPath, String(cell)],
     { encoding: 'utf8' }).trim();
 }
 
@@ -971,7 +891,7 @@ for si, suit in enumerate(SUITS):
 atlas.save(out, "PNG", optimize=True)
 print(str(atlas.size[0]) + "x" + str(atlas.size[1]))
 `;
-  return execFileSync(python(), ['-c', script, outPath, String(cell)],
+  return execFileSync(comfy.python(), ['-c', script, outPath, String(cell)],
     { encoding: 'utf8' }).trim();
 }
 
@@ -1067,9 +987,11 @@ async function main() {
     const seed = crypto.randomInt(0, 2 ** 31);
     process.stdout.write(`  ${name.padEnd(9)} `);
     try {
-      const img = await run(m.prompt, seed);
+      const img = await comfy.run(m.prompt, seed, {
+        negative: NEGATIVE, size: SIZE, prefix: 'material', client: 'casino-mat',
+      });
       const png = path.join(raw, `${m.file}.png`);
-      await fetchImage(img, png);
+      await comfy.fetchImage(img, png);
       const size = process_(png,
         path.join(out, `${m.file}.jpg`),
         path.join(out, `${m.file}-rough.jpg`));

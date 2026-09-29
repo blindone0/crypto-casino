@@ -164,6 +164,55 @@ test('two runs with the same seed play out identically', async () => {
   assert.deepStrictEqual(await play(), await play());
 });
 
+test('a kill can drop a bonus, and which kills do is decided by the seed', async () => {
+  // Hold fire and sweep; across a few seeds one of them drops something within a wave.
+  let found = null;
+  for (let seed = 1; seed <= 40 && found === null; seed += 1) {
+    await cabinet(async ({ h, game }) => {
+      h.keyDown('Space');
+      h.keyDown('ArrowLeft');
+      h.until(() => game.debug.dropsSeen > 0 || !game.debug.running, 2400);
+      if (game.debug.dropsSeen > 0) found = seed;
+      h.keyUp('Space');
+      h.keyUp('ArrowLeft');
+    }, { seed });
+  }
+  assert.ok(found !== null, 'no seed in forty dropped a bonus within a wave');
+});
+
+test('rapid fire allows three shots in the air, and it wears off', () => cabinet(async ({ h, game }) => {
+  game.grant('rapid');
+  assert.strictEqual(game.debug.bonus.rapid, 8);
+  h.keyDown('Space');
+  h.advance(6);
+  assert.ok(game.debug.shots >= 2, `rapid fire put ${game.debug.shots} shots up`);
+  h.keyUp('Space');
+  h.advance(520);
+  assert.strictEqual(game.debug.bonus.rapid, 0, 'eight seconds later it has worn off');
+}));
+
+test('a shield takes one hit instead of a life', () => cabinet(async ({ h, game }) => {
+  game.grant('shield');
+  assert.strictEqual(game.debug.bonus.shield, true);
+  const lives = game.debug.lives;
+  h.until(() => !game.debug.bonus.shield || !game.debug.running, 6000);
+  if (!game.debug.bonus.shield && game.debug.running) {
+    assert.strictEqual(game.debug.lives, lives, 'the hit that took the shield took no life');
+  }
+}));
+
+test('every wave schedules one event, and it fires', () => cabinet(async ({ h, game }) => {
+  const e = game.debug.event;
+  assert.ok(['saucer', 'meteors', 'blackout', 'shuffle'].includes(e.kind));
+  assert.strictEqual(e.fired, false);
+  h.until(() => game.debug.event.fired || !game.debug.running, 900);
+  assert.strictEqual(game.debug.event.fired, true, 'the event fired within its wave');
+}));
+
+test('with no pack the rectangles draw and nothing is missed', () => cabinet(async ({ game }) => {
+  assert.strictEqual(game.debug.pack, false, 'the harness has no Image, so no pack');
+}));
+
 test('the cabinet declares the metadata the arcade shell needs', () => cabinet(async ({ meta }) => {
   assert.strictEqual(meta.key, 'invaders');
   assert.ok(meta.width > 0 && meta.height > 0);

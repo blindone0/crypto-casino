@@ -1,0 +1,30 @@
+{
+  "seed": 11,
+  "words": {
+    "species": "bioluminescent",
+    "material": "coral",
+    "palette": "ice blue and white",
+    "mood": "sleek"
+  },
+  "atlas": {
+    "file": "atlas.png",
+    "w": 768,
+    "h": 160
+  },
+  "alien": {
+    "size": 64,
+    "species": 3,
+    "frames": 2,
+    "y": 0
+  },
+  "burst": {
+    "size": 96,
+    "frames": 8,
+    "y": 64
+  },
+  "backdrop": {
+    "file": "backdrop.jpg",
+    "size": 1024
+  },
+  "empty": []
+}
