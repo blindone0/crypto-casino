@@ -20,6 +20,7 @@ const fs = require('node:fs');
 const ledger = require('./ledger');
 const tokenchain = require('./tokenchain');
 const matches = require('./match');
+const events = require('./events');
 
 const fmt = (units) => (units / 100000000).toFixed(8);
 
@@ -48,7 +49,33 @@ function chainVerifies(db, cfg) {
   return {
     name: 'token chain',
     ok: out.ok,
-    detail: out.ok ? `${height} blocks verify` : `broken: ${out.why || out.error}`,
+    detail: out.ok
+      ? `${height} blocks verify, ${out.events || 0} game events among them`
+      : `broken: ${out.reason || out.why || out.error}`,
+  };
+}
+
+/**
+ * The event queue.
+ *
+ * A game step waits in token_events until the flusher puts it in a block, a few seconds
+ * at most. Rows waiting longer than that mean the flusher is not running, and every step
+ * players take meanwhile is a claim the chain has not committed to. Reported rather than
+ * failed: the games play on regardless, and a server that is stopped has a queue by
+ * definition — this doctor is often run against exactly that.
+ */
+function eventsFlowing(db, cfg) {
+  if (!cfg.token.enabled) return { name: 'events', ok: true, detail: 'token is off' };
+  const p = events.pending(db);
+  const total = db.get('SELECT COUNT(*) AS n FROM token_events').n;
+  if (!p.count) return { name: 'events', ok: true, detail: `${total} logged, none waiting for a block` };
+  const late = p.waitedMs > events.settings(cfg).batchMs * 3;
+  return {
+    name: 'events',
+    ok: true,
+    detail: late
+      ? `${p.count} waiting, the oldest for ${Math.round(p.waitedMs / 1000)}s: is the server running?`
+      : `${total - p.count} logged, ${p.count} waiting for the next block`,
   };
 }
 
@@ -200,6 +227,7 @@ function checkAll(db, cfg, at = Math.floor(Date.now() / 1000)) {
     schemaCurrent(db),
     booksBalance(db),
     chainVerifies(db, cfg),
+    eventsFlowing(db, cfg),
     supplyHolds(db, cfg),
     escrowCovered(db, cfg),
     nothingStranded(db, cfg, at),
@@ -215,6 +243,7 @@ module.exports = {
   schemaCurrent,
   booksBalance,
   chainVerifies,
+  eventsFlowing,
   supplyHolds,
   escrowCovered,
   nothingStranded,

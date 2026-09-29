@@ -173,6 +173,47 @@ const STEPS = [
       db.exec('DROP TABLE IF EXISTS puzzle_games');
     },
   },
+  {
+    id: 6,
+    name: 'token_rounds and token_events: every game step, queued for the chain',
+    /**
+     * The event log (src/events.js). token_events rows with height NULL are the queue of
+     * steps not yet in a block; token_rounds hands out each round's sequence numbers and
+     * records who played it. Additive only: the blocks already on the chain are never
+     * rewritten, and nothing is backfilled — inventing a history for rounds that predate
+     * the log would be the operator writing history.
+     */
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS token_rounds (
+          g         TEXT NOT NULL,
+          r         INTEGER NOT NULL,
+          user_id   INTEGER,
+          pubkey    TEXT,
+          next_seq  INTEGER NOT NULL DEFAULT 0,
+          opened_at INTEGER NOT NULL,
+          closed_at INTEGER,
+          sig       TEXT,
+          PRIMARY KEY (g, r)
+        );
+        CREATE INDEX IF NOT EXISTS ix_token_rounds_user ON token_rounds(user_id, opened_at DESC);
+        CREATE TABLE IF NOT EXISTS token_events (
+          g      TEXT NOT NULL,
+          r      INTEGER NOT NULL,
+          s      INTEGER NOT NULL,
+          k      TEXT NOT NULL,
+          a      TEXT NOT NULL,
+          u      TEXT,
+          sig    TEXT,
+          ms     INTEGER NOT NULL,
+          height INTEGER,
+          PRIMARY KEY (g, r, s)
+        ) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS ix_token_events_queue ON token_events(ms) WHERE height IS NULL;
+        CREATE INDEX IF NOT EXISTS ix_token_events_height ON token_events(height);
+      `);
+    },
+  },
 ];
 
 const latest = (steps = STEPS) => steps.reduce((n, s) => Math.max(n, s.id), 0);

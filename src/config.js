@@ -127,6 +127,12 @@ const DEFAULTS = {
     // Staking tugriks on the ordinary casino games. The house pays wins out of what it
     // holds, so the real ceiling is its own balance rather than a number set here.
     bet: { min: 1 * 100000000, max: 2000 * 100000000 },
+
+    // Every game step goes to the chain as an event (src/events.js). A block is appended
+    // when this many are waiting, or when the oldest has waited this long; a backlog
+    // drains at most maxPerBlock a block. Switched off, the games still play and the
+    // record simply stops — a dial for a broken flusher, not a setting to leave off.
+    events: { enabled: true, batchCount: 25, batchMs: 5000, maxPerBlock: 500 },
   },
 
   // ---- ARCADE -----------------------------------------------------------

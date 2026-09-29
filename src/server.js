@@ -27,6 +27,7 @@ const dice = require('./games/dice');
 const bones = require('./games/bones');
 const limbo = require('./games/limbo');
 const mines = require('./games/mines');
+const events = require('./events');
 const slots = require('./games/slots');
 const preferans = require('./games/preferans');
 const debertz = require('./games/debertz');
@@ -1084,6 +1085,7 @@ function build(cfg) {
 
   let sweeper = null;
   let heartbeats = null;
+  let flushes = null;
 
   function start() {
     // Bootstrap: an admin token so the panel is reachable before any account exists.
@@ -1119,6 +1121,14 @@ function build(cfg) {
     }, (cfg.match.heartbeatSeconds || 15) * 1000);
     beat.unref?.();
     heartbeats = beat;
+
+    // The event flusher. Every game step waits in token_events until this puts it in a
+    // block — a few seconds at most. Its own transaction, never a game's (src/events.js).
+    const flusher = setInterval(() => {
+      try { events.flush(db, cfg); } catch (e) { console.error(`  event flush failed: ${e.message}`); }
+    }, 1000);
+    flusher.unref?.();
+    flushes = flusher;
 
     const housekeeping = () => {
       limits.sweep(db);
@@ -1160,6 +1170,14 @@ function build(cfg) {
     crash.stop();
     if (sweeper) clearInterval(sweeper);
     if (heartbeats) clearInterval(heartbeats);
+    if (flushes) clearInterval(flushes);
+    // Whatever is still waiting goes into one last block, so a restart loses nothing and
+    // the doctor finds the queue empty.
+    try {
+      events.flush(db, cfg, { force: true });
+    } catch (e) {
+      console.error(`  final event flush failed: ${e.message}`);
+    }
     return new Promise((resolve) => server.close(resolve));
   }
 

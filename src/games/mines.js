@@ -7,6 +7,8 @@ const U = require('../util');
 const fair = require('../fair');
 const ledger = require('../ledger');
 const auth = require('../auth');
+const events = require('../events');
+const tokenchain = require('../tokenchain');
 
 const TILES = fair.MINES_TILES;
 const now = () => Math.floor(Date.now() / 1000);
@@ -68,6 +70,17 @@ function start({ db, cfg, user, bank }, body) {
       bank.mode, now(),
     );
     const g = activeGame(db, user.id);
+    // On the record: the round, its stake, and a commitment to the layout. The layout
+    // itself is revealed when the round ends, and the hash is what lets anyone check
+    // that no mine moved between the two.
+    events.emit(db, cfg, {
+      g: 'mines',
+      r: g.id,
+      k: 'o',
+      a: [wager, mineCount, tokenchain.sha256(tokenchain.canonical(mines))],
+      userId: user.id,
+      pubkey: tokenchain.keyFor(db, user.id)?.pubkey || null,
+    });
     return {
       ...view(db, cfg, g),
       table: multiplierTable(cfg, mineCount),
@@ -92,9 +105,12 @@ function reveal({ db, cfg, user, bankFor }, body) {
     // Settle against the bank this round was opened with, not the one the request asks
     // for: a round started with play money must never pay out real money.
     const bank = bankFor();
+    events.emit(db, cfg, { g: 'mines', r: g.id, k: 'r', a: [tile] });
 
     if (mines.includes(tile)) {
       db.run("UPDATE mines_games SET state='lost', ended_at=? WHERE id=?", now(), g.id);
+      events.emit(db, cfg, { g: 'mines', r: g.id, k: 'f', a: [0, 0, mines] });
+      events.close(db, { g: 'mines', r: g.id });
       bank.settle({
         user,
         game: 'mines',
@@ -150,6 +166,8 @@ function finish({ db, cfg, user, bankFor }, g) {
   const { payout, capped } = bank.capPayout(g.wager, raw);
 
   db.run("UPDATE mines_games SET state='cashed', payout=?, ended_at=? WHERE id=?", payout, now(), g.id);
+  events.emit(db, cfg, { g: 'mines', r: g.id, k: 'c', a: [payout, multiplier, mines] });
+  events.close(db, { g: 'mines', r: g.id });
   bank.settle({
     user,
     game: 'mines',
