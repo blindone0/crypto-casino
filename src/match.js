@@ -28,6 +28,60 @@ const { GAMES } = require('./matchgames');
 const now = () => Math.floor(Date.now() / 1000);
 const nowMs = () => Date.now();
 
+// ------------------------------------------------------------------ streams
+/**
+ * Who is watching which table.
+ *
+ * A browser at a table opens /api/match/stream?id= and is nudged — the id and nothing
+ * else — whenever that table changes, then refetches. The nudge carries nothing, so there
+ * is nothing in it to leak to a watcher who is not seated; the fetch that follows is the
+ * same authenticated one the two-second poll used to make. Tron needed this, because a
+ * rider's turn that arrives two seconds late is a crash; every other game merely stops
+ * polling.
+ */
+const streams = new Map();
+
+function subscribe(req, res, id) {
+  const key = Number(id);
+  if (!Number.isInteger(key)) {
+    res.writeHead(400, { 'content-type': 'text/plain' });
+    res.end('id?');
+    return;
+  }
+  res.writeHead(200, {
+    'content-type': 'text/event-stream',
+    'cache-control': 'no-store',
+    connection: 'keep-alive',
+    'x-accel-buffering': 'no',
+  });
+  res.write('retry: 3000\n\n');
+  if (!streams.has(key)) streams.set(key, new Set());
+  streams.get(key).add(res);
+  const ping = setInterval(() => {
+    try { res.write(`event: ping\ndata: ${Date.now()}\n\n`); } catch { /* dropped on close */ }
+  }, 25000);
+  const drop = () => {
+    clearInterval(ping);
+    const set = streams.get(key);
+    if (set) {
+      set.delete(res);
+      if (!set.size) streams.delete(key);
+    }
+  };
+  req.on('close', drop);
+  req.on('error', drop);
+}
+
+/** Tell everyone watching a table that it changed. Nobody watching is not an error. */
+function notify(id) {
+  const key = Number(id);
+  const set = streams.get(key);
+  if (!set) return;
+  for (const res of set) {
+    try { res.write(`event: update\ndata: {"id":${key}}\n\n`); } catch { set.delete(res); }
+  }
+}
+
 const gameFor = (key) => GAMES[String(key || '')] || null;
 
 // ----------------------------------------------------------------- the house
@@ -424,6 +478,13 @@ function timeoutOutcome(db, cfg, match) {
   const plugin = gameFor(match.game);
   const state = JSON.parse(match.state);
 
+  // A game that runs on its own clock may have decided itself with nobody on a seat
+  // clock at all. It is asked first; Tron is the game that answers.
+  if (plugin.resultNow) {
+    const out = plugin.resultNow(state, match.seats);
+    if (out) return { ready: true, winners: out.winners, reason: out.reason };
+  }
+
   // Still setting up, so the game clock is not running and a separate deadline applies.
   if (plugin.clockRuns && !plugin.clockRuns(state)) {
     if (now() - match.started_at < cfg.match.setupSeconds) {
@@ -668,4 +729,5 @@ module.exports = {
   create, join, cancel, act, resign, claimTimeout,
   lobby, detail, summary, settle, refund, stats, seatOf, seatsOf,
   timeoutOutcome, sweep, escrowHealth, heartbeat, creditDowntime,
+  subscribe, notify,
 };

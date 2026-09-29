@@ -1364,6 +1364,13 @@ body.couch .bigwin .amount { color: #e8eeff; text-shadow: 0 0 44px rgba(143, 166
 .match-bar .mono { color: var(--text); letter-spacing: .04em; }
 
 .board-host { width: min(100%, 520px); }
+.board-host:has(.tron) { width: min(100%, 768px); }
+.tron { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; }
+.tron-arena {
+  width: 100%; max-width: 768px; aspect-ratio: 3 / 2; display: block;
+  background: #050508; border: 1px solid #1c2a3a; border-radius: 6px; touch-action: none;
+}
+.tron-status { min-height: 1.4em; color: #bfe6ff; }
 .chessboard {
   position: relative;
   display: grid;

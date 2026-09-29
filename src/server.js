@@ -541,7 +541,7 @@ function build(cfg) {
   add('GET', '/api/solo/current', async (ctx, req) => {
     const user = requireUser(ctx);
     const url = new URL(req.url, 'http://x');
-    return { game: solo.current(db, user.id, String(url.searchParams.get('game') || '')) };
+    return { game: solo.current(db, user.id, String(url.searchParams.get('game') || ''), cfg) };
   });
 
   add('POST', '/api/solo/move', async (ctx, req) => {
@@ -771,7 +771,10 @@ function build(cfg) {
   add('POST', '/api/match/join', async (ctx, req) => {
     const user = requireUser(ctx);
     checkCsrf(req, ctx);
-    return matches.join(db, cfg, user, await U.readJsonBody(req));
+    const body = await U.readJsonBody(req);
+    const out = matches.join(db, cfg, user, body);
+    matches.notify(body.id);
+    return out;
   });
 
   add('POST', '/api/match/cancel', async (ctx, req) => {
@@ -783,19 +786,28 @@ function build(cfg) {
   add('POST', '/api/match/move', async (ctx, req) => {
     const user = requireUser(ctx);
     checkCsrf(req, ctx);
-    return matches.act(db, cfg, user, await U.readJsonBody(req));
+    const body = await U.readJsonBody(req);
+    const out = matches.act(db, cfg, user, body);
+    matches.notify(body.id);
+    return out;
   });
 
   add('POST', '/api/match/resign', async (ctx, req) => {
     const user = requireUser(ctx);
     checkCsrf(req, ctx);
-    return matches.resign(db, cfg, user, (await U.readJsonBody(req)).id);
+    const { id } = await U.readJsonBody(req);
+    const out = matches.resign(db, cfg, user, id);
+    matches.notify(id);
+    return out;
   });
 
   add('POST', '/api/match/timeout', async (ctx, req) => {
     const user = requireUser(ctx);
     checkCsrf(req, ctx);
-    return matches.claimTimeout(db, cfg, user, (await U.readJsonBody(req)).id);
+    const { id } = await U.readJsonBody(req);
+    const out = matches.claimTimeout(db, cfg, user, id);
+    matches.notify(id);
+    return out;
   });
 
   add('GET', '/api/admin/matches', async (ctx, req) => {
@@ -1011,6 +1023,13 @@ function build(cfg) {
         'cache-control': 'no-store',
       });
       res.end(`${geoBlock.reason}\n`);
+      return;
+    }
+
+    // Server-sent events for a match table: a nudge per change, and the browser refetches.
+    if (pathname === '/api/match/stream' && req.method === 'GET') {
+      const url = new URL(req.url, 'http://x');
+      matches.subscribe(req, res, url.searchParams.get('id'));
       return;
     }
 

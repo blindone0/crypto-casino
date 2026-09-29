@@ -27,6 +27,11 @@
 //   resultOnTimeout(state, seat, n)        who wins when a clock runs out
 //   resultOnSetupTimeout(state, n)         optional: who wins when nobody sets up
 //   onQuit(state, seat, n)                 optional: what resigning does at a big table
+//   resultNow(state, n)                    optional: a result the game reached on its
+//                                          own, for a game with no seat ever on the
+//                                          clock. Tron is the one that answers.
+//   catchUp(state, decide)                 optional, solo only: ride the machines'
+//                                          seats forward to now (see src/tron.js)
 //
 // `winners` is always a list of seats. One of them is a win, all of them is a draw, and
 // anything between is what a table game produces: in Дурак everyone except the fool won.
@@ -38,6 +43,7 @@ const seabattle = require('./seabattle');
 const balda = require('./balda');
 const durak = require('./durak');
 const poker = require('./poker');
+const { TRON } = require('./tron');
 const wordsRu = require('./words-ru');
 
 /** The other seat, at a table of two. */
@@ -562,6 +568,7 @@ const GAMES = {
   durak: DURAK,
   balda: BALDA,
   seabattle: SEABATTLE,
+  tron: TRON,
 };
 
 module.exports = { GAMES, other, allBut, TWO };

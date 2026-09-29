@@ -277,3 +277,111 @@ test('a match nobody can see does not leak a board', async (t) => {
   const missing = await alice.client.call('/api/match/one?id=9999');
   assert.strictEqual(missing.status, 404);
 });
+
+test('a Tron match over HTTP: two riders, a stream that nudges, one crash, the survivor paid', async (t) => {
+  const { cfg, app, base } = await boot();
+  // The race runs on src/tron.js's clock, which the test turns by hand; the server is in
+  // this process, so the dial is shared.
+  const tron = require('../src/tron');
+  let fake = Date.now();
+  tron.clock.now = () => fake;
+  let reader = null;
+  t.after(async () => {
+    tron.clock.now = () => Date.now();
+    if (reader) await reader.cancel().catch(() => {});
+    await app.stop();
+    cleanup(cfg, app.db);
+  });
+
+  const alice = await player(base, 'alice');
+  const bob = await player(base, 'bob');
+
+  const made = await alice.client.call('/api/match/create', {
+    method: 'POST',
+    body: { game: 'tron', stake: 100 * TUG, seats: 2, spend: await stake(alice, 100 * TUG) },
+  });
+  assert.strictEqual(made.status, 200, `create: ${JSON.stringify(made.data)}`);
+  const id = made.data.id;
+
+  // --- a watcher on the table's stream hears every change, with nothing in the nudge
+  const stream = await fetch(`${base}/api/match/stream?id=${id}`);
+  assert.strictEqual(stream.status, 200);
+  assert.match(stream.headers.get('content-type'), /text\/event-stream/);
+  reader = stream.body.getReader();
+  const decoder = new TextDecoder();
+  let heard = '';
+  const hear = async (marker) => {
+    for (let i = 0; i < 20 && !heard.includes(marker); i += 1) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      heard += decoder.decode(value);
+    }
+    return heard.includes(marker);
+  };
+  assert.ok(await hear('retry:'), 'the stream opened');
+
+  // --- the table fills and the race is on: nobody is "to move", everyone may act
+  const joined = await bob.client.call('/api/match/join', {
+    method: 'POST', body: { id, spend: await stake(bob, 100 * TUG) },
+  });
+  assert.strictEqual(joined.status, 200, `join: ${JSON.stringify(joined.data)}`);
+  assert.ok(await hear('event: update'), 'joining nudged the watcher');
+  assert.ok(!heard.includes('turns'), 'the nudge carries no state');
+
+  const aView = await alice.client.call(`/api/match/one?id=${id}`);
+  assert.strictEqual(aView.data.status, 'playing');
+  assert.strictEqual(aView.data.seat, 0);
+  assert.strictEqual(aView.data.toMove, null);
+  assert.deepStrictEqual(aView.data.view.turns, []);
+  assert.ok(aView.data.view.startMs > fake, 'a countdown before the first tick');
+  assert.strictEqual(aView.data.view.nowMs, fake, 'the server clock travels with the view');
+
+  // --- Alice turns east during the countdown: recorded for tick one, and pushed
+  heard = '';
+  const turned = await alice.client.call('/api/match/move', {
+    method: 'POST', body: { id, turn: 'e' },
+  });
+  assert.strictEqual(turned.status, 200, `turn: ${JSON.stringify(turned.data)}`);
+  assert.ok(await hear('event: update'), 'a turn nudged the watcher without a poll');
+  const bView = await bob.client.call(`/api/match/one?id=${id}`);
+  assert.deepStrictEqual(bView.data.view.turns, [{ t: 1, seat: 0, h: 'e' }]);
+
+  // --- Bob turns east too: his trail leaves row 21 alone, and he meets the east edge
+  // on tick 32 while Alice, on the longer line, rides on until tick 65
+  const bobTurn = await bob.client.call('/api/match/move', {
+    method: 'POST', body: { id, turn: 'e' },
+  });
+  assert.strictEqual(bobTurn.status, 200, `turn: ${JSON.stringify(bobTurn.data)}`);
+
+  // --- a reverse is refused by the server, not merely discouraged by the board
+  const rev = await bob.client.call('/api/match/move', {
+    method: 'POST', body: { id, turn: 's' },
+  });
+  assert.strictEqual(rev.status, 400);
+  assert.match(rev.data.error, /reverse/);
+
+  // --- claiming a result before there is one is refused
+  const early = await alice.client.call('/api/match/timeout', {
+    method: 'POST', body: { id, claim: true },
+  });
+  assert.strictEqual(early.status, 400);
+
+  // --- ten seconds on, Bob has met the edge and Alice is the last rider
+  fake += 10000;
+  const claim = await alice.client.call('/api/match/timeout', {
+    method: 'POST', body: { id, claim: true },
+  });
+  assert.strictEqual(claim.status, 200, `claim: ${JSON.stringify(claim.data)}`);
+  const done = await bob.client.call(`/api/match/one?id=${id}`);
+  assert.strictEqual(done.data.status, 'done');
+  assert.strictEqual(done.data.reason, 'last-rider');
+  assert.deepStrictEqual(done.data.winners, [0]);
+  assert.deepStrictEqual(done.data.view.result, { winners: [0], reason: 'last-rider' });
+
+  // --- the pot moved to Alice, less the rake
+  const rake = Math.floor(200 * TUG * cfg.match.rake);
+  const aliceNow = await alice.client.call('/api/match');
+  assert.strictEqual(aliceNow.data.balance, cfg.token.welcomeGrant - 100 * TUG + (200 * TUG - rake));
+  const bobNow = await bob.client.call('/api/match');
+  assert.strictEqual(bobNow.data.balance, cfg.token.welcomeGrant - 100 * TUG);
+});

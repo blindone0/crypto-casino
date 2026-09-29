@@ -33,6 +33,7 @@ const chess = require('./chess');
 const seabattle = require('./seabattle');
 const balda = require('./balda');
 const wordsRu = require('./words-ru');
+const tron = require('../public/games/tron-rules.js');
 
 /** A fair pick, using the same generator the games deal from. */
 const pick = (list) => list[crypto.randomInt(list.length)];
@@ -280,6 +281,19 @@ function pokerBot(view) {
 
 // ---------------------------------------------------------------------------
 
+// ------------------------------------------------------------------ tron ---
+/**
+ * The classic light-cycle bot, which lives in the rules file so the arcade rides the same
+ * one. In solo the view carries the live simulation; a caller with only the inputs gets
+ * the race rebuilt from them, which is the same race.
+ */
+function tronBot(view, seat) {
+  const sim = view.sim || tron.replay(view.n, view.turns, view.tick);
+  const h = tron.botHeading(sim, seat, () => crypto.randomInt(1000000) / 1000000, 6);
+  if (!h || h === sim.riders[seat].h) return { turn: 'straight' };
+  return { turn: h };
+}
+
 /**
  * One bot per game, keyed the way `matchgames.GAMES` is.
  *
@@ -292,6 +306,7 @@ const BOTS = {
   balda: baldaBot,
   durak: durakBot,
   poker: pokerBot,
+  tron: tronBot,
 };
 
 /**

@@ -20,6 +20,10 @@ const { testConfig, openTestDb, cleanup } = require('./helpers');
 const solo = require('../src/solo');
 const bots = require('../src/bots');
 const { GAMES } = require('../src/matchgames');
+const tronMatch = require('../src/tron');
+
+/** Tron runs on a clock; the test turns it by hand so the race can happen in no time. */
+const tronTime = { ms: 0 };
 
 function setup() {
   const cfg = testConfig();
@@ -39,6 +43,10 @@ function setup() {
  * position the player would be left staring at.
  */
 function playOut(db, cfg, user, game, limit = 600) {
+  if (game === 'tron') {
+    tronTime.ms = Date.now();
+    tronMatch.clock.now = () => tronTime.ms;
+  }
   let out = solo.start(db, cfg, user, game);
   let moves = 0;
   let lastError = null;
@@ -58,6 +66,12 @@ function playOut(db, cfg, user, game, limit = 600) {
       for (let i = 0; i < shots.length; i += 1) {
         if (shots[i] === null || shots[i] === undefined) tries.push({ cell: i });
       }
+    }
+    if (game === 'tron') {
+      // A third of a second a move, so the machines have ticks to ride between the
+      // player's turns; a sync is always a legal move.
+      tronTime.ms += 350;
+      tries.push({ turn: 'straight' });
     }
 
     let moved = false;

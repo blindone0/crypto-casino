@@ -332,7 +332,8 @@ test('no translation key is defined twice', () => {
 test('every match result reason has wording', () => {
   // The client renders a result as t('match.why.' + reason), so a reason the server can
   // emit with no string behind it prints the raw key at the player.
-  const games = read(path.join(__dirname, '..', 'src', 'matchgames.js'));
+  const games = read(path.join(__dirname, '..', 'src', 'matchgames.js'))
+    + read(path.join(__dirname, '..', 'src', 'tron.js'));
   const reasons = new Set([...games.matchAll(/reason: '([a-z-]+)'/g)].map((m) => m[1]));
   assert.ok(reasons.size >= 5, 'reasons were found');
   const missing = [...reasons].filter((r) => !STRINGS.has(`match.why.${r}`));

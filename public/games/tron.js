@@ -16,10 +16,7 @@
 // input is the same run every time.
 
 import * as R from './tron-rules.js';
-
-const CELL = 8;
-const W = R.COLS * CELL;
-const H = R.ROWS * CELL;
+import { paint, burstFor, ageBursts, W, H } from './tron-paint.js';
 
 const TICK_S = 0.08;             // the first round's tick
 const TICK_MIN_S = 0.042;
@@ -83,7 +80,7 @@ export function start(canvas, { onScore, onEnd, onBall, seed, sound } = {}) {
   }
 
   function burst(r) {
-    bursts.push({ x: (r.x + 0.5) * CELL, y: (r.y + 0.5) * CELL, colour: R.COLOURS[r.seat], t: 0 });
+    bursts.push(burstFor(r));
     if (!stillness) flash = 0.12;
     say('boom');
   }
@@ -123,10 +120,7 @@ export function start(canvas, { onScore, onEnd, onBall, seed, sound } = {}) {
   function step(dt) {
     if (messageFor > 0) messageFor -= dt;
     if (flash > 0) flash -= dt;
-    for (let i = bursts.length - 1; i >= 0; i -= 1) {
-      bursts[i].t += dt;
-      if (bursts[i].t > 0.5) bursts.splice(i, 1);
-    }
+    ageBursts(bursts, dt);
     if (phase === 'ready') {
       wait -= dt;
       if (wait <= 0) { phase = 'riding'; acc = 0; }
@@ -148,68 +142,8 @@ export function start(canvas, { onScore, onEnd, onBall, seed, sound } = {}) {
   }
 
   // ------------------------------------------------------------------- draw
-  function strokeTrail(r, width, alpha) {
-    ctx.strokeStyle = R.COLOURS[r.seat];
-    ctx.globalAlpha = alpha;
-    ctx.lineWidth = width;
-    ctx.beginPath();
-    r.path.forEach(([x, y], i) => {
-      const px = (x + 0.5) * CELL;
-      const py = (y + 0.5) * CELL;
-      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-    });
-    ctx.stroke();
-  }
-
   function draw() {
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = flash > 0 ? '#16161c' : '#050508';
-    ctx.fillRect(0, 0, W, H);
-
-    // The grid, faint, every eight cells: the floor of the arena.
-    ctx.strokeStyle = 'rgba(80,200,255,0.07)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let x = 0; x <= W; x += CELL * 8) { ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, H); }
-    for (let y = 0; y <= H; y += CELL * 8) { ctx.moveTo(0, y + 0.5); ctx.lineTo(W, y + 0.5); }
-    ctx.stroke();
-
-    if (!sim) return;
-    ctx.lineCap = 'square';
-    ctx.lineJoin = 'miter';
-    // The glow is additive, so where two trails cross it brightens rather than covers.
-    ctx.globalCompositeOperation = 'lighter';
-    for (const r of sim.riders) strokeTrail(r, CELL * 1.6, 0.22);
-    ctx.globalCompositeOperation = 'source-over';
-    for (const r of sim.riders) strokeTrail(r, CELL * 0.5, 1);
-    ctx.globalAlpha = 1;
-
-    // The heads: a bright square with a white heart, so the front of a trail is findable.
-    for (const r of sim.riders) {
-      if (!r.alive) continue;
-      ctx.fillStyle = R.COLOURS[r.seat];
-      ctx.fillRect(r.x * CELL, r.y * CELL, CELL, CELL);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(r.x * CELL + 2, r.y * CELL + 2, CELL - 4, CELL - 4);
-    }
-
-    // A crash: a ring of the rider's colour that opens and fades.
-    for (const b of bursts) {
-      const k = b.t / 0.5;
-      ctx.strokeStyle = b.colour;
-      ctx.globalAlpha = 1 - k;
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(b.x, b.y, 6 + k * 40, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.fillStyle = b.colour;
-      for (let i = 0; i < 8; i += 1) {
-        const a = (i / 8) * Math.PI * 2;
-        ctx.fillRect(b.x + Math.cos(a) * k * 52 - 2, b.y + Math.sin(a) * k * 52 - 2, 4, 4);
-      }
-      ctx.globalAlpha = 1;
-    }
+    paint(ctx, sim, { bursts, flash: flash > 0 });
 
     if (messageFor > 0) {
       ctx.fillStyle = '#e8f6ff';

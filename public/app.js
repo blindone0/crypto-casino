@@ -3459,15 +3459,27 @@ const MATCH_BOARDS = {
   balda: () => import('./games/baldaboard.js'),
   durak: () => import('./games/durakboard.js'),
   poker: () => import('./games/pokerboard.js'),
+  tron: () => import('./games/tronboard.js'),
 };
 
-/** Poll while a match is live. Matches are turn-based, so a socket would be overkill. */
-function matchPoll(fn) {
+/**
+ * Poll while a match is live. The stream below is the fast path — the server nudges a
+ * table's watchers on every change — and this is the net under it for a stream that drops.
+ */
+function matchPoll(fn, ms = 2000) {
   stopMatchPoll();
-  state.matchTimer = setInterval(fn, 2000);
+  state.matchTimer = setInterval(fn, ms);
 }
 function stopMatchPoll() {
   if (state.matchTimer) { clearInterval(state.matchTimer); state.matchTimer = null; }
+  if (state.matchStream) { state.matchStream.close(); state.matchStream = null; }
+}
+function listenMatch(id) {
+  if (typeof EventSource !== 'function') return;
+  const es = new EventSource(`/api/match/stream?id=${id}`);
+  es.addEventListener('update', () => { if (state.matchId === id) refreshMatch(false); });
+  es.onerror = () => { /* EventSource retries on its own; the poll covers the gap */ };
+  state.matchStream = es;
 }
 
 async function renderMatch() {
@@ -3677,7 +3689,8 @@ async function openMatch(id) {
   state.matchId = id;
   state.board = null;
   await refreshMatch(true);
-  matchPoll(() => refreshMatch(false));
+  listenMatch(id);
+  matchPoll(() => refreshMatch(false), 10000);
 }
 
 /**
@@ -3707,7 +3720,10 @@ async function soloAct(payload) {
     const out = await api('/api/solo/move', { method: 'POST', body: { game: state.solo.game, ...payload } });
     state.solo = out;
     paintSolo(out);
-  } catch (e) { toast(e.message, 'bad'); }
+  } catch (e) {
+    // A board that syncs on its own clock can have one in flight as the game ends.
+    if (!payload.claim && payload.turn !== 'straight') toast(e.message, 'bad');
+  }
 }
 
 async function buildSoloScreen(out) {
@@ -3729,6 +3745,7 @@ async function buildSoloScreen(out) {
     seats: out.seats,
     myTurn: out.status === 'playing' && out.toMove === out.seat,
     lang: getLocale(),
+    solo: true,
     onAct: (action) => soloAct(action),
   });
   paintSolo(out);
@@ -3797,7 +3814,8 @@ async function buildMatchScreen(view) {
     view: view.view,
     seat: view.seat,
     seats: view.seats,
-    myTurn: view.status === 'playing' && !!view.seat && view.toMove === view.seat,
+    myTurn: view.status === 'playing' && view.seat !== null && view.seat !== undefined
+      && view.toMove === view.seat,
     lang: getLocale(),
     onAct: (action) => sendAction(action),
   });
@@ -3952,11 +3970,14 @@ function moveSound(game, before, after) {
 async function sendAction(action) {
   const before = state.matchView;
   try {
-    await api('/api/match/move', { method: 'POST', body: { id: state.matchId, ...action } });
+    // A board that saw its game decide itself asks for the result rather than moving:
+    // Tron's race ends at a tick, not inside anybody's move.
+    const route = action.claim ? '/api/match/timeout' : '/api/match/move';
+    await api(route, { method: 'POST', body: { id: state.matchId, ...action } });
     await refreshMatch(false);
     audio.sfx(moveSound(before?.game, before, state.matchView));
   } catch (e) {
-    toast(e.message, 'bad');
+    if (!action.claim) toast(e.message, 'bad');
     await refreshMatch(false);
   }
 }

@@ -89,13 +89,13 @@ function render(row, plugin) {
 }
 
 /** The live game of this type, or null. */
-function current(db, userId, game) {
+function current(db, userId, game, cfg) {
   const plugin = requireGame(game);
   const row = db.get(
     "SELECT * FROM solo_games WHERE user_id=? AND game=? AND status='playing'",
     userId, game,
   );
-  return row ? render(row, plugin) : null;
+  return row ? render(catchUp(db, cfg, row, plugin), plugin) : null;
 }
 
 /**
@@ -215,6 +215,21 @@ function save(db, row, state, outcome) {
 }
 
 /**
+ * A game that runs on its own clock is ridden forward before it is read or moved on.
+ *
+ * Tron's machines have no timer, any more than its riders do, so their turns since the
+ * last request are decided now, by the same bots, and recorded (src/tron.js, catchUp).
+ * Every other game has no such hook and comes back untouched.
+ */
+function catchUp(db, cfg, row, plugin) {
+  if (!plugin.catchUp || row.status !== 'playing') return row;
+  const decide = (view, seat) => bots.choose(row.game, view, seat, cfg);
+  const out = plugin.catchUp(parse(row), decide);
+  if (!out) return row;
+  return save(db, row, out.state, out.winners ? out : null);
+}
+
+/**
  * Run every bot that can move, and stop when it is the player's turn again.
  *
  * One request, one transaction, one response holding the position *after* the opponents
@@ -259,12 +274,17 @@ function move(db, cfg, user, game, payload) {
     );
     if (!row) throw new U.BadRequest('no game in progress');
 
-    const state = parse(row);
-    const who = actors(plugin, state, row.seats);
+    // The machines ride first, up to now. If that ended the race there is nothing left
+    // for the player to do but see the result.
+    const live = catchUp(db, cfg, row, plugin);
+    if (live.status !== 'playing') return render(live, plugin);
+
+    const state = parse(live);
+    const who = actors(plugin, state, live.seats);
     if (!who.includes(PLAYER)) throw new U.BadRequest('not your turn');
 
     const out = plugin.act(state, PLAYER, payload, cfg);
-    const after = save(db, row, out.state || state, out.winners ? out : null);
+    const after = save(db, live, out.state || state, out.winners ? out : null);
     if (out.winners) return render(after, plugin);
     return advance(db, cfg, after, plugin);
   });
