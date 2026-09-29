@@ -10,6 +10,7 @@ import * as tokenKeys from './tokenkeys.js';
 import { verifyChain, compareHeads } from './chainverify.js';
 import { createSparks } from './slotfx.js';
 import { createReels as createGlReels } from './slot3d.js';
+import { createCabinet } from './cabinet3d.js';
 import { createDice } from './dice3d.js';
 import { createTable } from './cards3d.js';
 import { startParallax } from './parallax.js';
@@ -1795,6 +1796,14 @@ async function renderSlots() {
   if (win) {
     glReels = await buildGlReels(win);
     win.classList.toggle('gl', !!glReels);
+    // The housing, on a canvas of its own behind the drums, and the glass on one in front
+    // of them. The CSS cabinet stays whole underneath as the fallback and is simply not
+    // painted while the class is on; with no context, nothing here changes at all.
+    if (glCabinet) { glCabinet.dispose(); glCabinet = null; }
+    const cab = $('.slot-cabinet');
+    glCabinet = glReels && cab ? createCabinet(cab, { window: win, reels: $('#reels') }) : null;
+    cab?.classList.toggle('cabgl', !!glCabinet);
+    if (glCabinet) requestAnimationFrame(() => { if (glCabinet) glCabinet.resize(); });
     if (glReels) {
       glShow(null);
       // Size it again once layout has actually happened. Measuring during the build gets
@@ -2068,6 +2077,7 @@ let cardTable = null;
 let bonesDice = null;
 let glReels = null;
 let glWatch = null;
+let glCabinet = null;
 
 /** How many symbols go round one drum. Twelve reads well and keeps the texture small. */
 const GL_PER_DRUM = 12;
@@ -4324,6 +4334,7 @@ function renderGame() {
   // The stage it was publishing onto is about to be replaced, so the loop has nothing
   // left to drive.
   if (state.parallax && !['slots', 'games'].includes(state.game)) { state.parallax.stop(); state.parallax = null; }
+  if (glCabinet && state.game !== 'slots') { glCabinet.dispose(); glCabinet = null; }
   if (cardTable && !['preferans', 'debertz'].includes(state.game)) {
     cardTable.destroy();
     cardTable = null;

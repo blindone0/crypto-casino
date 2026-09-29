@@ -666,6 +666,45 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
   transform-style: preserve-3d;
 }
 /* The window the drums sit behind: a deep gold bezel around a dark recess. */
+/* The GL cabinet (public/cabinet3d.js).
+ *
+ * Two canvases: the housing behind the drums, the glass in front of them. While the
+ * class is on, the CSS cabinet's own paint — its wood, its bezel, its glass gradient — is
+ * turned off and nothing else: every rule stays, so a context that fails to start leaves
+ * the machine exactly as it was. The marquee text, the lever, the hubs, the payline and
+ * the sparks are all still CSS, and sit above the housing canvas.
+ */
+.cab-gl {
+  position: absolute; inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  display: block;
+  border-radius: 18px 18px 12px 12px;
+}
+.cab-glass {
+  position: absolute; inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  display: block;
+  /* Adds light and never takes it: a symbol cannot be hidden by the glass. */
+  mix-blend-mode: plus-lighter;
+}
+.slot-cabinet.cabgl {
+  background: none;
+  border-color: transparent;
+  box-shadow: 0 30px 70px rgba(0,0,0,.7);
+}
+.slot-cabinet.cabgl .cab-top,
+.slot-cabinet.cabgl .cab-side { display: none; }
+.slot-cabinet.cabgl .slot-marquee,
+.slot-cabinet.cabgl .slot-body,
+.slot-cabinet.cabgl .slot-base { position: relative; z-index: 2; }
+.slot-cabinet.cabgl .slot-marquee { background: none; box-shadow: none; }
+.slot-cabinet.cabgl .slot-window { background: none; box-shadow: none; }
+.slot-cabinet.cabgl .slot-base,
+.slot-cabinet.cabgl .slot-tray { background: none; box-shadow: none; border-color: transparent; }
+.slot-cabinet.cabgl .reel > .reel-glass { visibility: hidden; }
+
 .slot-window {
   flex: 1 1 auto; min-width: 0;
   padding: 9px;

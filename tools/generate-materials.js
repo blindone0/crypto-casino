@@ -109,6 +109,40 @@ const MATERIALS = {
       + 'macro photograph, flat even diffuse lighting, no shadows, top down orthographic',
     note: 'the table the dice land on',
   },
+  // The slot cabinet (public/cabinet3d.js). Four surfaces a real machine is made of,
+  // each asked for the way the dice materials are: a flat, even, top-down macro of the
+  // material itself, so the shader can light it. Anything with a specific place on the
+  // machine — a screw head, a hub boss, the denomination plate — is drawn, not modelled,
+  // for the same reason the pips are.
+  cabWood: {
+    file: 'cab-wood',
+    prompt: 'seamless tileable texture of dark walnut wood veneer, slot machine cabinet '
+      + 'side panel, warm brown, fine straight grain, satin lacquer, faint wear along the '
+      + 'grain, macro photograph, flat even diffuse studio lighting, no shadows, '
+      + 'top down orthographic, uniform',
+    note: 'the cabinet: its top and sides',
+  },
+  cabBrass: {
+    file: 'cab-brass',
+    prompt: 'seamless tileable texture of brushed antique brass metal, fine linear '
+      + 'brushing, warm gold tone, faint tarnish and fingerprints, macro photograph, flat '
+      + 'even diffuse lighting, no shadows, no highlights, top down orthographic, uniform',
+    note: 'the bezel around the window, and the trim',
+  },
+  cabVinyl: {
+    file: 'cab-vinyl',
+    prompt: 'seamless tileable texture of black textured vinyl leatherette, slot machine '
+      + 'cabinet front covering, fine pebble grain, matte, slightly worn, macro photograph, '
+      + 'flat even diffuse lighting, no shadows, top down orthographic, uniform',
+    note: 'the front of the cabinet around the window',
+  },
+  cabSteel: {
+    file: 'cab-steel',
+    prompt: 'seamless tileable texture of brushed stainless steel, fine linear grain, cool '
+      + 'grey, faint scuffs, macro photograph, flat even diffuse lighting, no shadows, '
+      + 'no highlights, top down orthographic, uniform',
+    note: 'the base and the coin tray',
+  },
   // The card back. A back is the one part of a card that IS a tileable pattern, so it
   // comes off the model like any other material. The faces are not, and are drawn below,
   // because a model cannot be trusted to put exactly seven pips in the right places.
@@ -927,7 +961,7 @@ async function main() {
   }
 
   try {
-    await api('/system_stats');
+    await comfy.api('/system_stats');
   } catch {
     console.log(`  Cannot reach ComfyUI at ${HOST}.`);
     console.log('  Start it first: the desktop shortcut, or D:\\ai\\comfyui\\start-comfyui.bat\n');
