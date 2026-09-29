@@ -18,10 +18,12 @@ const table = (body) => cabinet(MODULE, body, { width: 360, height: 680 });
 /** Run until every ball has stopped, or give up. */
 const settle = (h, game, limit = 3000) => h.until(() => !game.debug.moving, limit);
 
-test('the table racks up with a cue ball and nine object balls', () => table(async ({ game }) => {
+test('the table racks up with a red cue and fifteen white balls', () => table(async ({ game }) => {
   const s = game.debug;
-  assert.strictEqual(s.balls, 10, 'nine reds and the cue ball');
-  assert.strictEqual(s.remaining, 9);
+  assert.strictEqual(s.balls, 16, 'fifteen whites and the cue');
+  assert.strictEqual(s.remaining, 15);
+  assert.strictEqual(s.pocketed, 0);
+  assert.strictEqual(s.toGo, 8, 'free pyramid ends at eight');
   assert.strictEqual(s.score, 0);
   assert.strictEqual(s.shots, 30);
   assert.strictEqual(s.moving, false);
@@ -120,30 +122,63 @@ test('running out of shots ends the game exactly once', () => table(async ({ h, 
   assert.deepStrictEqual(game.debug, frozen);
 }));
 
-test('clearing the table pays a bonus for the shots not taken', () => table(async ({ h, game, events }) => {
+test('the eighth ball ends the game, with a bonus for the shots not taken', () => table(async ({ h, game, events }) => {
   // Play until the game ends one way or the other, then check the score is consistent
-  // with what happened rather than with a number written down here.
-  for (let i = 0; i < 40 && events.ends.length === 0; i += 1) {
+  // with what happened rather than with a number written down here. The pockets are
+  // tight now, so it takes more blind shots to drop eight than it took to clear nine.
+  for (let i = 0; i < 120 && events.ends.length === 0; i += 1) {
     game.shootAt((i * 1.3) % (Math.PI * 2), 1);
     settle(h, game);
   }
   const s = game.debug;
-  if (s.remaining === 0) {
-    assert.ok(s.score >= 9 * 1000 + 3000, `cleared the table for only ${s.score}`);
+  assert.ok(s.pocketed <= 8, 'the game stops at eight; nothing is potted after it');
+  // Two honest endings: the eighth ball, or the last shot. Blind shooting into pockets
+  // this tight usually runs out of shots first, and that is a result, not a failure.
+  assert.strictEqual(events.ends.length, 1, 'the game ended, once');
+  if (s.pocketed >= 8) {
+    assert.ok(s.score >= 8 * 1000 + 3000, `eight balls for only ${s.score}`);
   } else {
-    assert.ok(s.score >= 0, 'the score never goes below zero');
+    assert.strictEqual(s.shots, 0, 'if eight did not drop, it ended on the last shot');
+    assert.ok(s.score >= s.pocketed * 1000, 'every ball that dropped was paid');
   }
 }));
 
-test('a scratch is charged for rather than ignored', () => table(async ({ h, game }) => {
+test('a pocketed cue ball scores like any other and comes back', () => table(async ({ h, game }) => {
   // Aim into a corner pocket at an angle that gives the cue ball a clear run.
   const start = game.debug;
   game.shootAt(Math.PI * 0.75, 1); // down and to the left
   settle(h, game);
   const after = game.debug;
-  assert.ok(after.shots <= start.shots - 1, 'at least the shot itself was charged');
-  assert.ok(after.score >= 0, 'a scratch cannot push the score below zero');
+  assert.strictEqual(after.shots, start.shots - 1, 'only the shot itself is charged: there is no scratch');
   assert.strictEqual(after.balls, after.remaining + 1, 'the cue ball came back');
+  if (after.pocketed > start.pocketed) {
+    assert.ok(after.score >= start.score + 1000, 'whatever dropped, the cue included, scored');
+  }
+}));
+
+test('a drag released outside the table still fires the shot', () => table(async ({ h, game }) => {
+  // The cue sits on its spot at (180, 503). Press on it, pull well past the bottom edge of
+  // the canvas, as a player against the far cushion has to, and release out there. With
+  // the drag heard on the canvas alone this shot never happened: the bug igor hit.
+  const start = game.debug;
+  h.pointer('pointerdown', 180, 503);
+  h.pointerWindow('pointermove', 180, 620);
+  h.pointerWindow('pointermove', 180, 900);
+  h.pointerWindow('pointerup', 180, 900);
+  h.advance(2);
+  assert.strictEqual(game.debug.shots, start.shots - 1, 'the release outside the table took the shot');
+  assert.ok(game.debug.moving, 'and the ball is away');
+}));
+
+test('any ball may be played: a press on a white ball makes it the striker', () => table(async ({ h, game }) => {
+  // The apex of the pyramid sits on the spot at (180, 204). Press it, pull down, release:
+  // the apex ball goes up and the cue has not moved.
+  h.pointer('pointerdown', 180, 204);
+  h.pointerWindow('pointerup', 180, 260);
+  h.advance(2);
+  assert.notStrictEqual(game.debug.striker, 0, 'the striker is no longer the cue');
+  assert.ok(game.debug.moving);
+  assert.deepStrictEqual(game.debug.cue, { x: 180, y: 503 }, 'the cue ball stayed on its spot');
 }));
 
 test('the flat keys aim and strike without a pointer', () => table(async ({ h, game }) => {

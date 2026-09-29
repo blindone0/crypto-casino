@@ -1,7 +1,7 @@
 // Billiards.
 //
-// One cue ball, nine object balls, six pockets, and a shot count. Pot everything in as few
-// shots as you can. There are no fouls beyond the scratch, because a game room cabinet is
+// One cue ball, fifteen white object balls, six pockets, and a shot count. Pot everything in as few
+// shots as you can. There are no fouls at all, because a game room cabinet is
 // not a rulebook and nobody ever read the small print on one.
 //
 // Physics notes:
@@ -19,7 +19,15 @@ const W = 360;
 const H = 680;
 const CUSHION = 20;
 const R = 9;                 // ball radius
-const POCKET = 17;
+// A CAPTURE RADIUS from the pocket point, not a mouth width. The cushions keep a ball's
+// centre at least R from each wall, so its closest approach to a corner point is R*sqrt(2),
+// about 12.7 px: any radius below that and the corner pockets can never take a ball. The
+// pool value was 1.9R. Free pyramid is played with pockets barely wider than the ball, and
+// 1.55R is that here: a corner drops only a ball driven almost exactly into it, and a side
+// pocket takes a ball within about 21 px of its centre against a ball 18 px wide.
+const POCKET = R * 1.55;
+// Free pyramid ends at eight of the fifteen.
+const TARGET = 8;
 const FRICTION = 1.6;        // per second, exponential
 const STOP_BELOW = 6;        // units per second
 const SUBSTEPS = 6;
@@ -37,11 +45,10 @@ const POCKETS = [
   { x: LEFT, y: BOTTOM }, { x: RIGHT, y: BOTTOM },
 ];
 
-// Nine object balls in the usual diamond, plus the cue ball on its spot.
-const COLOURS = [
-  '#f2c230', '#2f6fd0', '#d13b3b', '#7b4fc4', '#e2823a',
-  '#2e9e6b', '#9e2e3f', '#1d1d20', '#d9d34a',
-];
+// Fifteen white balls and a red cue, the way a Russian table is laid: the colour is
+// which ball is which, not what it is worth. Every ball is worth the same.
+const IVORY = '#f4f1e8';
+const CUE_RED = '#c0392b';
 
 const len = (x, y) => Math.hypot(x, y);
 
@@ -74,18 +81,18 @@ export function start(canvas, { onScore, onEnd, onBall, sound } = {}) {
 
   function rack() {
     balls.length = 0;
-    balls.push({ x: W / 2, y: H * 0.74, vx: 0, vy: 0, cue: true, potted: false, colour: '#f4f1e8' });
-    // A diamond: rows of 1, 2, 3, 2, 1 around the head spot.
+    balls.push({ x: W / 2, y: H * 0.74, vx: 0, vy: 0, cue: true, potted: false, colour: CUE_RED });
+    // A pyramid: rows of one to five down from the apex spot, fifteen balls.
     const spot = { x: W / 2, y: H * 0.3 };
     const gap = R * 2 + 0.6;
-    const rows = [1, 2, 3, 2, 1];
+    const rows = [1, 2, 3, 4, 5];
     let n = 0;
     rows.forEach((count, row) => {
       for (let i = 0; i < count; i += 1) {
         balls.push({
           x: spot.x + (i - (count - 1) / 2) * gap,
-          y: spot.y + (row - 2) * gap * 0.88,
-          vx: 0, vy: 0, cue: false, potted: false, colour: COLOURS[n % COLOURS.length],
+          y: spot.y + row * gap * 0.88,
+          vx: 0, vy: 0, cue: false, potted: false, colour: IVORY,
         });
         n += 1;
       }
@@ -94,6 +101,12 @@ export function start(canvas, { onScore, onEnd, onBall, sound } = {}) {
   rack();
 
   const cue = () => balls[0];
+
+  // Free pyramid: any ball may be played, so "the striker" is a choice, not a role. The
+  // cue is only the default. `pocketed` counts every ball that dropped, the cue included.
+  let striker = 0;
+  let pocketed = 0;
+  const toGo = () => Math.max(0, TARGET - pocketed);
   const moving = () => balls.some((b) => !b.potted && (b.vx !== 0 || b.vy !== 0));
   const remaining = () => balls.filter((b) => !b.cue && !b.potted).length;
 
@@ -141,18 +154,18 @@ export function start(canvas, { onScore, onEnd, onBall, sound } = {}) {
       for (const p of POCKETS) {
         if (len(b.x - p.x, b.y - p.y) > POCKET) continue;
         b.vx = 0; b.vy = 0;
+        pocketed += 1;
+        award(1000);
+        say('pocket');
         if (b.cue) {
-          // A scratch costs a shot and the cue ball comes back on its spot.
+          // Free pyramid: the cue is a ball like any other, so pocketing it SCORES. It
+          // comes back to its spot only so there is always something to strike.
           b.x = W / 2; b.y = H * 0.74;
-          shots = Math.max(0, shots - 1);
-          award(-200);
-          message = 'Scratch';
-          if (onBall) onBall(shots);
+          message = `Cue potted — ${toGo()} to go`;
         } else {
           b.potted = true;
-          award(1000);
-          say('pocket');
-          message = `Potted — ${remaining()} left`;
+          if (balls.indexOf(b) === striker) striker = 0;
+          message = `Potted — ${toGo()} to go`;
         }
         break;
       }
@@ -185,10 +198,10 @@ export function start(canvas, { onScore, onEnd, onBall, sound } = {}) {
 
     checkPockets();
 
-    if (remaining() === 0) {
-      // Clearing the table is worth the shots you did not take.
+    if (pocketed >= TARGET) {
+      // The eighth ball is worth the shots you did not take.
       award(shots * 250 + 3000);
-      message = 'Table cleared';
+      message = 'Eight. Game.';
       finish();
     } else if (shots <= 0 && !moving()) {
       finish();
@@ -201,12 +214,13 @@ export function start(canvas, { onScore, onEnd, onBall, sound } = {}) {
     if (onEnd) onEnd(score);
   }
 
-  /** Fire the cue ball. `power` is 0..1. */
+  /** Fire the striker. `power` is 0..1. */
   function shoot(angle, strength) {
     if (!running || moving() || shots <= 0) return;
+    if (balls[striker].potted) striker = 0;
     const p = Math.max(0.12, Math.min(1, strength));
-    cue().vx = Math.cos(angle) * MAX_POWER * p;
-    cue().vy = Math.sin(angle) * MAX_POWER * p;
+    balls[striker].vx = Math.cos(angle) * MAX_POWER * p;
+    balls[striker].vy = Math.sin(angle) * MAX_POWER * p;
     shots -= 1;
     message = '';
     say('cue');
@@ -286,31 +300,39 @@ export function start(canvas, { onScore, onEnd, onBall, sound } = {}) {
     if (!running || moving()) return;
     e.preventDefault();
     const p = toTable(e);
+    // A press on a ball makes it the striker; a press elsewhere keeps the current one,
+    // so the drag still starts anywhere, as it always did.
+    const on = balls.findIndex((b) => !b.potted && len(p.x - b.x, p.y - b.y) <= R * 2.2);
+    if (on >= 0) striker = on;
     aiming = true;
     aimX = p.x; aimY = p.y;
-    power = Math.min(1, len(p.x - cue().x, p.y - cue().y) / 220);
+    power = Math.min(1, len(p.x - balls[striker].x, p.y - balls[striker].y) / 220);
   };
   const pMove = (e) => {
     if (!aiming) return;
     const p = toTable(e);
     aimX = p.x; aimY = p.y;
-    power = Math.min(1, len(p.x - cue().x, p.y - cue().y) / 220);
+    power = Math.min(1, len(p.x - balls[striker].x, p.y - balls[striker].y) / 220);
   };
   const pUp = (e) => {
     if (!aiming) return;
     e.preventDefault();
     aiming = false;
-    const c = cue();
+    const c = balls[striker];
     // Pull back to shoot forward: the ball goes away from where you dragged to, which is
     // how a cue works and how every pool game on a phone behaves.
     shoot(Math.atan2(c.y - aimY, c.x - aimX), power);
     power = 0;
   };
 
+  // The press starts on the table; the drag and the release are heard on the WINDOW.
+  // With all three on the canvas, a pull that left it went silent, and a ball against a
+  // cushion had no room to pull at all: the cue could not be drawn past the table edge.
+  // toTable() works from the canvas rectangle, so coordinates outside it are still right.
   canvas.addEventListener('pointerdown', pDown);
-  canvas.addEventListener('pointermove', pMove);
-  canvas.addEventListener('pointerup', pUp);
-  canvas.addEventListener('pointercancel', pUp);
+  window.addEventListener('pointermove', pMove);
+  window.addEventListener('pointerup', pUp);
+  window.addEventListener('pointercancel', pUp);
 
   const onKey = (e, down) => {
     if (e.repeat) return;
@@ -352,9 +374,9 @@ export function start(canvas, { onScore, onEnd, onBall, sound } = {}) {
       window.removeEventListener('keydown', keyDown);
       window.removeEventListener('keyup', keyUp);
       canvas.removeEventListener('pointerdown', pDown);
-      canvas.removeEventListener('pointermove', pMove);
-      canvas.removeEventListener('pointerup', pUp);
-      canvas.removeEventListener('pointercancel', pUp);
+      window.removeEventListener('pointermove', pMove);
+      window.removeEventListener('pointerup', pUp);
+      window.removeEventListener('pointercancel', pUp);
     },
     get score() { return score; },
     /** Exposed so the shell, and a test, can see the table without reading pixels. */
@@ -367,6 +389,9 @@ export function start(canvas, { onScore, onEnd, onBall, sound } = {}) {
         remaining: remaining(),
         cue: { x: Math.round(cue().x), y: Math.round(cue().y) },
         balls: balls.filter((b) => !b.potted).length,
+        pocketed,
+        toGo: toGo(),
+        striker,
         message,
       };
     },
@@ -379,5 +404,5 @@ export const meta = {
   key: 'billiards',
   width: W,
   height: H,
-  controls: 'Drag back from the cue ball and release. Arrow keys to aim, SPACE to strike.',
+  controls: 'Tap a ball to play it, drag back from it and release. Arrow keys to aim, SPACE to strike.',
 };

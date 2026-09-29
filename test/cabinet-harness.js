@@ -116,6 +116,22 @@ function harness({ width = 400, height = 640 } = {}) {
       });
     },
 
+    /**
+     * The same pointer event, delivered to the WINDOW.
+     *
+     * A cabinet that has to hear a drag leave its canvas listens for the move and the
+     * release on the window, the way the jigsaw board always has and billiards does now.
+     * fire() reaches one bag only and nothing bubbles here, so those listeners need their
+     * own door. Coordinates are still the canvas's, and may lie outside it: that is the
+     * point.
+     */
+    pointerWindow(type, x, y, extra = {}) {
+      fire('window', type, {
+        clientX: x, clientY: y, pointerId: 1, button: 0,
+        preventDefault() {}, ...extra,
+      });
+    },
+
     restore() {
       global.window = saved.window;
       global.performance = saved.performance;

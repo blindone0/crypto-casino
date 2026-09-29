@@ -31,10 +31,10 @@ const GAMES = {
   },
   billiards: {
     key: 'billiards',
-    name: 'Billiards',
-    blurb: 'Pot every ball in as few shots as you can.',
-    // Nine balls at a thousand, plus the clearance bonus and whatever shots are left.
-    maxScore: 30000,
+    name: 'Russian Billiards',
+    blurb: 'Free pyramid: play any ball, pot any ball. Eight wins.',
+    // Eight balls at a thousand, plus the bonus and whatever shots are left.
+    maxScore: 20000,
   },
   invaders: {
     key: 'invaders',
