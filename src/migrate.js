@@ -237,6 +237,23 @@ const STEPS = [
       `);
     },
   },
+  {
+    id: 8,
+    name: 'users: banned, and why a frozen account is frozen',
+    /**
+     * The anti-cheat (src/anticheat.js) freezes first and bans on review. A frozen player
+     * can still log in and is shown why, with the blocks that hold the evidence; a banned
+     * one cannot, and `ban_height` is the block the ban is on, which a seize cites.
+     */
+    up(db) {
+      db.exec(`
+        ALTER TABLE users ADD COLUMN banned INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE users ADD COLUMN frozen_why TEXT;
+        ALTER TABLE users ADD COLUMN frozen_blocks TEXT;
+        ALTER TABLE users ADD COLUMN ban_height INTEGER;
+      `);
+    },
+  },
 ];
 
 const latest = (steps = STEPS) => steps.reduce((n, s) => Math.max(n, s.id), 0);

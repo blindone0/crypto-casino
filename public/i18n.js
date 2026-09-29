@@ -462,6 +462,18 @@ const STRINGS = {
     ru: 'Новый кошелёк начинается с нуля. Стартовые токены выдаются раз на аккаунт и уже выданы, второй раз их не будет. Запишите новую фразу.',
   },
   'tok.lostGo': { en: 'I understand, start a new wallet', ru: 'Понимаю, завести новый' },
+  'acct.frozen': {
+    en: 'Your account is under review and nothing can be staked or moved until it is done. Reason: {why}.',
+    ru: 'Ваш аккаунт на проверке: пока она идёт, ставки и переводы недоступны. Причина: {why}.',
+  },
+  'acct.banned': {
+    en: 'This account is banned. Reason: {why}.',
+    ru: 'Этот аккаунт забанен. Причина: {why}.',
+  },
+  'acct.frozenBlocks': {
+    en: 'The evidence is on the chain in blocks {blocks}.',
+    ru: 'Доказательства — в цепочке, блоки {blocks}.',
+  },
   'tok.noHouse': {
     en: 'The token wallet is not ready yet. Try again in a moment.',
     ru: 'Токен-кошелёк ещё не готов. Попробуйте через мгновение.',

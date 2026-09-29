@@ -28,6 +28,7 @@ const bones = require('./games/bones');
 const limbo = require('./games/limbo');
 const mines = require('./games/mines');
 const events = require('./events');
+const anticheat = require('./anticheat');
 const slots = require('./games/slots');
 const preferans = require('./games/preferans');
 const debertz = require('./games/debertz');
@@ -608,6 +609,7 @@ function build(cfg) {
     const user = requireUser(ctx);
     checkCsrf(req, ctx);
     if (!cfg.token.enabled) throw new U.BadRequest('the site token is disabled');
+    if (user.frozen) throw new U.Forbidden('account frozen: nothing moves until the review is done');
     const body = await U.readJsonBody(req);
     const key = tokenchain.keyFor(db, user.id);
     // The signature is what authorises the move, but a session may only submit its own
@@ -906,6 +908,24 @@ function build(cfg) {
     const body = await U.readJsonBody(req);
     return adminApi.setFrozen(db, U.toInt(params.id, { min: 1, name: 'id' }), !!body.frozen, actor);
   });
+
+  // ------------------------------------------------------------ anti-cheat
+  add('GET', '/api/admin/anticheat', async (ctx, req) => {
+    requireAdmin(req, ctx);
+    return { ...anticheat.scan(db), flagged: anticheat.flagged(db) };
+  });
+  for (const action of ['flag', 'unflag', 'ban', 'seize']) {
+    add('POST', `/api/admin/anticheat/${action}`, async (ctx, req) => {
+      const { actor } = requireAdmin(req, ctx);
+      const body = await U.readJsonBody(req);
+      return anticheat[action](db, cfg, {
+        userId: U.toInt(body.userId, { min: 1, name: 'userId' }),
+        why: body.why,
+        blocks: Array.isArray(body.blocks) ? body.blocks : [],
+        actor,
+      });
+    });
+  }
 
   add('POST', '/api/admin/bankroll', async (ctx, req) => {
     const { actor } = requireAdmin(req, ctx);

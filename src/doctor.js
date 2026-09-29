@@ -21,6 +21,7 @@ const ledger = require('./ledger');
 const tokenchain = require('./tokenchain');
 const matches = require('./match');
 const events = require('./events');
+const anticheat = require('./anticheat');
 
 const fmt = (units) => (units / 100000000).toFixed(8);
 
@@ -103,6 +104,30 @@ function eventsFlowing(db, cfg) {
     detail: late
       ? `${p.count} waiting, the oldest for ${Math.round(p.waitedMs / 1000)}s: is the server running?`
       : `${total - p.count} logged, ${p.count} waiting for the next block`,
+  };
+}
+
+/**
+ * What the record says about the players.
+ *
+ * The anti-cheat's scan, run here so the findings are seen: a jigsaw solved faster than a
+ * hand can move, a solve the log never showed being assembled, clicks with no human gap,
+ * a run of mines luck a fair layout would not allow. Reported and never failed: a finding
+ * is a reason for a person to look (the admin panel's review queue), not a verdict.
+ */
+function cheatsReported(db, cfg) {
+  if (!cfg.token.enabled) return { name: 'anti-cheat', ok: true, detail: 'token is off' };
+  const out = anticheat.scan(db);
+  const flagged = anticheat.flagged(db);
+  const held = flagged.filter((u) => !u.banned).length;
+  const banned = flagged.length - held;
+  const state = `${held} under review, ${banned} banned`;
+  return {
+    name: 'anti-cheat',
+    ok: true,
+    detail: out.findings.length
+      ? `${out.findings.length} finding(s) in ${out.rounds} rounds await review; ${state}`
+      : `nothing found in ${out.rounds} rounds; ${state}`,
   };
 }
 
@@ -260,6 +285,7 @@ function checkAll(db, cfg, at = Math.floor(Date.now() / 1000)) {
     chainVerifies(db, cfg),
     fullVerifyRecent(db, cfg, at),
     eventsFlowing(db, cfg),
+    cheatsReported(db, cfg),
     supplyHolds(db, cfg),
     escrowCovered(db, cfg),
     nothingStranded(db, cfg, at),
@@ -277,6 +303,7 @@ module.exports = {
   chainVerifies,
   fullVerifyRecent,
   eventsFlowing,
+  cheatsReported,
   supplyHolds,
   escrowCovered,
   nothingStranded,

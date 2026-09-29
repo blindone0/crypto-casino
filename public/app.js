@@ -464,6 +464,7 @@ function authModal(mode = 'login') {
         const out = await api(path, { method: 'POST', body: payload });
         state.user = out.user;
         state.csrf = out.csrf;
+        renderBanners();
         if (mode === 'register') {
           // A new account has no wallet, and tugriks live on a key the player holds. So
           // the wallet is made here, before anything else: register, and you are funded
@@ -4227,6 +4228,7 @@ async function refreshMe() {
     const me = await api('/api/me');
     state.user = me.user;
     state.csrf = me.csrf;
+    renderBanners();
     setBalance(me.user.balance);
   } catch { /* session may have expired */ }
 }
@@ -4241,7 +4243,18 @@ async function refreshMe() {
  */
 function renderBanners() {
   const box = $('#banners');
-  if (box) setKids(box);
+  if (!box) return;
+  const u = state.user;
+  if (u && (u.frozen || u.banned)) {
+    // Under review: the reason and the blocks that hold the evidence, so a frozen player
+    // is told exactly what was seen rather than met with a closed door.
+    const blocks = (u.frozenBlocks || []).join(', ');
+    setKids(box, el('div', { class: 'banner' },
+      t(u.banned ? 'acct.banned' : 'acct.frozen', { why: u.frozenWhy || '—' }),
+      blocks ? ` ${t('acct.frozenBlocks', { blocks })}` : ''));
+    return;
+  }
+  setKids(box);
 }
 
 async function boot() {
@@ -4335,6 +4348,7 @@ async function boot() {
     const me = await api('/api/me');
     state.user = me.user;
     state.csrf = me.csrf;
+    renderBanners();
     await afterAuth();
   } catch {
     renderGame();

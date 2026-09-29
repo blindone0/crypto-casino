@@ -281,6 +281,58 @@ function verifyRoundSignature(pubkey, payload, sig) {
   }
 }
 
+/**
+ * THE ANTI-CHEAT'S TRANSACTIONS, AND THE ONE EXCEPTION TO THE CENTRAL CLAIM
+ *
+ * `flag`, `unflag` and `ban` are the operator's decisions about an account, on the record
+ * with the evidence: they move nothing. `seize` moves what a banned account holds to the
+ * house, and it is the one transaction in this file that debits a key without that key's
+ * signature. It is held to exactly this and nothing more, in applyTx and in both
+ * verifiers: only to the house key, only citing a `ban` of the same key that is already
+ * on the chain. The central claim — the operator cannot sign a transfer out of your
+ * account — is untouched: a seize is not a transfer, and the test that makes that claim
+ * is unmodified. Supply is unchanged by construction: a seize is a move, not a mint.
+ */
+const ADMIN_TYPES = new Set(['flag', 'unflag', 'ban', 'seize']);
+const KEY_RE = /^[0-9a-f]{64}$/;
+
+function checkAdminTx(tx) {
+  if (tx.type === 'seize') {
+    for (const k of Object.keys(tx)) {
+      if (!['type', 'from', 'to', 'amount', 'ban'].includes(k)) return `a seize carries an unknown field (${k})`;
+    }
+    if (!KEY_RE.test(String(tx.from))) return 'a seize names no account';
+    if (!KEY_RE.test(String(tx.to))) return 'a seize names no destination';
+    if (!Number.isSafeInteger(tx.amount) || tx.amount <= 0) return 'a seize has no amount';
+    if (!Number.isSafeInteger(tx.ban) || tx.ban < 0) return 'a seize cites no ban';
+    return null;
+  }
+  for (const k of Object.keys(tx)) {
+    if (!['type', 'who', 'why', 'blocks'].includes(k)) return `a ${tx.type} carries an unknown field (${k})`;
+  }
+  if (!KEY_RE.test(String(tx.who))) return `a ${tx.type} names no account`;
+  if (tx.why !== undefined && (typeof tx.why !== 'string' || tx.why.length > 200)) return `a ${tx.type} has a bad reason`;
+  if (tx.blocks !== undefined && !(Array.isArray(tx.blocks) && tx.blocks.every((h) => Number.isSafeInteger(h) && h >= 0))) {
+    return `a ${tx.type} cites blocks badly`;
+  }
+  if (tx.type === 'ban' && !tx.why) return 'a ban says why';
+  return null;
+}
+
+/** The house key, as the anti-cheat and the loans need it: the only place a seize may go. */
+function houseKeyRaw(db) {
+  const stored = db.kvGet('token.houseKey');
+  return stored ? stored.publicRaw : null;
+}
+
+/** Whether block `height`, before block `before`, carries a ban of `who`. */
+function banIn(db, height, who, before) {
+  if (!Number.isSafeInteger(height) || height >= before) return false;
+  const row = db.get('SELECT txs FROM token_blocks WHERE height=?', height);
+  if (!row) return false;
+  return JSON.parse(row.txs).some((tx) => tx.type === 'ban' && tx.who === who);
+}
+
 function verifyTransferSignature(tx) {
   try {
     return crypto.verify(
@@ -326,6 +378,22 @@ function applyTx(db, tx) {
     // that would not verify cannot be written in the first place.
     const why = checkEvent(tx);
     if (why) throw new U.BadRequest(why);
+    return;
+  }
+  if (ADMIN_TYPES.has(tx.type)) {
+    const why = checkAdminTx(tx);
+    if (why) throw new U.BadRequest(why);
+    if (tx.type !== 'seize') return;
+    // The narrow exception: only to the house, only after a ban already on the chain.
+    if (tx.to !== houseKeyRaw(db)) throw new U.BadRequest('a seize may only go to the house');
+    const tip = head(db);
+    if (!banIn(db, tx.ban, tx.from, tip ? tip.height + 1 : 0)) {
+      throw new U.BadRequest('a seize follows a ban on the chain, never precedes one');
+    }
+    const from = balanceOf(db, tx.from);
+    if (from < tx.amount) throw new U.BadRequest('insufficient token balance');
+    credit(db, tx.from, -tx.amount);
+    credit(db, tx.to, tx.amount);
     return;
   }
   if (tx.type === 'mint') {
@@ -411,8 +479,10 @@ function verifyChain(db, { checkpoint = false } = {}) {
   let seenNonces = new Set();
   let prevHash = GENESIS_PREV;
   let events = 0;
+  let admin = 0;
   let start = 0;
   let from = null;
+  const house = houseKeyRaw(db);
 
   if (checkpoint) {
     const cp = latestCheckpoint(db);
@@ -453,6 +523,15 @@ function verifyChain(db, { checkpoint = false } = {}) {
         events += 1;
         continue;
       }
+      if (ADMIN_TYPES.has(tx.type)) {
+        const why = checkAdminTx(tx);
+        if (why) return fail(`block ${i}: ${why}`);
+        admin += 1;
+        if (tx.type !== 'seize') continue;
+        // The narrow exception, held to by the verifier as well as by applyTx.
+        if (tx.to !== house) return fail(`block ${i} seizes to a key that is not the house`);
+        if (!banIn(db, tx.ban, tx.from, i)) return fail(`block ${i} seizes without a ban on the chain before it`);
+      }
       // The supply is fixed by refusing to accept a chain that creates tokens anywhere but
       // in its first block. A verifier that skipped this check would happily confirm a
       // ledger where the operator minted itself a fortune in block nine hundred.
@@ -474,6 +553,7 @@ function verifyChain(db, { checkpoint = false } = {}) {
         if (tx.type === 'mint') move(tx.to, tx.amount);
         else if (tx.type === 'transfer') { move(tx.from, -tx.amount); move(tx.to, tx.amount); }
         else if (tx.type === 'burn') move(tx.from, -tx.amount);
+        else if (tx.type === 'seize') { move(tx.from, -tx.amount); move(tx.to, tx.amount); }
         else return fail(`block ${i} contains an unknown transaction type`);
       } catch (e) {
         return fail(e.message);
@@ -503,6 +583,7 @@ function verifyChain(db, { checkpoint = false } = {}) {
     head: prevHash,
     minted,
     events,
+    admin,
     balances,
     nonces: seenNonces,
   };
@@ -656,6 +737,7 @@ function chainSlice(db, from = 0, limit = 500) {
   return {
     chain: CHAIN_ID,
     serverKey: serverKey(db).publicRaw,
+    houseKey: houseKeyRaw(db),
     genesisPrev: GENESIS_PREV,
     height: tip ? tip.height : -1,
     head: tip ? tip.hash : null,
@@ -679,5 +761,6 @@ module.exports = {
   appendBlock, head, balanceOf, verifyChain, verifyTransferSignature, checkEvent,
   latestCheckpoint, writeCheckpoint, lastFullVerify,
   ROUND_SEED, roundPayload, foldEvent, verifyRoundSignature,
+  ADMIN_TYPES, checkAdminTx, houseKeyRaw, banIn,
   registerKey, submitTransfer, chainSlice, keyFor, nextNonce,
 };

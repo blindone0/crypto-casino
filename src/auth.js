@@ -85,7 +85,9 @@ function login(db, cfg, { username, password, ip }) {
   const stored = user ? user.password_hash : U.hashPassword(crypto.randomBytes(16).toString('hex'));
   const ok = U.verifyPassword(String(password ?? ''), stored);
   if (!user || !ok) throw new U.HttpError(401, 'wrong username or password');
-  if (user.frozen) throw new U.Forbidden('account frozen');
+  // A frozen account may log in: it can bet nothing and move nothing, and it is shown why.
+  // A banned one may not.
+  if (user.banned) throw new U.Forbidden('account banned');
 
   const token = crypto.randomBytes(32).toString('base64url');
   const csrf = crypto.randomBytes(24).toString('base64url');
@@ -204,6 +206,12 @@ function publicUser(db, user) {
     selfExcludedUntil: user.self_excluded_until,
     maxBetCap: user.max_bet_cap,
     createdAt: user.created_at,
+    // Under review, or banned: the reason and the blocks that hold the evidence, so the
+    // player is told what was seen rather than met with a closed door.
+    frozen: !!user.frozen,
+    banned: !!user.banned,
+    frozenWhy: user.frozen_why || null,
+    frozenBlocks: user.frozen_blocks ? JSON.parse(user.frozen_blocks) : [],
   };
 }
 

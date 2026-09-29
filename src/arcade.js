@@ -89,6 +89,7 @@ function verifySpendSignature(spend) {
  * account for plays it never made, which would make the token worth less than nothing.
  */
 function insertToken(db, cfg, user, spend) {
+  if (user.frozen) throw new U.Forbidden('account frozen');
   const game = GAMES[String(spend.game || '')];
   if (!game) throw new U.BadRequest('no such cabinet');
   if (!cfg.token.enabled) throw new U.BadRequest('the site token is disabled');

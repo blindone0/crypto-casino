@@ -132,6 +132,21 @@ const L = {
   'a.sweepFees': { en: 'Sweep fees into bankroll', ru: 'Перевести сборы в банкролл' },
   'a.walletInfo': { en: 'Wallet node', ru: 'Узел кошелька' },
   'a.gateBad': { en: 'Token rejected', ru: 'Токен отклонён' },
+  'a.anticheat': { en: 'Anti-cheat', ru: 'Античит' },
+  'a.findings': { en: 'Findings awaiting review', ru: 'Находки на проверку' },
+  'a.flagged': { en: 'Under review and banned', ru: 'На проверке и забаненные' },
+  'a.kind': { en: 'What', ru: 'Что' },
+  'a.why': { en: 'Why', ru: 'Почему' },
+  'a.blocks': { en: 'Blocks', ru: 'Блоки' },
+  'a.flag': { en: 'Flag: freeze', ru: 'Флаг: заморозить' },
+  'a.unflag': { en: 'Dismiss: thaw', ru: 'Снять: разморозить' },
+  'a.ban': { en: 'Ban', ru: 'Забанить' },
+  'a.seize': { en: 'Seize to the house', ru: 'Изъять в казино' },
+  'a.banned': { en: 'banned', ru: 'забанен' },
+  'a.underReview': { en: 'under review', ru: 'на проверке' },
+  'a.nothingFound': { en: 'Nothing found in the record.', ru: 'В записи ничего не найдено.' },
+  'a.scanned': { en: 'rounds read', ru: 'раундов прочитано' },
+  'a.chainHeight': { en: 'on the chain at block', ru: 'в цепочке, блок' },
 };
 const tr = (k) => (L[k] ? (L[k][getLocale()] ?? L[k].en) : k);
 
@@ -615,12 +630,53 @@ async function viewToken(root) {
   );
 }
 
+/**
+ * The review queue. Every button here writes a transaction to the chain as well as a row
+ * to the database: a flag with its evidence, an unflag, a ban, a seize that cites the
+ * ban. The scan is the doctor's too; this is where a person decides.
+ */
+async function viewAnticheat(root) {
+  const data = await api('/api/admin/anticheat');
+  const act = async (action, body) => {
+    try {
+      const r = await api(`/api/admin/anticheat/${action}`, { method: 'POST', body });
+      toast(r.height !== null && r.height !== undefined ? `${tr('a.chainHeight')} ${r.height}` : 'ok');
+      viewAnticheat(root);
+    } catch (e) { toast(e.message, 'bad'); }
+  };
+  const findings = data.findings.length
+    ? table([tr('a.kind'), tr('a.userId'), tr('a.why'), tr('a.blocks'), tr('a.action')],
+      data.findings.map((f) => [
+        f.kind, `${f.username || '?'} (#${f.userId ?? '-'}) ${f.g}#${f.r}`, f.detail, (f.blocks || []).join(', '),
+        f.userId ? el('button', {
+          class: 'tiny danger',
+          onclick: () => act('flag', { userId: f.userId, why: `${f.kind}: ${f.detail}`, blocks: f.blocks }),
+        }, tr('a.flag')) : '',
+      ]))
+    : el('p', { class: 'hint' }, tr('a.nothingFound'));
+  const flagged = table([tr('a.userId'), tr('a.state'), tr('a.why'), tr('a.blocks'), tr('a.balance'), tr('a.action')],
+    data.flagged.map((u) => [
+      `${u.username} (#${u.id})`, u.banned ? tr('a.banned') : tr('a.underReview'), u.why || '', (u.blocks || []).join(', '),
+      fmt(u.balance),
+      el('span', {},
+        !u.banned && el('button', { class: 'tiny', onclick: () => act('unflag', { userId: u.id }) }, tr('a.unflag')),
+        !u.banned && el('button', { class: 'tiny danger', onclick: () => act('ban', { userId: u.id, why: u.why }) }, tr('a.ban')),
+        u.banned && u.balance > 0 && el('button', { class: 'tiny danger', onclick: () => act('seize', { userId: u.id }) }, tr('a.seize'))),
+    ]));
+  root.replaceChildren(
+    el('div', { class: 'panel' },
+      el('h2', {}, `${tr('a.findings')} · ${data.rounds} ${tr('a.scanned')}`), findings),
+    el('div', { class: 'panel' }, el('h2', {}, tr('a.flagged')), flagged),
+  );
+}
+
 const TABS = [
   { key: 'a.overview', view: viewOverview },
   { key: 'a.risk', view: viewRisk },
   { key: 'a.treasury', view: viewTreasury },
   { key: 'a.withdrawals', view: viewWithdrawals },
   { key: 'a.players', view: viewPlayers },
+  { key: 'a.anticheat', view: viewAnticheat },
   { key: 'a.affiliates', view: viewAffiliates },
   { key: 'a.token', view: viewToken },
   { key: 'a.audit', view: viewAudit },

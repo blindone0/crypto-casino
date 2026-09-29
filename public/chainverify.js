@@ -11,9 +11,12 @@
 //   6. that replaying every transaction from zero produces the balances claimed, and
 //   7. that every game event in a block is only an event: it has the one shape events
 //      have, and no `to`, `from` or `amount` that a balance replay could be talked into
-//      honouring.
+//      honouring, and
+//   8. that the anti-cheat's transactions are only what they are: a flag, an unflag and a
+//      ban move nothing, and a seize — the one debit without the account's signature —
+//      goes only to the house and only cites a ban already on the chain.
 //
-// If all seven hold, the operator has not rewritten history and has not moved anyone's
+// If all eight hold, the operator has not rewritten history and has not moved anyone's
 // tokens. If any fails, this says exactly which block and why.
 import { canonical, transferPayload, verifySignature, verifyOverString, sha256Hex } from './tokenkeys.js';
 
@@ -55,6 +58,33 @@ async function hashOf(block, chainId) {
   }));
 }
 
+/** The anti-cheat's transactions: the same rules as src/tokenchain.js checkAdminTx. */
+const ADMIN_TYPES = new Set(['flag', 'unflag', 'ban', 'seize']);
+const KEY_RE = /^[0-9a-f]{64}$/;
+
+export function checkAdminTx(tx) {
+  if (tx.type === 'seize') {
+    for (const k of Object.keys(tx)) {
+      if (!['type', 'from', 'to', 'amount', 'ban'].includes(k)) return `a seize carries an unknown field (${k})`;
+    }
+    if (!KEY_RE.test(String(tx.from))) return 'a seize names no account';
+    if (!KEY_RE.test(String(tx.to))) return 'a seize names no destination';
+    if (!Number.isSafeInteger(tx.amount) || tx.amount <= 0) return 'a seize has no amount';
+    if (!Number.isSafeInteger(tx.ban) || tx.ban < 0) return 'a seize cites no ban';
+    return null;
+  }
+  for (const k of Object.keys(tx)) {
+    if (!['type', 'who', 'why', 'blocks'].includes(k)) return `a ${tx.type} carries an unknown field (${k})`;
+  }
+  if (!KEY_RE.test(String(tx.who))) return `a ${tx.type} names no account`;
+  if (tx.why !== undefined && (typeof tx.why !== 'string' || tx.why.length > 200)) return `a ${tx.type} has a bad reason`;
+  if (tx.blocks !== undefined && !(Array.isArray(tx.blocks) && tx.blocks.every((h) => Number.isSafeInteger(h) && h >= 0))) {
+    return `a ${tx.type} cites blocks badly`;
+  }
+  if (tx.type === 'ban' && !tx.why) return 'a ban says why';
+  return null;
+}
+
 /**
  * Verify the whole chain.
  * `onProgress(done, total)` is called as it goes, because a long chain takes a moment and
@@ -70,10 +100,13 @@ export async function verifyChain({ fetchSlice, onProgress } = {}) {
   const first = await load(0);
   const chainId = first.chain;
   const serverKey = first.serverKey;
+  const houseKey = first.houseKey || null;
   const total = first.height + 1;
 
   const balances = new Map();
   const nonces = new Set();
+  const bans = new Map();
+  let admin = 0;
   let prevHash = GENESIS_PREV;
   let checked = 0;
   let transfers = 0;
@@ -109,6 +142,17 @@ export async function verifyChain({ fetchSlice, onProgress } = {}) {
           events += 1;
           continue;
         }
+        if (ADMIN_TYPES.has(tx.type)) {
+          const why = checkAdminTx(tx);
+          if (why) return fail(why, block.height);
+          admin += 1;
+          if (tx.type === 'ban') bans.set(tx.who, block.height);
+          if (tx.type !== 'seize') continue;
+          if (tx.to !== houseKey) return fail('a seize in this block goes somewhere other than the house', block.height);
+          if (bans.get(tx.from) !== tx.ban) {
+            return fail('a seize in this block cites a ban that is not on the chain before it', block.height);
+          }
+        }
         if (tx.type === 'transfer') {
           const good = await verifySignature(tx.from, transferPayload(tx), tx.sig);
           if (!good) {
@@ -133,6 +177,7 @@ export async function verifyChain({ fetchSlice, onProgress } = {}) {
           if (tx.type === 'mint') move(tx.to, tx.amount);
           else if (tx.type === 'transfer') { move(tx.from, -tx.amount); move(tx.to, tx.amount); }
           else if (tx.type === 'burn') move(tx.from, -tx.amount);
+          else if (tx.type === 'seize') { move(tx.from, -tx.amount); move(tx.to, tx.amount); }
           else return fail(`unknown transaction type "${tx.type}"`, block.height);
         } catch (e) {
           return fail(e.message, block.height);
@@ -161,6 +206,7 @@ export async function verifyChain({ fetchSlice, onProgress } = {}) {
     transfers,
     mints,
     events,
+    admin,
     supply,
     balances,
   };

@@ -259,6 +259,7 @@ function refund(db, match, reason) {
 function requireToken(db, cfg, user) {
   if (!cfg.token.enabled) throw new U.BadRequest('the site token is disabled');
   if (!cfg.match.enabled) throw new U.BadRequest('matches are closed');
+  if (user.frozen) throw new U.Forbidden('account frozen');
   const key = tokenchain.keyFor(db, user.id);
   if (!key) throw new U.BadRequest('create a token wallet first');
   return key;
