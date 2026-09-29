@@ -1,6 +1,6 @@
 import { LANGS, t, setLocale, getLocale, applyAll } from './i18n.js';
 import {
-  ensureSymbolDefs, symbolSvg, symbolSvgStandalone, symbolImage, THEME_KEYS,
+  ensureSymbolDefs, symbolSvg, symbolImage, THEME_KEYS,
 } from './symbols.js';
 import { pictureSvg } from './pictures.js';
 import { createCut } from './jigsaw.js';
@@ -11,6 +11,8 @@ import { verifyChain, compareHeads } from './chainverify.js';
 import { createSparks } from './slotfx.js';
 import { createReels as createGlReels } from './slot3d.js';
 import { createCabinet } from './cabinet3d.js';
+import { slotPalette } from './slotthemes.js';
+import { cellPainter } from './slotstrip.js';
 import { createDice } from './dice3d.js';
 import { createTable } from './cards3d.js';
 import { startParallax } from './parallax.js';
@@ -1733,6 +1735,9 @@ async function renderSlots() {
   setTimeout(() => {
     const lever = $('#slotLever');
     if (lever) lever.addEventListener('click', () => { if (!spin.disabled) spin.click(); });
+    // The deck under the window carries the spin button when the GL cabinet is drawn.
+    const deck = $('.slot-base');
+    if (deck) deck.addEventListener('click', () => { if (!spin.disabled) spin.click(); });
   }, 0);
 
   setKids(panel, 
@@ -1801,8 +1806,20 @@ async function renderSlots() {
     // painted while the class is on; with no context, nothing here changes at all.
     if (glCabinet) { glCabinet.dispose(); glCabinet = null; }
     const cab = $('.slot-cabinet');
-    glCabinet = glReels && cab ? createCabinet(cab, { window: win, reels: $('#reels') }) : null;
+    const palette = slotPalette(slotTheme);
+    glCabinet = glReels && cab ? createCabinet(cab, { window: win, reels: $('#reels'), theme: palette }) : null;
     cab?.classList.toggle('cabgl', !!glCabinet);
+    if (cab) {
+      // The marquee text is CSS on top of the GL panel; it takes the theme's colours
+      // through custom properties, which the CSP allows where a style attribute is not.
+      const [a, b, c] = palette.marquee.text;
+      cab.style.setProperty('--mq-a', a);
+      cab.style.setProperty('--mq-b', b);
+      cab.style.setProperty('--mq-c', c);
+      cab.style.setProperty('--mq-small', palette.marquee.small);
+      const glow = palette.marquee.glow.map((k) => Math.round(k * 255)).join(',');
+      cab.style.setProperty('--mq-glow', `rgba(${glow}, .6)`);
+    }
     if (glCabinet) requestAnimationFrame(() => { if (glCabinet) glCabinet.resize(); });
     if (glReels) {
       glShow(null);
@@ -2083,59 +2100,18 @@ let glCabinet = null;
 const GL_PER_DRUM = 12;
 
 /**
- * Paint one symbol into the strip texture.
- *
- * The panel behind it matters. The drum is dark and the artwork is mostly line work, so
- * without a lit panel the symbols come out as outlines floating on a black barrel. The
- * panel is flat rather than graded for the same reason the DOM faces are: the cylinder
- * does the shading, and a gradient per cell fights it.
+ * Paint one symbol into the strip texture: the printed cell from slotstrip.js, in the
+ * current theme's palette. The painter is built once per theme, because the palette and
+ * the pack's atlas are per theme.
  */
+let glPainter = null;
+let glPainterTheme = null;
 function glDrawSymbol(ctx, sym, y, cell, width) {
-  return new Promise((resolve) => {
-    // The band the symbols are printed on.
-    //
-    // A flat dark fill was most of why the wheels looked cheap: the renders carry their
-    // own black ground, so between symbols there was nothing but black and the drum read
-    // as an empty tube. A real reel band is a material — this one is brushed brass, lit
-    // down its length, with a darker lip at each seam.
-    const band = ctx.createLinearGradient(0, y, width, y + cell);
-    band.addColorStop(0, '#241b09');
-    band.addColorStop(0.3, '#46371a');
-    band.addColorStop(0.5, '#5d4a22');
-    band.addColorStop(0.7, '#3c2f15');
-    band.addColorStop(1, '#1b1406');
-    ctx.fillStyle = band;
-    ctx.fillRect(0, y, width, cell);
-
-    const img = new Image();
-    const rendered = symbolImage(sym, slotTheme);
-    const pad = rendered ? 0 : cell * 0.12;
-    img.onload = () => {
-      if (rendered) {
-        // 'screen', not 'lighter'.
-        //
-        // Both drop the pure black the renders sit on, so the object lifts off the brass
-        // either way. The difference is what happens at the bright end: 'lighter' simply
-        // adds, so a gold highlight plus a lit brass band goes past 1.0 and clips to white
-        // **inside the texture** — before a single line of the shader has run. Every
-        // symbol was losing its detail to that, and no amount of lighting could bring it
-        // back, because the pixels were already gone. 'screen' approaches 1.0 without ever
-        // reaching it, so the highlight survives as a highlight.
-        ctx.save();
-        ctx.globalCompositeOperation = 'screen';
-        ctx.drawImage(img, 0, y, width, cell);
-        ctx.restore();
-      } else {
-        ctx.drawImage(img, pad, y + pad, width - pad * 2, cell - pad * 2);
-      }
-      resolve();
-    };
-    // A symbol that will not load should not stall the whole strip.
-    img.onerror = () => resolve();
-    img.src = rendered
-      // Standalone: an <img> is its own document and cannot see the page's shared defs.
-      || `data:image/svg+xml;charset=utf-8,${encodeURIComponent(symbolSvgStandalone(sym, slotTheme))}`;
-  });
+  if (!glPainter || glPainterTheme !== slotTheme) {
+    glPainter = cellPainter(slotTheme, slotPalette(slotTheme));
+    glPainterTheme = slotTheme;
+  }
+  return glPainter(ctx, sym, y, cell, width);
 }
 
 /** The twelve symbols on one drum, taken from that reel's real strip. */
@@ -2162,6 +2138,7 @@ async function buildGlReels(window_) {
   if (glReels) { glReels.dispose(); glReels = null; }
   const made = createGlReels(window_, { reels: 5, rows: 3, perDrum: GL_PER_DRUM });
   if (!made) return null;
+  made.setAccent(slotPalette(slotTheme).accent);
   for (let reel = 0; reel < 5; reel += 1) {
     // eslint-disable-next-line no-await-in-loop
     await made.setStrip(reel, glStripFor(reel), glDrawSymbol);

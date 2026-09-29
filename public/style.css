@@ -689,7 +689,7 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
   /* Adds light and never takes it: a symbol cannot be hidden by the glass. */
   mix-blend-mode: plus-lighter;
 }
-.slot-cabinet.cabgl {
+.slot-stage .slot-cabinet.cabgl {
   background: none;
   border-color: transparent;
   box-shadow: 0 30px 70px rgba(0,0,0,.7);
@@ -704,6 +704,31 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
 .slot-cabinet.cabgl .slot-base,
 .slot-cabinet.cabgl .slot-tray { background: none; box-shadow: none; border-color: transparent; }
 .slot-cabinet.cabgl .reel > .reel-glass { visibility: hidden; }
+/* Room either side of the window for the LED strips and the thicker bezel, a deck under
+   it deep enough for the button, and the marquee title lit in the theme's colours - the
+   palette in slotthemes.js sets the custom properties on the cabinet. */
+.slot-cabinet.cabgl { max-width: 720px; }
+.slot-cabinet.cabgl .slot-body { padding: 14px 60px 12px; }
+.slot-cabinet.cabgl .slot-body { position: relative; }
+/* Out of the flow, hung off the case's right edge, so the window keeps the whole width
+   between the paddings and the LEDs have their room. */
+.slot-cabinet.cabgl .slot-lever { position: absolute; right: -22px; top: 22%; margin: 0; }
+.slot-cabinet.cabgl .slot-base { min-height: 64px; margin: 0 16px; cursor: pointer; }
+.slot-cabinet.cabgl .slot-marquee { padding: 16px 16px 14px; }
+.slot-cabinet.cabgl .mq-main {
+  background: linear-gradient(180deg, var(--mq-a, #fff3cd) 0%, var(--mq-b, #e2bd63) 48%, var(--mq-c, #9a7526) 100%);
+  -webkit-background-clip: text; background-clip: text;
+  filter: drop-shadow(0 0 10px var(--mq-glow, rgba(255, 200, 120, .6)));
+}
+.slot-cabinet.cabgl .mq-top,
+.slot-cabinet.cabgl .mq-sub { color: var(--mq-small, #c8a24a); }
+/* A phone has no width to spare for LEDs: the window takes it, and the strips are
+   simply not built when there is no room for them. */
+@media (max-width: 560px) {
+  .slot-cabinet.cabgl .slot-body { padding: 10px 26px 10px; }
+  .slot-cabinet.cabgl .slot-lever { right: -14px; }
+  .slot-cabinet.cabgl .slot-base { min-height: 52px; }
+}
 
 .slot-window {
   flex: 1 1 auto; min-width: 0;

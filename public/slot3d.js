@@ -58,6 +58,7 @@ uniform float uWinV;     // v at the centre of a winning symbol, or -1 for none
 uniform float uRowHalf;  // half a symbol, in v
 uniform float uBlur;     // vertical smear while the drum is turning, in v
 uniform vec2 uTexel;     // one texel of the strip, in uv - for the emboss below
+uniform vec3 uAccent;    // the theme's colour, for the glow on a winning symbol
 
 varying vec3 vNormal;
 varying vec2 vUV;
@@ -156,7 +157,7 @@ void main() {
   if (uWinV >= 0.0) {
     float dv = abs(fract(vUV.y - uWinV + 0.5) - 0.5);
     float band = smoothstep(uRowHalf, uRowHalf * 0.35, dv);
-    lit += tex.rgb * band * 1.25 + vec3(0.30, 0.24, 0.10) * band;
+    lit += tex.rgb * band * 1.25 + uAccent * band * 0.42;
   }
   gl_FragColor = vec4(tonemap(lit * uDim), tex.a);
 }`;
@@ -241,7 +242,10 @@ function modelMatrix(x, angle, halfWidth) {
  * The strip is the reel's real symbol order, so what comes past the window as it turns is
  * what is genuinely next on that reel rather than a decorative loop.
  */
-export async function stripTexture(gl, symbols, drawSymbol, width = 256, height = 2048) {
+export const STRIP_W = 512;
+export const STRIP_H = 4096;
+
+export async function stripTexture(gl, symbols, drawSymbol, width = STRIP_W, height = STRIP_H) {
   // Both sides must be a power of two.
   //
   // The texture has to wrap on T to go round the drum, and WebGL 1 will not REPEAT a
@@ -249,9 +253,11 @@ export async function stripTexture(gl, symbols, drawSymbol, width = 256, height 
   // a barrel drawn with a 256x3072 strip looks like: correct geometry, correct lighting,
   // and no picture on it at all.
   //
-  // So the strip is a fixed 256x2048 and the symbols divide it, rather than the symbol
+  // So the strip is a fixed 512x4096 and the symbols divide it, rather than the symbol
   // size deciding the height. v still runs 0..1 over the whole strip, so each symbol
-  // occupies 1/N of a turn however many pixels that works out to be.
+  // occupies 1/N of a turn however many pixels that works out to be. Twelve cells of
+  // 341 px: a drum is drawn about 120 CSS px wide, so even at a device pixel ratio of
+  // two the strip is never upscaled, which the 256-wide strip before it always was.
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -263,18 +269,16 @@ export async function stripTexture(gl, symbols, drawSymbol, width = 256, height 
   for (let i = 0; i < symbols.length; i += 1) {
     // eslint-disable-next-line no-await-in-loop
     await drawSymbol(ctx, symbols[i], i * cell, cell, width);
-    ctx.strokeStyle = 'rgba(0,0,0,.45)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(0, i * cell + 0.5);
-    ctx.lineTo(width, i * cell + 0.5);
-    ctx.stroke();
   }
 
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  // Mipmapped: the rows above and below the payline fall away from the camera and are
+  // minified, and without mipmaps they shimmered - on exactly the rows a player scans
+  // for a near miss. Power-of-two on both sides, so the chain is allowed.
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   // Wrap round the circumference, clamp across the width.
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -326,7 +330,9 @@ export function createReels(host, opts = {}) {
     rowHalf: gl.getUniformLocation(prog, 'uRowHalf'),
     blur: gl.getUniformLocation(prog, 'uBlur'),
     texel: gl.getUniformLocation(prog, 'uTexel'),
+    accent: gl.getUniformLocation(prog, 'uAccent'),
   };
+  let accent = [1.0, 0.78, 0.32];
 
   // A drum wide enough that five sit side by side across the window with a small gap, and
   // a radius that puts `rows` symbols across the visible face.
@@ -465,10 +471,13 @@ export function createReels(host, opts = {}) {
       // motion and start reading as fog.
       const perFrame = Math.abs(d.vel) * 16 / (Math.PI * 2);
       gl.uniform1f(loc.blur, Math.min(perFrame * 0.6, 0.35 / perDrum));
-      // One texel of the strip, which stripTexture fixes at 256x2048. Set per draw
-      // rather than once because the uniform belongs to the program, and leaving it
-      // at its default (0,0) makes the emboss sample itself three times and vanish.
-      gl.uniform2f(loc.texel, 1 / 256, 1 / 2048);
+      // Two texels of the strip, which stripTexture fixes at 512x4096: the emboss was
+      // tuned on a 256-wide strip, and one texel of the finer one is half the distance,
+      // so the taps keep their old spacing on the drum. Set per draw rather than once
+      // because the uniform belongs to the program, and leaving it at its default
+      // (0,0) makes the emboss sample itself three times and vanish.
+      gl.uniform2f(loc.texel, 2 / STRIP_W, 2 / STRIP_H);
+      gl.uniform3fv(loc.accent, accent);
       gl.uniformMatrix4fv(loc.model, false, modelMatrix(d.x, d.angle, halfW));
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, mesh.count);
     }
@@ -545,6 +554,12 @@ export function createReels(host, opts = {}) {
       };
     },
     resize() { resize(); draw(); },
+
+    /** The theme's colour, which a winning symbol glows with. */
+    setAccent(rgb) {
+      if (Array.isArray(rgb) && rgb.length === 3) accent = rgb.slice();
+      draw();
+    },
 
     /** Hand a drum its strip. `symbols` is the reel's own order. */
     async setStrip(index, symbols, drawSymbol) {
