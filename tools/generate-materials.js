@@ -366,6 +366,232 @@ print(f"{atlas.size[0]}x{atlas.size[1]}")
 }
 
 /**
+ * The Мины gem and bomb, ray traced rather than generated.
+ *
+ * Same reasoning as the dice pips and the card faces: a model cannot be relied on to
+ * produce two icons that read instantly at forty pixels and sit on the same light. These
+ * are two shapes with known geometry, so the arithmetic does them.
+ *
+ * The gem is a brilliant cut seen face on — a flat octagonal table ringed by facets whose
+ * normals tilt outward. Each facet is a plane, so its normal is constant across it, and
+ * alternating facets are darkened: that alternation is what makes a cut read as cut
+ * rather than as a blurry ball.
+ *
+ * The bomb is an actual ray traced sphere: solve for the front surface, take the normal
+ * from the hit point. The fuse is stamped as discs of shrinking radius so it tapers
+ * without a polygon path, and the spark at its tip is two gaussians, a hot core inside a
+ * wide halo, on its own layer.
+ *
+ * Both are lit by KEY_DIR from gl.js, normalised [-0.45, 1.0, 0.55], so a gem on the
+ * board and a die on the felt are lit by the same lamp.
+ *
+ * Output is one atlas, two cells wide: gem at x=0, bomb at x=size.
+ *
+ * NOTE: no backticks anywhere below. This whole string is a JS template literal, and a
+ * backtick inside it ends the string and turns the rest of the Python into JavaScript.
+ * test/gl.test.js guards this for the renderers; this file is checked by eye.
+ */
+function mineIcons(outPath, cell = 256) {
+  const script = `
+import math
+import sys
+from PIL import Image, ImageFilter
+
+out, s = sys.argv[1], int(sys.argv[2])
+
+SS = 2                      # supersample; the ray march is the expensive part
+N = s * SS
+
+# The same key light the WebGL renderers use, so the board agrees with the felt.
+KX, KY, KZ = -0.45, 1.0, 0.55
+kl = math.sqrt(KX * KX + KY * KY + KZ * KZ)
+KX, KY, KZ = KX / kl, KY / kl, KZ / kl
+
+def norm3(x, y, z):
+    l = math.sqrt(x * x + y * y + z * z) or 1.0
+    return x / l, y / l, z / l
+
+def clamp(v, a, b):
+    return a if v < a else (b if v > b else v)
+
+def shade(nx, ny, nz, base, spec_power, spec_amt, rim_amt):
+    # Lambert plus a Blinn-Phong highlight, with a rim term so the silhouette reads
+    # against a dark tile without needing an outline.
+    lam = max(0.0, nx * KX + ny * KY + nz * KZ)
+    # The viewer is straight on, so the half vector is the key plus (0,0,1).
+    hx, hy, hz = norm3(KX, KY, KZ + 1.0)
+    spec = max(0.0, nx * hx + ny * hy + nz * hz) ** spec_power
+    rim = (1.0 - max(0.0, nz)) ** 2.5
+    res = []
+    for c in base:
+        v = c * (0.22 + 0.78 * lam) + 255.0 * spec * spec_amt + 90.0 * rim * rim_amt
+        res.append(int(clamp(v, 0, 255)))
+    return (res[0], res[1], res[2])
+
+# ---------------------------------------------------------------- the gem
+#
+# A brilliant cut seen face on: an octagonal table surrounded by facets. Each facet is a
+# flat plane, so its normal is constant across it and the gem reads as cut stone rather
+# than a blurry ball. Facet normals tilt outward from the centre by a fixed angle.
+
+GEM_RGB = (150, 250, 226)       # paler than the tile it sits on, deliberately
+FACETS = 8
+TABLE_R = 0.34                  # where the flat top ends
+EDGE_R = 0.92                   # the outer silhouette
+
+gem = Image.new("RGBA", (N, N), (0, 0, 0, 0))
+gp = gem.load()
+
+for py in range(N):
+    for px in range(N):
+        # To -1..1, y up.
+        x = (px + 0.5) / N * 2.0 - 1.0
+        y = 1.0 - (py + 0.5) / N * 2.0
+        r = math.sqrt(x * x + y * y)
+        if r > EDGE_R:
+            continue
+
+        a = math.atan2(y, x)
+        # Which facet this pixel belongs to, and the angle to that facet's centre.
+        seg = int(math.floor((a + math.pi) / (2 * math.pi) * FACETS))
+        mid = -math.pi + (seg + 0.5) * (2 * math.pi / FACETS)
+
+        if r < TABLE_R:
+            nx, ny, nz = 0.0, 0.0, 1.0          # the flat table
+            base = [c * 1.0 for c in GEM_RGB]
+        else:
+            # Tilt outward: further from the table means a steeper facet.
+            t = (r - TABLE_R) / (EDGE_R - TABLE_R)
+            tilt = 0.30 + 0.85 * t
+            nx, ny, nz = norm3(math.cos(mid) * tilt, math.sin(mid) * tilt, 1.0)
+            # Alternate facets slightly darker: this is what makes a cut read as cut.
+            base = [c * (0.52 if seg % 2 else 0.92) for c in GEM_RGB]
+
+        col = shade(nx, ny, nz, base, 16.0, 0.55, 0.30)
+        # A dark rim in the last few percent of the radius. Without it a pale green
+        # stone on a green tile has no silhouette, and the facets read as noise.
+        band = clamp((r - EDGE_R * 0.86) / (EDGE_R * 0.14), 0.0, 1.0)
+        dark = 1.0 - 0.55 * band
+        col = (int(col[0] * dark), int(col[1] * dark), int(col[2] * dark))
+        # Antialias the silhouette by fading the outermost sliver of the radius.
+        edge = clamp((EDGE_R - r) / (EDGE_R * 0.015), 0.0, 1.0)
+        gp[px, py] = (col[0], col[1], col[2], int(255 * edge))
+
+# --------------------------------------------------------------- the bomb
+#
+# A sphere, ray traced properly: solve for the front surface, take the normal from the
+# hit point. Plus a fuse, and the specular dot that makes a sphere look polished.
+
+BOMB_RGB = (58, 54, 60)
+BR = 0.74
+
+bomb = Image.new("RGBA", (N, N), (0, 0, 0, 0))
+bp = bomb.load()
+
+for py in range(N):
+    for px in range(N):
+        x = (px + 0.5) / N * 2.0 - 1.0
+        y = 1.0 - (py + 0.5) / N * 2.0
+        # Sit the body slightly low, leaving room for the fuse.
+        cy = y + 0.10
+        d2 = x * x + cy * cy
+        if d2 > BR * BR:
+            continue
+        z = math.sqrt(BR * BR - d2)
+        nx, ny, nz = x / BR, cy / BR, z / BR
+        col = shade(nx, ny, nz, BOMB_RGB, 28.0, 0.70, 0.75)
+        edge = clamp((BR - math.sqrt(d2)) / (BR * 0.02), 0.0, 1.0)
+        bp[px, py] = (col[0], col[1], col[2], int(255 * edge))
+
+# The fuse: a short curved taper out of the top right, stamped as discs so it narrows
+# smoothly without needing a polygon path.
+fuse = Image.new("RGBA", (N, N), (0, 0, 0, 0))
+fd = fuse.load()
+steps = 90
+for i in range(steps + 1):
+    t = i / steps
+    fx = 0.30 + 0.34 * t + 0.10 * math.sin(t * 2.6)
+    fy = 0.52 + 0.40 * t
+    rad = (0.055 * (1.0 - 0.45 * t)) * N
+    cxp = (fx + 1.0) * 0.5 * N
+    cyp = (1.0 - fy) * 0.5 * N
+    tone = 150 - int(40 * t)
+    ri = int(rad)
+    for oy in range(-ri, ri + 1):
+        for ox in range(-ri, ri + 1):
+            if ox * ox + oy * oy > rad * rad:
+                continue
+            qx, qy = int(cxp + ox), int(cyp + oy)
+            if 0 <= qx < N and 0 <= qy < N:
+                # Light the cord from the same side as everything else.
+                lit = clamp(0.5 - (oy / rad) * 0.5, 0.0, 1.0)
+                v = int(tone * (0.55 + 0.75 * lit))
+                fd[qx, qy] = (v, int(v * 0.82), int(v * 0.6), 255)
+
+# A spark at the fuse tip.
+#
+# Drawn into its OWN layer rather than into the fuse: composited into the cord it was
+# competing with the cord's own opaque alpha, and a spark that cannot brighten what is
+# under it is just a pale dot. This layer is added on top of the finished bomb.
+t_end = 1.0
+tipx = ((0.30 + 0.34 * t_end + 0.10 * math.sin(t_end * 2.6)) + 1.0) * 0.5 * N
+tipy = (1.0 - (0.52 + 0.40 * t_end)) * 0.5 * N
+
+spark = Image.new("RGBA", (N, N), (0, 0, 0, 0))
+sp = spark.load()
+spark_r = 0.11 * N
+span = int(spark_r * 2.4)
+for oy in range(-span, span + 1):
+    for ox in range(-span, span + 1):
+        dd = math.sqrt(ox * ox + oy * oy)
+        qx, qy = int(tipx + ox), int(tipy + oy)
+        if not (0 <= qx < N and 0 <= qy < N):
+            continue
+        # A hot core with a wide soft falloff, which is what a burning tip looks like:
+        # two gaussians rather than one, so it does not read as a flat disc.
+        # Clip to a circle first. Without this the square iteration window leaves a
+        # visible rectangular block wherever the gaussian is still above the cutoff at
+        # the corners — which it is, because a gaussian never actually reaches zero.
+        reach = spark_r * 2.4
+        if dd > reach:
+            continue
+        core = math.exp(-(dd / (spark_r * 0.42)) ** 2)
+        halo = math.exp(-(dd / (spark_r * 1.5)) ** 2)
+        f = clamp(core + halo * 0.55, 0.0, 1.0)
+        # And taper the last stretch to zero, so the circle's own edge is not a step.
+        f *= clamp((reach - dd) / (reach * 0.35), 0.0, 1.0)
+        if f <= 0.004:
+            continue
+        sp[qx, qy] = (
+            int(clamp(255 * f, 0, 255)),
+            int(clamp((150 + 105 * core) * f, 0, 255)),
+            int(clamp(70 * f * f, 0, 255)),
+            int(clamp(255 * f, 0, 255)),
+        )
+
+bomb = Image.alpha_composite(bomb, fuse)
+bomb = Image.alpha_composite(bomb, spark)
+
+# Down to final size, and a soft contact shadow under each so they sit on the tile
+# rather than floating above it.
+atlas = Image.new("RGBA", (s * 2, s), (0, 0, 0, 0))
+for i, img in enumerate((gem, bomb)):
+    small = img.resize((s, s), Image.LANCZOS)
+    blurred = small.filter(ImageFilter.GaussianBlur(s * 0.035))
+    black = Image.new("L", blurred.size, 0)
+    shadow = Image.merge("RGBA", (
+        black, black, black,
+        blurred.split()[3].point(lambda v: int(v * 0.45))))
+    atlas.paste(Image.alpha_composite(shadow, small), (i * s, 0))
+
+atlas.save(out, "PNG", optimize=True)
+print(str(atlas.size[0]) + "x" + str(atlas.size[1]))
+`;
+  return execFileSync(python(), ['-c', script, outPath, String(cell)],
+    { encoding: 'utf8' }).trim();
+}
+
+/**
  * The card faces, drawn rather than generated.
  *
  * Same reasoning as the dice pips, only more so. A generative model cannot be relied on
@@ -545,6 +771,7 @@ async function main() {
     console.log(`  ${name.padEnd(9)} ${m.file.padEnd(14)} ${m.note}`);
   }
   console.log(`  pips      dice-pips      drawn, not generated — six faces, exact layout`);
+  console.log('  mines     mine-icons     drawn, not generated — a cut gem and a lit bomb');
   console.log('');
 
   if (!go) {
@@ -582,6 +809,18 @@ async function main() {
     console.log(`ok  ${size}`);
   } catch (e) {
     console.log(`FAILED  ${e.message.split('\n')[0]}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  process.stdout.write('  mines     ');
+  try {
+    const size = mineIcons(path.join(out, 'mine-icons.png'));
+    console.log('ok  ' + size);
+  } catch (e) {
+    // fromCharCode(10) rather than a backslash-n: this file is edited through layers
+    // that eat escapes, and a literal newline inside a string is a parse error.
+    console.log('FAILED  ' + String(e.message).split(String.fromCharCode(10))[0]);
     process.exitCode = 1;
     return;
   }

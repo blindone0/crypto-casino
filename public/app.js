@@ -1110,7 +1110,7 @@ function paintMines() {
       class: `tile ${isGem ? 'gem' : ''} ${isMine ? 'mine' : ''} ${done && !isGem && !isMine ? 'dim' : ''}`,
       disabled: (!live || isGem) ? 'disabled' : false,
       onclick: () => revealTile(i),
-    }, isGem ? '◆' : (isMine ? '✕' : '')));
+    }, isGem || isMine ? el('i', { class: 'mine-icon ' + (isGem ? 'gem' : 'bomb') }) : ''));
   }
 
   const status = g && g.state === 'lost' ? t('mines.boom')

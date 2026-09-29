@@ -1673,3 +1673,45 @@ body.couch .bigwin .amount { color: #e8eeff; text-shadow: 0 0 44px rgba(143, 166
   box-shadow: inset 0 2px 14px rgba(0, 0, 0, .6);
 }
 .cards-canvas { display: block; width: 100%; }
+
+/* ------------------------------------------------- the Мины gem and bomb ---
+
+   Two halves of one atlas (public/textures/mine-icons.png, gem at x=0, bomb at the
+   right), placed by background-position so both tiles share a single request.
+
+   They are ray traced by tools/generate-materials.js rather than drawn as glyphs: the
+   old ◆ and ✕ were whatever the player's font happened to have, which on a phone could
+   be a coloured emoji and on Linux frequently a box. These are the same object on every
+   machine, lit by the same key direction as the dice and the cards. */
+.mine-icon {
+  display: block;
+  width: 78%; aspect-ratio: 1;
+  background-image: url('/textures/mine-icons.png');
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  /* The tile already animates its own transform on hover; this rides along. */
+  pointer-events: none;
+}
+.mine-icon.gem { background-position: 0 0; }
+.mine-icon.bomb { background-position: 100% 0; }
+
+/* A found gem lands rather than appears: the scale settles, so a run of safe picks
+   reads as a sequence of events instead of the board silently changing colour. */
+.tile.gem .mine-icon { animation: mine-pop .28s cubic-bezier(.2, 1.5, .4, 1); }
+.tile.mine .mine-icon { animation: mine-shake .34s ease-out; }
+
+@keyframes mine-pop {
+  from { transform: scale(.3); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+@keyframes mine-shake {
+  0% { transform: scale(1.35) rotate(-7deg); opacity: 0; }
+  40% { opacity: 1; }
+  60% { transform: scale(1) rotate(4deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+
+/* Motion is a nicety, not the information: the icon itself says what happened. */
+@media (prefers-reduced-motion: reduce) {
+  .tile.gem .mine-icon, .tile.mine .mine-icon { animation: none; }
+}
