@@ -310,3 +310,80 @@ test('every board is big, and every one is solvable', () => {
       `${name} must scramble to a permutation, or it cannot be finished`);
   }
 });
+
+// ---------------------------------------------------------------- the record
+const events = require('../src/events');
+
+test('every drop goes on the record, and a reopened round comes back from it', (t) => {
+  const { cfg, db, priv, pub, user } = setup();
+  t.after(() => cleanup(cfg, db));
+  const g = open(cfg, db, priv, pub, user);
+  const n = g.pieces;
+
+  const ctx = ctxFor(cfg, db, user);
+  jigsaw.place(ctx, { slot: 0, piece: 0 });
+  jigsaw.place(ctx, { slot: 1, piece: 5 });         // wrong, and recorded all the same
+  jigsaw.place(ctx, { slot: 1, piece: -1 });        // taken off again
+  jigsaw.place(ctx, { slot: 2, piece: 5 });
+  jigsaw.place(ctx, { slot: 3, piece: 5 });         // moved: one piece, one slot at most
+
+  const back = jigsaw.current(ctx);
+  assert.strictEqual(back.id, g.id);
+  const expect = new Array(n).fill(null);
+  expect[0] = 0;
+  expect[3] = 5;
+  assert.deepStrictEqual(back.placed, expect, 'the board as the record has it');
+
+  const log = events.history(db, 'jigsaw', g.id);
+  assert.strictEqual(log.map((e) => e.k).join(''), 'oppppp');
+  assert.strictEqual(log[0].a[0], TUG, 'the stake');
+  assert.strictEqual(log[0].a[1], SMALLEST, 'the board');
+  assert.strictEqual(log[0].u, pub.slice(0, 8));
+  assert.deepStrictEqual(log[2].a.slice(0, 2), [1, 5], 'the wrong drop is on the record too');
+  assert.deepStrictEqual(log[3].a.slice(0, 2), [1, -1]);
+
+  assert.throws(() => jigsaw.place(ctx, { slot: n, piece: 0 }), /slot/);
+  assert.throws(() => jigsaw.place(ctx, { slot: 0, piece: n }), /piece/);
+});
+
+test('a solved round closes its record with the result, and a round given up says so', (t) => {
+  const { cfg, db, priv, pub, user } = setup();
+  t.after(() => cleanup(cfg, db));
+  const g = open(cfg, db, priv, pub, user);
+  const ctx = ctxFor(cfg, db, user);
+  for (let i = 0; i < g.pieces; i += 1) jigsaw.place(ctx, { slot: i, piece: i });
+  // The human floor: a solve faster than a person can drag pays nothing but still closes.
+  const out = jigsaw.solve(ctx, { arrangement: solved(g.pieces) });
+  assert.strictEqual(out.state, 'done');
+  const log = events.history(db, 'jigsaw', g.id);
+  assert.strictEqual(log.map((e) => e.k).join(''), `o${'p'.repeat(g.pieces)}f`);
+  const finish = log[log.length - 1];
+  assert.strictEqual(finish.a[2], out.payout, 'the payout is on the record');
+  assert.strictEqual(finish.a[3], out.tooFast);
+  assert.ok(events.round(db, 'jigsaw', g.id).closed_at > 0);
+  assert.strictEqual(jigsaw.current(ctx), null);
+
+  // The round is one story on the chain: the same events, in the same order, from the
+  // blocks alone.
+  events.flush(db, cfg, { force: true });
+  assert.deepStrictEqual(events.fromChain(db, 'jigsaw', g.id).map((e) => e.k), log.map((e) => e.k));
+  assert.ok(tc.verifyChain(db).ok);
+
+  const g2 = open(cfg, db, priv, pub, user);
+  jigsaw.place(ctx, { slot: 0, piece: 1 });
+  jigsaw.give(ctx);
+  assert.strictEqual(events.history(db, 'jigsaw', g2.id).map((e) => e.k).join(''), 'opq');
+  assert.ok(events.round(db, 'jigsaw', g2.id).closed_at > 0);
+});
+
+test('a round cannot fill blocks with noise: the moves a round may log are capped', (t) => {
+  const { cfg, db, priv, pub, user } = setup();
+  t.after(() => cleanup(cfg, db));
+  const g = open(cfg, db, priv, pub, user);
+  const ctx = ctxFor(cfg, db, user);
+  const cap = g.pieces * jigsaw.MOVE_CAP;
+  // One already logged: the opening. So cap - 1 moves fit, and the next is refused.
+  for (let i = 0; i < cap - 1; i += 1) jigsaw.place(ctx, { slot: 0, piece: 0 });
+  assert.throws(() => jigsaw.place(ctx, { slot: 0, piece: 0 }), /too many moves/);
+  assert.strictEqual(events.history(db, 'jigsaw', g.id).length, cap);
+});

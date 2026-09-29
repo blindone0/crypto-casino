@@ -2346,14 +2346,30 @@ function paintJigsaw() {
   // The board.
   const host = el('div');
   setKids($('#stage'), host);
+  // Every drop goes to the record as it happens, in order, and a round reopened from the
+  // record starts from what it says. `known` is what the record already holds, so the
+  // board's first report — the one it makes on construction — is not taken for a move.
+  let known = (g.placed || new Array(g.pieces).fill(null)).slice();
+  let queue = Promise.resolve();
+  const report = (arrangement) => {
+    for (let slot = 0; slot < arrangement.length; slot += 1) {
+      if (arrangement[slot] === known[slot]) continue;
+      const piece = arrangement[slot] === null || arrangement[slot] === undefined ? -1 : arrangement[slot];
+      queue = queue
+        .then(() => api('/api/bet/jigsaw/place', { method: 'POST', body: { slot, piece } }))
+        .catch(() => { /* the record is best effort from here; the answer is still solve */ });
+    }
+    known = arrangement.slice();
+  };
   jigBoard = jigsawBoard(host, {
     cols: g.cols,
     rows: g.rows,
     scramble: g.scramble,
     cutSeed: g.cutSeed,
     picture: state.puzzlePictures?.[g.picture] || null,
+    placed: g.placed || null,
     onSolve: (arrangement) => submitJigsaw(arrangement),
-    onMove: (_arrangement, placed, total) => showLeft(total - placed),
+    onMove: (arrangement, placed, total) => { showLeft(total - placed); report(arrangement); },
   });
 }
 

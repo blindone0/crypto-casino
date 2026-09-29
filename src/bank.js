@@ -12,6 +12,7 @@
 const U = require('./util');
 const ledger = require('./ledger');
 const tokenchain = require('./tokenchain');
+const events = require('./events');
 
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -149,7 +150,22 @@ function tokenBank(db, cfg, spend) {
       // is taken here. The persistent ones took it when the round opened.
       if (!stakeTaken) this.takeStake(user, wager);
       if (payout > 0) move(user.id, payout, bet.game);
-      return ledger.recordBet(db, cfg, bet);
+      const betId = ledger.recordBet(db, cfg, bet);
+      // On the record. An instant game has no intermediate state, so its whole round is
+      // this one event; a game that logs its own steps (mines, the jigsaw) says so with
+      // `logged` and its round already carries the finish.
+      if (!bet.logged) {
+        events.emit(db, cfg, {
+          g: bet.game,
+          r: betId,
+          k: 'f',
+          a: [wager, bet.multiplier, payout, bet.seedId ?? null, bet.nonce ?? 0,
+            bet.clientSeed ?? '', bet.detail ?? null],
+          userId: user.id,
+          pubkey: tokenchain.keyFor(db, user.id)?.pubkey || null,
+        });
+      }
+      return betId;
     },
 
     history(userId, limit = 50) {

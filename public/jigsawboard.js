@@ -65,7 +65,7 @@ const DRAG_SLOP = 6;
  * the tray is part of the provably-fair record rather than whatever order a loop ran in.
  */
 export function board(host, {
-  cols, rows, scramble, cutSeed = 1, picture = null,
+  cols, rows, scramble, cutSeed = 1, picture = null, placed = null,
   onSolve = () => {}, onMove = () => {},
 }) {
   const pieces = cols * rows;
@@ -652,6 +652,16 @@ export function board(host, {
   // A drag released outside the wrapper never reaches the handlers above, and the piece
   // would hang. The window sees it regardless.
   window.addEventListener('pointerup', endDrag);
+
+  // A round resumed from its record: `placed[slot]` is the piece already there. They go
+  // straight to their slots, not through the drop path, so the first report below — the
+  // one every board makes on construction — describes what the record already holds and
+  // is not mistaken for new moves.
+  if (Array.isArray(placed)) {
+    placed.forEach((piece, slot) => {
+      if (Number.isInteger(piece) && piece >= 0 && piece < pieces && slot < pieces) putOnBoard(piece, slot);
+    });
+  }
 
   settled();
 

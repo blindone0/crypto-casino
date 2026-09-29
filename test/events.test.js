@@ -230,3 +230,33 @@ test('Мины: a round leaves its every step on the chain, the layout committed
   assert.strictEqual(log2.map((e) => e.k).join(''), 'orf');
   assert.deepStrictEqual(log2[2].a[2], JSON.parse(g2.mines));
 });
+
+test('an instant game is one event: its settlement, from the bank, with the roll in it', (t) => {
+  const { cfg, db, pub, priv } = setup();
+  t.after(() => cleanup(cfg, db));
+  const bankMod = require('../src/bank');
+  const match = require('../src/match');
+  const user = { ...db.get('SELECT * FROM users WHERE id=1'), frozen: 0, self_excluded_until: 0 };
+  db.tx(() => tc.appendBlock(db, [
+    tc.treasuryTransfer(db, match.houseKey(db).publicRaw, 1000 * TUG),
+  ]));
+  const tx = {
+    type: 'transfer', from: pub, to: match.houseKey(db).publicRaw, amount: 10 * TUG, nonce: tc.nextNonce(db, pub),
+  };
+  const spend = {
+    from: pub, nonce: tx.nonce,
+    sig: crypto.sign(null, Buffer.from(tc.canonical(tc.transferPayload(tx))), priv).toString('hex'),
+  };
+
+  const betId = db.tx(() => bankMod.bankFor(db, cfg, spend).settle({
+    user, game: 'dice', wager: 10 * TUG, multiplier: 1.98, payout: Math.round(19.8 * TUG),
+    edgeUnits: 0, seedId: null, nonce: 3, clientSeed: 'cs', detail: { roll: 42.17, target: 50 },
+  }));
+  const log = events.history(db, 'dice', betId);
+  assert.strictEqual(log.length, 1, 'no intermediate state, so no intermediate events');
+  assert.strictEqual(log[0].k, 'f');
+  assert.deepStrictEqual(log[0].a.slice(0, 6), [10 * TUG, 1.98, Math.round(19.8 * TUG), null, 3, 'cs']);
+  assert.deepStrictEqual(log[0].a[6], { roll: 42.17, target: 50 }, 'the outcome, for anyone replaying the seed');
+  assert.strictEqual(log[0].u, pub.slice(0, 8));
+  assert.strictEqual(events.pending(db).count, 1);
+});

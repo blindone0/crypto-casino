@@ -123,6 +123,7 @@ function reveal({ db, cfg, user, bankFor }, body) {
         clientSeed: g.client_seed,
         detail: { mineCount: g.mine_count, picks, hit: tile, mines },
         stakeTaken: true,
+        logged: true,
       });
       return {
         ...view(db, cfg, { ...g, state: 'lost' }),
@@ -180,6 +181,7 @@ function finish({ db, cfg, user, bankFor }, g) {
     clientSeed: g.client_seed,
     detail: { mineCount: g.mine_count, picks, mines, multiplier, capped },
     stakeTaken: true,
+    logged: true,
   });
 
   return {

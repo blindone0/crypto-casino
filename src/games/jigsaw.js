@@ -33,9 +33,14 @@
 const U = require('../util');
 const fair = require('../fair');
 const auth = require('../auth');
+const events = require('../events');
+const tokenchain = require('../tokenchain');
 const pictures = require('../pictures');
 
 const now = () => Math.floor(Date.now() / 1000);
+
+/** How many moves a round may log, per piece. Past this a client is filling blocks. */
+const MOVE_CAP = 40;
 
 /**
  * The board. There is one, and it is 10x10.
@@ -222,12 +227,63 @@ function start({ db, cfg, user, bank }, body) {
       seed.id, nonce, user.client_seed, now(), now(),
     );
     const g = activeGame(db, user.id);
+    events.emit(db, cfg, {
+      g: 'jigsaw',
+      r: g.id,
+      k: 'o',
+      a: [wager, name, board.cols, board.rows, picture, tokenchain.sha256(tokenchain.canonical(scramble))],
+      userId: user.id,
+      pubkey: tokenchain.keyFor(db, user.id)?.pubkey || null,
+    });
     return {
       ...view(db, cfg, g),
       serverSeedHash: seed.seed_hash,
       balance: bank.balance(user.id),
     };
   });
+}
+
+/**
+ * One drag, on the record.
+ *
+ * The board reports every drop, the wrong ones included — a log of only correct moves is
+ * a log of a solver, not of a player — and each is written as an event without being
+ * judged: the rules are the board's and the answer is solve()'s. What is checked is the
+ * shape, and a ceiling on how many moves a round may have, so a client cannot fill blocks
+ * with noise. A piece taken off the board is recorded as -1.
+ */
+function place({ db, cfg, user }, body) {
+  return db.tx(() => {
+    const g = activeGame(db, user.id);
+    if (!g) throw new U.BadRequest('no jigsaw in progress');
+    const board = boardOfRound(g);
+    const slot = U.toInt(body.slot, { min: 0, max: board.pieces - 1, name: 'slot' });
+    const off = body.piece === null || body.piece === undefined || Number(body.piece) === -1;
+    const piece = off ? -1 : U.toInt(body.piece, { min: 0, max: board.pieces - 1, name: 'piece' });
+    const round = events.round(db, 'jigsaw', g.id);
+    if (round && round.next_seq >= board.pieces * MOVE_CAP) {
+      throw new U.BadRequest('too many moves for one round');
+    }
+    events.emit(db, cfg, { g: 'jigsaw', r: g.id, k: 'p', a: [slot, piece] });
+    return { ok: true };
+  });
+}
+
+/**
+ * The board as the record has it: slot -> piece, rebuilt from the round's moves. This is
+ * what a player who closed the tab comes back to.
+ */
+function placedFrom(db, g) {
+  const board = boardOfRound(g);
+  const placed = new Array(board.pieces).fill(null);
+  for (const e of events.history(db, 'jigsaw', g.id)) {
+    if (e.k !== 'p') continue;
+    const [slot, piece] = e.a;
+    // A piece is in one slot at most and a slot holds one piece: the later move wins.
+    for (let s = 0; s < placed.length; s += 1) if (placed[s] === piece) placed[s] = null;
+    placed[slot] = piece === -1 ? null : piece;
+  }
+  return placed;
 }
 
 /**
@@ -286,7 +342,10 @@ function solve({ db, cfg, user, bankFor }, body) {
       clientSeed: g.client_seed,
       detail: { board: g.board, seconds, tooFast, capped },
       stakeTaken: true,
+      logged: true,
     });
+    events.emit(db, cfg, { g: 'jigsaw', r: g.id, k: 'f', a: [seconds, multiplier, payout, tooFast] });
+    events.close(db, { g: 'jigsaw', r: g.id });
 
     const done = db.get('SELECT * FROM jigsaw_games WHERE id=?', g.id);
     return {
@@ -305,17 +364,19 @@ function give({ db, cfg, user }) {
     if (!g) return { ok: true };
     db.run("UPDATE jigsaw_games SET state='done', seconds=?, multiplier=0, payout=0 WHERE id=?",
       now() - g.started_at, g.id);
+    events.emit(db, cfg, { g: 'jigsaw', r: g.id, k: 'q', a: [now() - g.started_at] });
+    events.close(db, { g: 'jigsaw', r: g.id });
     return { ok: true, ...view(db, cfg, db.get('SELECT * FROM jigsaw_games WHERE id=?', g.id)) };
   });
 }
 
 function current({ db, cfg, user }) {
   const g = activeGame(db, user.id);
-  return g ? view(db, cfg, g) : null;
+  return g ? { ...view(db, cfg, g), placed: placedFrom(db, g) } : null;
 }
 
 module.exports = {
   BOARDS, MAX_MULTIPLIER, HUMAN_FLOOR_PER_PIECE,
   boardOf, boardOfRound, scrambleFor, payoutMultiplier, payTable, payTableFor,
-  start, solve, give, current,
+  start, solve, give, current, place, placedFrom, MOVE_CAP,
 };

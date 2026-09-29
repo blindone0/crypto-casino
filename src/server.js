@@ -526,6 +526,10 @@ function build(cfg) {
   });
 
   add('GET', '/api/bet/jigsaw/current', async (ctx) => jigsaw.current(gameCtx(ctx)));
+  add('POST', '/api/bet/jigsaw/place', async (ctx, req) => {
+    checkCsrf(req, ctx);
+    return jigsaw.place(gameCtx(ctx), await U.readJsonBody(req));
+  });
 
   // ----------------------------------------------------------- singleplayer
   //
