@@ -1371,15 +1371,37 @@ body.couch .bigwin .amount { color: #e8eeff; text-shadow: 0 0 44px rgba(143, 166
   width: 84%; height: 84%;
   border: 3px solid rgba(217, 180, 90, .55);
 }
+/* One atlas, six pieces across by two rows: white on top, black beneath, in the order
+   k q r b n p. The column comes from the piece class and the row from the colour class,
+   so a square never needs to know anything but which two classes to put on a span.
+
+   These replaced Unicode glyphs, which were whatever the player's font happened to
+   have — a colour emoji on some phones, a box on Linux — and which mixed the outlined
+   white series with the filled black one while the comment here claimed otherwise. */
 .chessboard .pc {
-  font-size: clamp(22px, 7.4vw, 44px);
-  line-height: 1;
+  width: 92%; height: 92%;
+  background-image: url('/textures/chess-pieces.png');
+  background-size: 600% 200%;
+  background-repeat: no-repeat;
   pointer-events: none;
 }
-/* Both sets are drawn with the filled glyphs and separated by colour, because the
-   outlined white pieces vanish against a dark board. */
-.chessboard .pc.white { color: #f2ead7; text-shadow: 0 1px 2px rgba(0, 0, 0, .65); }
-.chessboard .pc.black { color: #11151b; text-shadow: 0 1px 0 rgba(255, 255, 255, .18); }
+.chessboard .pc.white { background-position-y: 0; }
+.chessboard .pc.black { background-position-y: 100%; }
+.chessboard .pc-k { background-position-x: 0%; }
+.chessboard .pc-q { background-position-x: 20%; }
+.chessboard .pc-r { background-position-x: 40%; }
+.chessboard .pc-b { background-position-x: 60%; }
+.chessboard .pc-n { background-position-x: 80%; }
+.chessboard .pc-p { background-position-x: 100%; }
+
+/* The promotion picker uses the same sprites, as buttons rather than spans. */
+.promo .pc {
+  width: clamp(30px, 9vw, 52px); aspect-ratio: 1;
+  background-image: url('/textures/chess-pieces.png');
+  background-size: 600% 200%;
+  background-repeat: no-repeat;
+  pointer-events: auto;
+}
 .chessboard .rank, .chessboard .file {
   position: absolute;
   font-size: 9px;

@@ -6,14 +6,19 @@
 // that have to agree, and when a stake rides on the game, the one that matters is the one
 // on the server.
 //
-// Pieces are Unicode glyphs rather than images, for the same reason everything else here
-// is drawn rather than downloaded: the page runs under a Content-Security-Policy that
-// forbids remote media.
-
-const GLYPHS = {
-  K: '♔', Q: '♕', R: '♖', B: '♗', N: '♘', P: '♙',
-  k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟',
-};
+// Pieces come from one locally rendered atlas rather than from the font.
+//
+// They used to be Unicode glyphs, on the reasoning that the Content-Security-Policy
+// forbids remote media — which is true, and the conclusion did not follow: a local image
+// is not remote. The glyphs meant each piece was whatever shape the player's font
+// happened to have, a colour emoji on some phones and a box on Linux. They also mixed
+// the two Unicode series, outlined for white and filled for black, while the stylesheet
+// insisted both were filled.
+//
+// public/textures/chess-pieces.png is six pieces across by two rows, k q r b n p, white
+// on top. tools/generate-materials.js draws it. Which cell to show is decided entirely in
+// CSS by background-position, from the `pc-<kind>` and `white`/`black` classes — which is
+// why a piece here is a pair of class names and not a character.
 
 const FILES = 'abcdefgh';
 const squareName = (file, rank) => `${FILES[file]}${8 - rank}`;
@@ -126,7 +131,8 @@ export function board(host, opts = {}) {
           || state.lastMove.slice(2, 4) === name)) cell.classList.add('last');
 
         if (piece) {
-          const glyph = el('span', `pc ${piece === piece.toUpperCase() ? 'white' : 'black'}`, GLYPHS[piece]);
+          const white = piece === piece.toUpperCase();
+          const glyph = el('span', `pc ${white ? 'white' : 'black'} pc-${piece.toLowerCase()}`);
           cell.append(glyph);
         }
         // Coordinates on the outer edges only, the way a printed diagram does it.
@@ -142,7 +148,7 @@ export function board(host, opts = {}) {
       const white = state.orientation === 'w';
       const picker = el('div', 'promo');
       for (const p of ['q', 'r', 'b', 'n']) {
-        const btn = el('button', 'pc', GLYPHS[white ? p.toUpperCase() : p]);
+        const btn = el('button', `pc ${white ? 'white' : 'black'} pc-${p}`);
         btn.onclick = () => {
           const move = state.pending.from + state.pending.to + p;
           state.pending = null;

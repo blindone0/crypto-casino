@@ -366,6 +366,233 @@ print(f"{atlas.size[0]}x{atlas.size[1]}")
 }
 
 /**
+ * The chess pieces, drawn rather than typed.
+ *
+ * They were Unicode glyphs, which meant each piece was whatever shape the player's font
+ * happened to have: a colour emoji on some phones, a box on Linux, and a different set
+ * on every machine. Worse, GLYPHS mixed the two Unicode series — white used the OUTLINED
+ * codepoints and black the FILLED ones — while the stylesheet comment beside it claimed
+ * both were filled. The comment described an intention the data did not implement.
+ *
+ * These are six silhouettes, each rendered twice: ivory on the top row, ebony beneath.
+ * The shading is a relief rather than a ray trace — blur the mask, offset a copy toward
+ * the key light, difference the two — which is enough to read as a turned piece at the
+ * forty-four pixels a board square actually gets, and a great deal less code than tracing
+ * a lathe profile would be. Every piece stands on the same foot, because that is what
+ * makes a set look like a set rather than six unrelated objects.
+ *
+ * Output is one atlas, six across by two down, in the order k q r b n p.
+ *
+ * NOTE: no backticks anywhere below. This whole string is a JS template literal, and a
+ * backtick inside it ends the string and turns the rest of the Python into JavaScript.
+ */
+function chessPieces(outPath, cell = 128) {
+  const script = `
+import math
+import sys
+from PIL import Image, ImageDraw, ImageFilter
+
+out, s = sys.argv[1], int(sys.argv[2])
+
+SS = 4                       # supersample: the silhouettes are all curves
+N = s * SS
+
+# The same key light as every other rendered asset (KEY_DIR in gl.js), so a knight and a
+# die are lit by the same lamp. Only the horizontal part matters for a 2D relief.
+LX, LY = -0.42, -0.76        # y is down in image space, so the light is up and left
+
+WHITE = (238, 230, 214)
+BLACK = (28, 32, 40)
+
+ORDER = ['k', 'q', 'r', 'b', 'n', 'p']
+
+
+def shaded(mask, base, lift):
+    """Turn a flat silhouette into a lit piece.
+
+    The mask is the shape. Blurring it and subtracting gives a distance-like field that
+    is bright in the middle and dark at the rim, which is enough to read as volume; the
+    light direction comes from sampling that field offset against itself. This is a
+    relief, not a ray trace — a chess piece at 44 pixels does not need one, and a real
+    trace of a turned bishop would cost more code than the whole board.
+    """
+    inner = mask.filter(ImageFilter.GaussianBlur(N * 0.030))
+    # Offset the blur toward the light and difference it: where the piece falls away from
+    # the lamp the offset copy is brighter, which is exactly the shading term.
+    dx, dy = int(LX * N * 0.026), int(LY * N * 0.026)
+    lit = Image.new('L', mask.size, 0)
+    lit.paste(inner, (dx, dy))
+
+    px_m, px_i, px_l = mask.load(), inner.load(), lit.load()
+    img = Image.new('RGBA', mask.size, (0, 0, 0, 0))
+    px = img.load()
+    w, h = mask.size
+    for y in range(h):
+        for x in range(w):
+            a = px_m[x, y]
+            if not a:
+                continue
+            # Body shading: the difference gives the lit side, the inner blur gives the
+            # sense of thickness away from the outline.
+            face = (px_l[x, y] - px_i[x, y]) / 255.0          # -1..1, lit side positive
+            core = px_i[x, y] / 255.0
+            v = 0.62 + 0.55 * face + 0.30 * core
+            col = [int(max(0, min(255, c * v + lift * 255 * max(0.0, face)))) for c in base]
+            px[x, y] = (col[0], col[1], col[2], a)
+    return img
+
+
+def outline(img, mask, colour, width):
+    """A rim the opposite value of the body, so a black king reads on a dark square."""
+    grown = mask.filter(ImageFilter.MaxFilter(width if width % 2 else width + 1))
+    ring = Image.new('RGBA', img.size, (0, 0, 0, 0))
+    rp, gp = ring.load(), grown.load()
+    mp = mask.load()
+    w, h = img.size
+    for y in range(h):
+        for x in range(w):
+            if gp[x, y] and not mp[x, y]:
+                rp[x, y] = (colour[0], colour[1], colour[2], gp[x, y])
+    return Image.alpha_composite(ring, img)
+
+
+def base_shape(d, cx, w, bottom):
+    """Every piece stands on the same foot, which is what makes a set look like a set."""
+    fw = w * 0.92
+    d.rounded_rectangle([cx - fw / 2, bottom - w * 0.20, cx + fw / 2, bottom],
+                        radius=w * 0.07, fill=255)
+    d.polygon([(cx - fw * 0.40, bottom - w * 0.20), (cx + fw * 0.40, bottom - w * 0.20),
+               (cx + fw * 0.30, bottom - w * 0.34), (cx - fw * 0.30, bottom - w * 0.34)],
+              fill=255)
+
+
+def collar(d, cx, y, w):
+    d.rounded_rectangle([cx - w * 0.30, y, cx + w * 0.30, y + w * 0.09],
+                        radius=w * 0.04, fill=255)
+
+
+def draw_piece(kind):
+    """The silhouette of one piece, in a mask the size of one cell."""
+    m = Image.new('L', (N, N), 0)
+    d = ImageDraw.Draw(m)
+    cx = N * 0.5
+    w = N * 0.62                 # nominal piece width
+    bottom = N * 0.90
+
+    if kind == 'p':              # pawn
+        base_shape(d, cx, w * 0.78, bottom)
+        d.polygon([(cx - w * 0.17, bottom - w * 0.34), (cx + w * 0.17, bottom - w * 0.34),
+                   (cx + w * 0.11, N * 0.44), (cx - w * 0.11, N * 0.44)], fill=255)
+        d.ellipse([cx - w * 0.21, N * 0.26, cx + w * 0.21, N * 0.26 + w * 0.42], fill=255)
+
+    elif kind == 'r':            # rook
+        base_shape(d, cx, w * 0.92, bottom)
+        d.polygon([(cx - w * 0.30, bottom - w * 0.34), (cx + w * 0.30, bottom - w * 0.34),
+                   (cx + w * 0.26, N * 0.42), (cx - w * 0.26, N * 0.42)], fill=255)
+        collar(d, cx, N * 0.38, w)
+        # Battlements: three merlons with two gaps.
+        top, hgt = N * 0.24, N * 0.14
+        d.rectangle([cx - w * 0.40, top, cx + w * 0.40, top + hgt], fill=255)
+        for gx in (-0.17, 0.17):
+            d.rectangle([cx + w * gx - w * 0.06, top, cx + w * gx + w * 0.06, top + hgt * 0.55],
+                        fill=0)
+
+    elif kind == 'b':            # bishop
+        base_shape(d, cx, w * 0.82, bottom)
+        d.polygon([(cx - w * 0.22, bottom - w * 0.34), (cx + w * 0.22, bottom - w * 0.34),
+                   (cx + w * 0.14, N * 0.48), (cx - w * 0.14, N * 0.48)], fill=255)
+        collar(d, cx, N * 0.44, w * 0.8)
+        # The mitre: a teardrop.
+        d.ellipse([cx - w * 0.24, N * 0.24, cx + w * 0.24, N * 0.24 + w * 0.46], fill=255)
+        d.polygon([(cx, N * 0.16), (cx - w * 0.15, N * 0.34), (cx + w * 0.15, N * 0.34)], fill=255)
+        d.ellipse([cx - w * 0.05, N * 0.12, cx + w * 0.05, N * 0.12 + w * 0.10], fill=255)
+        # The slit every bishop has.
+        d.line([(cx + w * 0.02, N * 0.26), (cx + w * 0.13, N * 0.37)], fill=0, width=int(N * 0.018))
+
+    elif kind == 'n':            # knight
+        base_shape(d, cx, w * 0.86, bottom)
+        # A horse head in profile, facing right. Points, not curves: a knight is the one
+        # piece whose silhouette people actually recognise, so it is drawn explicitly.
+        head = [
+            (cx - w * 0.26, bottom - w * 0.32),
+            (cx - w * 0.22, N * 0.56),
+            (cx - w * 0.30, N * 0.42),
+            (cx - w * 0.20, N * 0.26),
+            (cx - w * 0.02, N * 0.16),
+            (cx + w * 0.10, N * 0.14),
+            (cx + w * 0.07, N * 0.23),
+            (cx + w * 0.22, N * 0.20),
+            (cx + w * 0.34, N * 0.33),
+            (cx + w * 0.30, N * 0.47),
+            (cx + w * 0.14, N * 0.56),
+            (cx + w * 0.20, bottom - w * 0.32),
+        ]
+        d.polygon(head, fill=255)
+        # The ear notch and the eye.
+        d.polygon([(cx + w * 0.08, N * 0.17), (cx + w * 0.13, N * 0.10), (cx + w * 0.16, N * 0.20)],
+                  fill=255)
+        d.ellipse([cx + w * 0.06, N * 0.27, cx + w * 0.12, N * 0.33], fill=0)
+
+    elif kind == 'q':            # queen
+        base_shape(d, cx, w * 0.94, bottom)
+        d.polygon([(cx - w * 0.28, bottom - w * 0.34), (cx + w * 0.28, bottom - w * 0.34),
+                   (cx + w * 0.20, N * 0.44), (cx - w * 0.20, N * 0.44)], fill=255)
+        collar(d, cx, N * 0.40, w)
+        # A five-point coronet: the points are circles on the tips, the classic shape.
+        top = N * 0.30
+        d.polygon([(cx - w * 0.40, top), (cx + w * 0.40, top),
+                   (cx + w * 0.30, N * 0.42), (cx - w * 0.30, N * 0.42)], fill=255)
+        for i in range(5):
+            f = (i - 2) / 2.0
+            px_ = cx + f * w * 0.34
+            py_ = top - (N * 0.10) * (1.0 - abs(f) * 0.45)
+            d.polygon([(px_ - w * 0.07, top), (px_ + w * 0.07, top), (px_, py_)], fill=255)
+            d.ellipse([px_ - w * 0.055, py_ - w * 0.055, px_ + w * 0.055, py_ + w * 0.055], fill=255)
+
+    else:                        # king
+        base_shape(d, cx, w * 0.94, bottom)
+        d.polygon([(cx - w * 0.28, bottom - w * 0.34), (cx + w * 0.28, bottom - w * 0.34),
+                   (cx + w * 0.20, N * 0.44), (cx - w * 0.20, N * 0.44)], fill=255)
+        collar(d, cx, N * 0.40, w)
+        top = N * 0.28
+        d.polygon([(cx - w * 0.38, top), (cx + w * 0.38, top),
+                   (cx + w * 0.28, N * 0.42), (cx - w * 0.28, N * 0.42)], fill=255)
+        # The cross that says king and nothing else does.
+        bar = N * 0.030
+        d.rectangle([cx - bar, N * 0.10, cx + bar, top], fill=255)
+        d.rectangle([cx - w * 0.15, N * 0.155, cx + w * 0.15, N * 0.155 + bar * 2], fill=255)
+
+    return m
+
+
+# Two rows: white on top, black beneath, six pieces across in ORDER.
+atlas = Image.new('RGBA', (s * 6, s * 2), (0, 0, 0, 0))
+
+for row, (base, rim, lift) in enumerate((
+        (WHITE, (40, 34, 28), 0.00),
+        (BLACK, (214, 206, 190), 0.18))):
+    for col, kind in enumerate(ORDER):
+        mask = draw_piece(kind)
+        body = shaded(mask, base, lift)
+        body = outline(body, mask, rim, int(N * 0.012) | 1)
+        small = body.resize((s, s), Image.LANCZOS)
+
+        # A contact shadow, so a piece sits on its square instead of floating.
+        blurred = small.filter(ImageFilter.GaussianBlur(s * 0.028))
+        black_ch = Image.new('L', blurred.size, 0)
+        shadow = Image.merge('RGBA', (black_ch, black_ch, black_ch,
+                                      blurred.split()[3].point(lambda v: int(v * 0.42))))
+        cell = Image.alpha_composite(shadow, small)
+        atlas.paste(cell, (col * s, row * s))
+
+atlas.save(out, 'PNG', optimize=True)
+print(str(atlas.size[0]) + 'x' + str(atlas.size[1]))
+`;
+  return execFileSync(python(), ['-c', script, outPath, String(cell)],
+    { encoding: 'utf8' }).trim();
+}
+
+/**
  * The Мины gem and bomb, ray traced rather than generated.
  *
  * Same reasoning as the dice pips and the card faces: a model cannot be relied on to
@@ -820,6 +1047,16 @@ async function main() {
   } catch (e) {
     // fromCharCode(10) rather than a backslash-n: this file is edited through layers
     // that eat escapes, and a literal newline inside a string is a parse error.
+    console.log('FAILED  ' + String(e.message).split(String.fromCharCode(10))[0]);
+    process.exitCode = 1;
+    return;
+  }
+
+  process.stdout.write('  chess     ');
+  try {
+    const size = chessPieces(path.join(out, 'chess-pieces.png'));
+    console.log('ok  ' + size);
+  } catch (e) {
     console.log('FAILED  ' + String(e.message).split(String.fromCharCode(10))[0]);
     process.exitCode = 1;
     return;
