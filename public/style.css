@@ -1344,6 +1344,12 @@ body.couch .bigwin .amount { color: #e8eeff; text-shadow: 0 0 44px rgba(143, 166
 }
 .arcade-hud b { color: #8fe3ff; }
 .arcade-controls { font-size: 12px; color: var(--text-faint); text-align: center; }
+/* What the billiards table has to say when it is drawn in WebGL, where there is no text on
+   the canvas: the last shot, and the score. */
+.arcade-caption {
+  font-family: var(--mono); font-size: 12px; color: #ffd166; text-align: center;
+  min-height: 16px; font-variant-numeric: tabular-nums;
+}
 
 /* ------------------------------------------------------------------ radio */
 .stations {

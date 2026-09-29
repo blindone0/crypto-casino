@@ -320,15 +320,29 @@ test('the shaders no longer normalise a constant or an already-unit uniform', ()
 // day it is added, without anyone remembering to extend a list.
 
 const TICK = String.fromCharCode(96);
+const PUBLIC = path.join(__dirname, '..', 'public');
+
+/**
+ * Every file that keeps GLSL in a template literal: the renderers in public/, and the
+ * games' own in public/games/ (billiards3d.js draws the Russian table), so a cabinet's
+ * renderer is held to the same rules the day it is added.
+ */
+function renderers(withGl) {
+  const top = fs.readdirSync(PUBLIC).filter((f) => f.endsWith('3d.js') || (withGl && f === 'gl.js'));
+  const games = fs.readdirSync(path.join(PUBLIC, 'games'))
+    .filter((f) => f.endsWith('3d.js'))
+    .map((f) => `games/${f}`);
+  return [...top, ...games];
+}
 
 test('no shader in any renderer is cut short by a stray backtick', () => {
-  const dir = path.join(__dirname, '..', 'public');
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith('3d.js') || f === 'gl.js');
+  const files = renderers(true);
   assert.ok(files.length >= 3, `expected the renderers, found ${files.join(', ')}`);
+  assert.ok(files.includes('games/billiards3d.js'), 'the walk reaches the games');
 
   let checked = 0;
   for (const file of files) {
-    const src = fs.readFileSync(path.join(dir, file), 'utf8');
+    const src = fs.readFileSync(path.join(PUBLIC, file), 'utf8');
     const re = /const\s+([A-Z_0-9]+)\s*=\s*`/g;
     let m;
     while ((m = re.exec(src)) !== null) {
@@ -353,9 +367,8 @@ test('no shader in any renderer is cut short by a stray backtick', () => {
 
 test('no comment inside a shader contains a backtick', () => {
   // The failure above is the symptom; this is the cause, and it names the line.
-  const dir = path.join(__dirname, '..', 'public');
-  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('3d.js'))) {
-    const lines = fs.readFileSync(path.join(dir, file), 'utf8').split('\n');
+  for (const file of renderers(false)) {
+    const lines = fs.readFileSync(path.join(PUBLIC, file), 'utf8').split('\n');
     let inShader = false;
     lines.forEach((line, i) => {
       if (/const\s+[A-Z_0-9]+\s*=\s*`/.test(line)) { inShader = true; return; }

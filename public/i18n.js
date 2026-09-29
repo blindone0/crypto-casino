@@ -270,10 +270,11 @@ const STRINGS = {
     en: 'Flippers, bumpers and a plunger. Keep the ball alive.',
     ru: 'Флипперы, бамперы и пружина. Не дайте шару упасть.',
   },
-  'arc.g.billiards': { en: 'Russian Billiards', ru: 'Русский бильярд' },
+  'arc.g.billiards': { en: 'Russian Pyramid', ru: 'Русская пирамида' },
+  'arc.g.billiards.hud': { en: 'Balls to 8', ru: 'Шаров до 8' },
   'arc.g.billiards.blurb': {
-    en: 'Free pyramid: play any ball, pot any ball, the cue included. Eight wins.',
-    ru: 'Свободная пирамида: бить можно любым шаром и забивать любой, биток тоже. Восемь шаров — победа.',
+    en: 'Russian pyramid against the machine, in 3D. A real table, 68 mm balls, pockets barely wider. Only the cue ball is struck; any ball down counts, a свояк too. Eight wins.',
+    ru: 'Русская пирамида против машины, в 3D. Настоящий стол, шары 68 мм, лузы едва шире шара. Бьют только битком; любой упавший шар в счёт, свояк тоже. Восемь — победа.',
   },
   'arc.g.invaders': { en: 'Void Raiders', ru: 'Налёт из пустоты' },
   'arc.g.invaders.blurb': {
@@ -285,8 +286,8 @@ const STRINGS = {
     ru: 'Стрелки или Z / M — флипперы, ПРОБЕЛ — запуск. На телефоне касайтесь слева или справа.',
   },
   'arc.g.billiards.controls': {
-    en: 'Tap a ball to play it, drag back from it and release. Arrow keys to aim, SPACE to strike.',
-    ru: 'Коснитесь шара, чтобы бить им; потяните от него назад и отпустите. Стрелки — прицел, ПРОБЕЛ — удар.',
+    en: 'Pull back from the cue ball and let go: the longer the pull, the harder the shot. Arrow keys to aim, SPACE to strike. Miss, and the machine shoots.',
+    ru: 'Потяните от битка назад и отпустите: чем длиннее оттяжка, тем сильнее удар. Стрелки — прицел, ПРОБЕЛ — удар. Промахнётесь — бьёт машина.',
   },
   'arc.g.invaders.controls': {
     en: 'Arrow keys or A / D to move, SPACE to fire. On a phone, tap the sides to move and the middle to shoot.',

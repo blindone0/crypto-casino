@@ -1,349 +1,305 @@
-// Billiards.
+// Русская пирамида, in the arcade: you against the machine.
 //
-// One cue ball, fifteen white object balls, six pockets, and a shot count. Pot everything in as few
-// shots as you can. There are no fouls at all, because a game room cabinet is
-// not a rulebook and nobody ever read the small print on one.
+// The game is not in this file. billiards-rules.js holds the table in millimetres, the
+// physics and the rules of the classic pyramid — only the биток is struck, any ball
+// dropped counts, a свояк counts, a foul hands the other side a ball, eight wins — and
+// billiards3d.js draws that table in WebGL when there is WebGL. What this file owns is
+// the cabinet: the pointer and the keys, the machine's turn and its pause for thought,
+// the arcade score, and a flat drawing of the cloth for a browser with no WebGL, which is
+// also what the headless tests run against. Both renderers show the same millimetres,
+// and both look up the table from the house with +y to the left, so the arrow keys turn
+// the cue the same way whichever is on.
 //
-// Physics notes:
-//   - Fixed timestep with substeps. A ball at nine hundred units a second crosses its own
-//     diameter in a frame, and two balls that never overlap never collide.
-//   - Ball on ball is the equal-mass elastic case, resolved along the line of centres.
-//     That is the whole of pool: the object ball leaves along the line from the cue ball's
-//     centre through its own, which is why aiming is aiming at a ghost ball.
-//   - Overlap is pushed apart before the impulse is applied. Skipping that lets a pair
-//     settle inside each other and jitter forever.
-//   - Rolling friction is exponential, with a floor below which a ball is simply stopped.
-//     Balls that creep for another ten seconds are not realism, they are waiting.
+// The same contract as every cabinet: start(canvas, callbacks) returns { stop, score,
+// debug }, the module exports meta, sound is a callback, and the machine's one bit of
+// chance comes from a seeded generator, so a run with the same shots is the same run.
 
-const W = 360;
-const H = 680;
-const CUSHION = 20;
-const R = 9;                 // ball radius
-// A CAPTURE RADIUS from the pocket point, not a mouth width. The cushions keep a ball's
-// centre at least R from each wall, so its closest approach to a corner point is R*sqrt(2),
-// about 12.7 px: any radius below that and the corner pockets can never take a ball. The
-// pool value was 1.9R. Free pyramid is played with pockets barely wider than the ball, and
-// 1.55R is that here: a corner drops only a ball driven almost exactly into it, and a side
-// pocket takes a ball within about 21 px of its centre against a ball 18 px wide.
-const POCKET = R * 1.55;
-// Free pyramid ends at eight of the fifteen.
-const TARGET = 8;
-const FRICTION = 1.6;        // per second, exponential
-const STOP_BELOW = 6;        // units per second
-const SUBSTEPS = 6;
-const MAX_SHOTS = 30;
-const MAX_POWER = 1150;
+import * as B from './billiards-rules.js';
+import { createView } from './billiards3d.js';
 
-const LEFT = CUSHION;
-const RIGHT = W - CUSHION;
-const TOP = CUSHION;
-const BOTTOM = H - CUSHION;
-
-const POCKETS = [
-  { x: LEFT, y: TOP }, { x: RIGHT, y: TOP },
-  { x: LEFT, y: (TOP + BOTTOM) / 2 }, { x: RIGHT, y: (TOP + BOTTOM) / 2 },
-  { x: LEFT, y: BOTTOM }, { x: RIGHT, y: BOTTOM },
-];
-
-// Fifteen white balls and a red cue, the way a Russian table is laid: the colour is
-// which ball is which, not what it is worth. Every ball is worth the same.
-const IVORY = '#f4f1e8';
+const CW = 420;
+const CH = 750;
+const MARGIN = 30;
+const THINK_S = 0.9;          // the machine's pause before it shoots
+const DRAW_MM = 900;          // a pull this long on the cloth is full power
+const SHOT_CAP = 300;         // a game that has not ended by then ends
 const CUE_RED = '#c0392b';
+const IVORY = '#f4f1e8';
 
-const len = (x, y) => Math.hypot(x, y);
-
-/**
- * Start a game on a canvas.
- * Returns { stop() }. `onScore` and `onEnd` report upward to the cabinet shell.
- */
-export function start(canvas, { onScore, onEnd, onBall, sound } = {}) {
-  // Sound arrives as a callback rather than an import, so the cabinet has no dependency
-  // on the audio engine and the headless tests do not have to stub one.
+export function start(canvas, { onScore, onEnd, onBall, seed, sound } = {}) {
   const say = (name) => { if (sound) sound(name); };
-  const ctx = canvas.getContext('2d');
-  canvas.width = W;
-  canvas.height = H;
+  const random = B.rng(seed ?? (Date.now() & 0xffffffff));
+  canvas.width = CW;
+  canvas.height = CH;
+
+  const state = B.create();
+
+  // The view: the table in three dimensions, or the cloth flat. A canvas that handed out a
+  // WebGL context and then failed to compile cannot hand out a 2D one, so in that one case
+  // the flat cloth goes on a fresh canvas put in its place.
+  let surface = canvas;
+  const view = createView(canvas);
+  let ctx = null;
+  if (!view) {
+    ctx = canvas.getContext('2d');
+    if (!ctx && typeof document !== 'undefined') {
+      surface = document.createElement('canvas');
+      surface.width = CW;
+      surface.height = CH;
+      surface.className = canvas.className;
+      canvas.replaceWith(surface);
+      ctx = surface.getContext('2d');
+    }
+  }
+  // In three dimensions there is no text on the canvas, so what the table has to say goes
+  // on a caption under it.
+  let caption = null;
+  if (view && typeof document !== 'undefined' && canvas.parentNode) {
+    caption = document.createElement('div');
+    caption.className = 'arcade-caption';
+    canvas.parentNode.insertBefore(caption, canvas.nextSibling);
+  }
+
+  // The flat cloth: the length runs up the canvas with the house at the bottom, near you,
+  // and +y to the left — mirrored, so it agrees with the camera in billiards3d.js.
+  const s2 = (CH - 2 * MARGIN) / B.L;
+  const ox = (CW - B.W * s2) / 2;
+  const toScreen = (x, y) => ({ sx: ox + (B.W - y) * s2, sy: CH - MARGIN - x * s2 });
+  const fromScreen = (clientX, clientY) => {
+    const rect = surface.getBoundingClientRect();
+    const px = ((clientX - rect.left) / rect.width) * CW;
+    const py = ((clientY - rect.top) / rect.height) * CH;
+    return { x: (CH - MARGIN - py) / s2, y: B.W - (px - ox) / s2 };
+  };
+  const toTable = (e) => (view ? view.toTable(e.clientX, e.clientY) : fromScreen(e.clientX, e.clientY));
 
   let score = 0;
-  let shots = MAX_SHOTS;
   let running = true;
-  let message = 'Drag from the cue ball to aim';
-
-  // Aiming state. `power` is 0..1 and only means anything while aiming.
+  let ended = false;
+  let message = 'Your break: pull back from the cue ball and let go';
+  let messageFor = 6;
   let aiming = false;
-  let aimX = W / 2;
-  let aimY = H * 0.25;
+  let aimAt = { x: 0, y: 0 };
   let power = 0;
-  let keyAngle = -Math.PI / 2;
+  let keyAngle = 0;             // up the table, at the pyramid
   let keyCharging = false;
+  let botAim = null;
+  let think = 0;
 
-  const balls = [];
-
-  function rack() {
-    balls.length = 0;
-    balls.push({ x: W / 2, y: H * 0.74, vx: 0, vy: 0, cue: true, potted: false, colour: CUE_RED });
-    // A pyramid: rows of one to five down from the apex spot, fifteen balls.
-    const spot = { x: W / 2, y: H * 0.3 };
-    const gap = R * 2 + 0.6;
-    const rows = [1, 2, 3, 4, 5];
-    let n = 0;
-    rows.forEach((count, row) => {
-      for (let i = 0; i < count; i += 1) {
-        balls.push({
-          x: spot.x + (i - (count - 1) / 2) * gap,
-          y: spot.y + row * gap * 0.88,
-          vx: 0, vy: 0, cue: false, potted: false, colour: IVORY,
-        });
-        n += 1;
-      }
-    });
-  }
-  rack();
-
-  const cue = () => balls[0];
-
-  // Free pyramid: any ball may be played, so "the striker" is a choice, not a role. The
-  // cue is only the default. `pocketed` counts every ball that dropped, the cue included.
-  let striker = 0;
-  let pocketed = 0;
-  const toGo = () => Math.max(0, TARGET - pocketed);
-  const moving = () => balls.some((b) => !b.potted && (b.vx !== 0 || b.vy !== 0));
-  const remaining = () => balls.filter((b) => !b.cue && !b.potted).length;
-
-  function award(points) {
+  const award = (points) => {
     score = Math.max(0, score + points);
     if (onScore) onScore(score);
-  }
-
-  // ------------------------------------------------------------- collisions
-  /** Equal masses, resolved along the line of centres. This is all of pool. */
-  function hitBalls(a, b) {
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const dist = len(dx, dy);
-    if (dist === 0 || dist > R * 2) return false;
-
-    const nx = dx / dist;
-    const ny = dy / dist;
-
-    // Separate first. A pair left overlapping will re-collide every substep and buzz.
-    const overlap = (R * 2 - dist) / 2 + 0.01;
-    a.x -= nx * overlap; a.y -= ny * overlap;
-    b.x += nx * overlap; b.y += ny * overlap;
-
-    const rel = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
-    if (rel > 0) return false; // already separating
-    const impulse = rel * 0.98; // a touch of energy lost to the cloth
-    a.vx += impulse * nx; a.vy += impulse * ny;
-    b.vx -= impulse * nx; b.vy -= impulse * ny;
-    // Only a solid contact is worth a click. A graze at walking pace is not a noise.
-    if (rel < -60) say('clack');
-    return true;
-  }
-
-  function cushions(b) {
-    if (b.x - R < LEFT) { b.x = LEFT + R; b.vx = -b.vx * 0.9; }
-    if (b.x + R > RIGHT) { b.x = RIGHT - R; b.vx = -b.vx * 0.9; }
-    if (b.y - R < TOP) { b.y = TOP + R; b.vy = -b.vy * 0.9; }
-    if (b.y + R > BOTTOM) { b.y = BOTTOM - R; b.vy = -b.vy * 0.9; }
-  }
-
-  function checkPockets() {
-    for (const b of balls) {
-      if (b.potted) continue;
-      for (const p of POCKETS) {
-        if (len(b.x - p.x, b.y - p.y) > POCKET) continue;
-        b.vx = 0; b.vy = 0;
-        pocketed += 1;
-        award(1000);
-        say('pocket');
-        if (b.cue) {
-          // Free pyramid: the cue is a ball like any other, so pocketing it SCORES. It
-          // comes back to its spot only so there is always something to strike.
-          b.x = W / 2; b.y = H * 0.74;
-          message = `Cue potted — ${toGo()} to go`;
-        } else {
-          b.potted = true;
-          if (balls.indexOf(b) === striker) striker = 0;
-          message = `Potted — ${toGo()} to go`;
-        }
-        break;
-      }
-    }
-  }
-
-  // ------------------------------------------------------------------ step
-  function step(dt) {
-    if (!running) return;
-
-    for (const b of balls) {
-      if (b.potted) continue;
-      b.x += b.vx * dt;
-      b.y += b.vy * dt;
-
-      const decay = Math.exp(-FRICTION * dt);
-      b.vx *= decay;
-      b.vy *= decay;
-      if (len(b.vx, b.vy) < STOP_BELOW) { b.vx = 0; b.vy = 0; }
-      cushions(b);
-    }
-
-    for (let i = 0; i < balls.length; i += 1) {
-      if (balls[i].potted) continue;
-      for (let j = i + 1; j < balls.length; j += 1) {
-        if (balls[j].potted) continue;
-        hitBalls(balls[i], balls[j]);
-      }
-    }
-
-    checkPockets();
-
-    if (pocketed >= TARGET) {
-      // The eighth ball is worth the shots you did not take.
-      award(shots * 250 + 3000);
-      message = 'Eight. Game.';
-      finish();
-    } else if (shots <= 0 && !moving()) {
-      finish();
-    }
-  }
+  };
 
   function finish() {
-    if (!running) return;
+    if (ended) return;
+    ended = true;
     running = false;
     if (onEnd) onEnd(score);
   }
 
-  /** Fire the striker. `power` is 0..1. */
-  function shoot(angle, strength) {
-    if (!running || moving() || shots <= 0) return;
-    if (balls[striker].potted) striker = 0;
-    const p = Math.max(0.12, Math.min(1, strength));
-    balls[striker].vx = Math.cos(angle) * MAX_POWER * p;
-    balls[striker].vy = Math.sin(angle) * MAX_POWER * p;
-    shots -= 1;
-    message = '';
-    say('cue');
-    if (onBall) onBall(shots);
+  const hooks = {
+    onContact: () => say('clack'),
+    onPocket: () => say('pocket'),
+  };
+
+  /** What the last shot came to, in words, and what it is worth on the arcade's scale. */
+  function announce(last) {
+    const mine = last.seat === 0;
+    // A thousand for every ball of yours — the ones you dropped, and the one the machine
+    // hands you when it fouls. The machine's own balls are worth nothing to you.
+    if (mine) award(last.counted * 1000);
+    else if (last.penalty) award(1000);
+    if (state.over) {
+      if (state.winner === 0) {
+        award(5000 + B.toGo(state, 1) * 500);
+        message = 'Eight. You win.';
+      } else if (state.winner === 1) message = 'Eight. The machine wins.';
+      else message = 'Nothing left on the table. A draw.';
+    } else if (last.foul) {
+      message = mine ? 'Foul: nothing touched. One to the machine.' : 'The machine fouls: one to you.';
+    } else if (last.svoyak) {
+      message = mine ? `Свояк! ${B.toGo(state, 0)} to go — shoot again.` : `A свояк for the machine: ${B.toGo(state, 1)} to go.`;
+    } else if (last.counted) {
+      message = mine ? `${last.counted} down, ${B.toGo(state, 0)} to go — shoot again.` : `The machine drops one: ${B.toGo(state, 1)} to go.`;
+    } else {
+      message = mine ? 'Nothing. The machine shoots.' : 'Your shot.';
+    }
+    messageFor = 4;
+    if (onBall) onBall(B.toGo(state, 0));
+    if (state.over) finish();
   }
 
-  // ----------------------------------------------------------------- render
-  function draw() {
+  function step(dt) {
+    if (messageFor > 0) messageFor -= dt;
+    const inFlight = !!state.shot;
+    for (let i = 0; i < B.SUBSTEPS; i += 1) B.step(state, dt / B.SUBSTEPS, hooks);
+    if (inFlight && !state.shot && state.last) {
+      const last = state.last;
+      state.last = null;
+      announce(last);
+      if (!running) return;
+    }
+    if (!B.moving(state) && state.shots >= SHOT_CAP) { finish(); return; }
+
+    // The machine's turn: it lines the shot up, holds the cue there for a moment so you can
+    // see what it means to do, then shoots.
+    if (state.turn === 1 && !state.shot && !B.moving(state) && !state.over) {
+      if (!botAim) {
+        botAim = B.botShot(state, random);
+        think = THINK_S;
+      }
+      think -= dt;
+      if (think <= 0) {
+        const aim = botAim;
+        botAim = null;
+        if (B.shoot(state, aim.angle, aim.power)) say('cue');
+      }
+    }
+  }
+
+  /** Where the cue is pointing right now, if anyone is holding it. */
+  function aimNow() {
+    if (state.over || state.shot || B.moving(state)) return null;
+    if (state.turn === 1) return botAim ? { angle: botAim.angle, power: botAim.power, aiming: true } : null;
+    const c = B.cueBall(state);
+    if (aiming) return { angle: Math.atan2(c.y - aimAt.y, c.x - aimAt.x), power, aiming: true };
+    return { angle: keyAngle, power: keyCharging ? power : 0, aiming: keyCharging };
+  }
+
+  // ------------------------------------------------------------- the cloth
+  function drawFlat() {
     ctx.fillStyle = '#0b1410';
-    ctx.fillRect(0, 0, W, H);
-
+    ctx.fillRect(0, 0, CW, CH);
+    const rail = 14;
+    const top = CH - MARGIN - B.L * s2;
     ctx.fillStyle = '#5a3a1c';
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(ox - rail, top - rail, B.W * s2 + rail * 2, B.L * s2 + rail * 2);
     ctx.fillStyle = '#12613f';
-    ctx.fillRect(LEFT, TOP, RIGHT - LEFT, BOTTOM - TOP);
-
-    ctx.strokeStyle = '#0d4a30';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(LEFT, TOP, RIGHT - LEFT, BOTTOM - TOP);
-
-    for (const p of POCKETS) {
+    ctx.fillRect(ox, top, B.W * s2, B.L * s2);
+    for (const p of B.POCKETS) {
+      const q = toScreen(p.x, p.y);
       ctx.beginPath();
-      ctx.arc(p.x, p.y, POCKET, 0, Math.PI * 2);
+      ctx.arc(q.sx, q.sy, ((p.corner ? B.CORNER_MOUTH : B.MIDDLE_MOUTH) / 2 + 22) * s2, 0, Math.PI * 2);
       ctx.fillStyle = '#07100c';
       ctx.fill();
     }
-
-    for (const b of balls) {
+    ctx.strokeStyle = '#0d4a30';
+    ctx.lineWidth = 3;
+    for (const s of B.RAILS) {
+      const a = s.axis === 'y' ? toScreen(s.from, s.at) : toScreen(s.at, s.from);
+      const b = s.axis === 'y' ? toScreen(s.to, s.at) : toScreen(s.at, s.to);
+      ctx.beginPath(); ctx.moveTo(a.sx, a.sy); ctx.lineTo(b.sx, b.sy); ctx.stroke();
+    }
+    const rp = B.R * s2;
+    for (const b of state.balls) {
       if (b.potted) continue;
+      const q = toScreen(b.x, b.y);
       ctx.beginPath();
-      ctx.arc(b.x, b.y, R, 0, Math.PI * 2);
-      const g = ctx.createRadialGradient(b.x - 3, b.y - 3, 1, b.x, b.y, R);
+      ctx.arc(q.sx, q.sy, rp, 0, Math.PI * 2);
+      const g = ctx.createRadialGradient(q.sx - rp * 0.35, q.sy - rp * 0.35, 1, q.sx, q.sy, rp);
       g.addColorStop(0, '#ffffff');
-      g.addColorStop(0.35, b.colour);
+      g.addColorStop(0.35, b.cue ? CUE_RED : IVORY);
       g.addColorStop(1, '#00000055');
       ctx.fillStyle = g;
       ctx.fill();
     }
-
-    // The aiming line, and a ghost of where the cue ball is going.
-    if (running && !moving()) {
-      const c = cue();
-      const angle = aiming ? Math.atan2(aimY - c.y, aimX - c.x) : keyAngle;
-      const reach = 70 + (aiming ? power : (keyCharging ? power : 0)) * 90;
+    const aim = aimNow();
+    if (aim) {
+      const c = B.cueBall(state);
+      const hit = B.predict(state, aim.angle);
+      const from = toScreen(c.x, c.y);
+      const to = toScreen(hit.x, hit.y);
       ctx.strokeStyle = 'rgba(255,255,255,.45)';
       ctx.lineWidth = 2;
       ctx.setLineDash([5, 5]);
-      ctx.beginPath();
-      ctx.moveTo(c.x, c.y);
-      ctx.lineTo(c.x + Math.cos(angle) * reach, c.y + Math.sin(angle) * reach);
-      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(from.sx, from.sy); ctx.lineTo(to.sx, to.sy); ctx.stroke();
       ctx.setLineDash([]);
+      // The cue, drawn back with the power.
+      const back = B.R + 24 + aim.power * 280;
+      const tip = toScreen(c.x - Math.cos(aim.angle) * back, c.y - Math.sin(aim.angle) * back);
+      const butt = toScreen(c.x - Math.cos(aim.angle) * (back + 1400), c.y - Math.sin(aim.angle) * (back + 1400));
+      ctx.strokeStyle = '#c9a36a';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(tip.sx, tip.sy); ctx.lineTo(butt.sx, butt.sy); ctx.stroke();
     }
-
     ctx.fillStyle = '#e8edf6';
-    ctx.font = '600 15px ui-monospace, monospace';
-    ctx.fillText(`${shots}`, 24, H - 6);
-    if (message) {
+    ctx.font = '600 13px ui-monospace, monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(`You ${state.scores[0]}`, 12, CH - 8);
+    ctx.textAlign = 'right';
+    ctx.fillText(`Machine ${state.scores[1]}`, CW - 12, CH - 8);
+    if (messageFor > 0 && message) {
       ctx.fillStyle = '#ffd166';
       ctx.font = '600 13px system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(message, W / 2, 14);
-      ctx.textAlign = 'left';
+      ctx.fillText(message, CW / 2, 16);
+    }
+    ctx.textAlign = 'left';
+  }
+
+  let captionText = '';
+  function draw(dt) {
+    if (view) {
+      view.draw(state, aimNow(), dt);
+      if (caption) {
+        const tally = `You ${state.scores[0]} — Machine ${state.scores[1]}`;
+        const text = messageFor > 0 && message ? `${message}   ·   ${tally}` : tally;
+        if (text !== captionText) { captionText = text; caption.textContent = text; }
+      }
+    } else if (ctx) {
+      drawFlat();
     }
   }
 
-  // ------------------------------------------------------------------ input
-  const toTable = (e) => {
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: ((e.clientX - rect.left) / rect.width) * W,
-      y: ((e.clientY - rect.top) / rect.height) * H,
-    };
+  // ---------------------------------------------------------------- input
+  const mayShoot = () => running && state.turn === 0 && !state.shot && !state.over && !B.moving(state);
+  const pullPower = (at) => {
+    const c = B.cueBall(state);
+    return Math.min(1, Math.hypot(at.x - c.x, at.y - c.y) / DRAW_MM);
   };
 
   const pDown = (e) => {
-    if (!running || moving()) return;
+    if (!mayShoot()) return;
     e.preventDefault();
-    const p = toTable(e);
-    // A press on a ball makes it the striker; a press elsewhere keeps the current one,
-    // so the drag still starts anywhere, as it always did.
-    const on = balls.findIndex((b) => !b.potted && len(p.x - b.x, p.y - b.y) <= R * 2.2);
-    if (on >= 0) striker = on;
+    aimAt = toTable(e);
     aiming = true;
-    aimX = p.x; aimY = p.y;
-    power = Math.min(1, len(p.x - balls[striker].x, p.y - balls[striker].y) / 220);
+    power = pullPower(aimAt);
   };
   const pMove = (e) => {
     if (!aiming) return;
-    const p = toTable(e);
-    aimX = p.x; aimY = p.y;
-    power = Math.min(1, len(p.x - balls[striker].x, p.y - balls[striker].y) / 220);
+    aimAt = toTable(e);
+    power = pullPower(aimAt);
   };
   const pUp = (e) => {
     if (!aiming) return;
     e.preventDefault();
     aiming = false;
-    const c = balls[striker];
-    // Pull back to shoot forward: the ball goes away from where you dragged to, which is
-    // how a cue works and how every pool game on a phone behaves.
-    shoot(Math.atan2(c.y - aimY, c.x - aimX), power);
+    const c = B.cueBall(state);
+    // Pull back to shoot forward: the ball goes away from where you dragged to.
+    if (mayShoot() && B.shoot(state, Math.atan2(c.y - aimAt.y, c.x - aimAt.x), power)) say('cue');
     power = 0;
   };
-
-  // The press starts on the table; the drag and the release are heard on the WINDOW.
-  // With all three on the canvas, a pull that left it went silent, and a ball against a
-  // cushion had no room to pull at all: the cue could not be drawn past the table edge.
-  // toTable() works from the canvas rectangle, so coordinates outside it are still right.
-  canvas.addEventListener('pointerdown', pDown);
+  // The press is on the table; the drag and the release are heard on the WINDOW, so a
+  // pull past the edge of the canvas — the only way to draw the cue back from a ball
+  // against a cushion — still counts.
+  surface.addEventListener('pointerdown', pDown);
   window.addEventListener('pointermove', pMove);
   window.addEventListener('pointerup', pUp);
   window.addEventListener('pointercancel', pUp);
 
+  // +y is to the left in both views, and a bigger angle turns the aim toward +y.
   const onKey = (e, down) => {
     if (e.repeat) return;
-    if (e.code === 'ArrowLeft') { if (down) keyAngle -= 0.09; e.preventDefault(); }
-    if (e.code === 'ArrowRight') { if (down) keyAngle += 0.09; e.preventDefault(); }
+    if (e.code === 'ArrowLeft') { if (down) keyAngle += 0.06; e.preventDefault(); }
+    if (e.code === 'ArrowRight') { if (down) keyAngle -= 0.06; e.preventDefault(); }
     if (e.code === 'Space') {
       e.preventDefault();
-      if (down) { keyCharging = true; }
-      else if (keyCharging) {
+      if (down) {
+        if (mayShoot()) keyCharging = true;
+      } else if (keyCharging) {
         keyCharging = false;
-        shoot(keyAngle, Math.max(0.2, power));
+        if (mayShoot() && B.shoot(state, keyAngle, Math.max(0.2, power))) say('cue');
         power = 0;
       }
     }
@@ -353,17 +309,19 @@ export function start(canvas, { onScore, onEnd, onBall, sound } = {}) {
   window.addEventListener('keydown', keyDown);
   window.addEventListener('keyup', keyUp);
 
-  // ------------------------------------------------------------------- loop
-  let last = performance.now();
+  if (onBall) onBall(B.TARGET);
+
+  // ----------------------------------------------------------------- loop
+  let prev = performance.now();
   let raf = 0;
   function frame(t) {
-    if (!running) { draw(); return; }
-    const dt = Math.min(0.05, (t - last) / 1000);
-    last = t;
+    const dt = Math.min(0.05, (t - prev) / 1000);
+    prev = t;
+    if (!running) { draw(dt); return; }
     if (keyCharging) power = Math.min(1, power + dt * 0.9);
-    for (let i = 0; i < SUBSTEPS && running; i += 1) step(dt / SUBSTEPS);
-    draw();
-    raf = requestAnimationFrame(frame);
+    step(dt);
+    draw(dt);
+    if (running) raf = requestAnimationFrame(frame);
   }
   raf = requestAnimationFrame(frame);
 
@@ -373,36 +331,46 @@ export function start(canvas, { onScore, onEnd, onBall, sound } = {}) {
       cancelAnimationFrame(raf);
       window.removeEventListener('keydown', keyDown);
       window.removeEventListener('keyup', keyUp);
-      canvas.removeEventListener('pointerdown', pDown);
+      surface.removeEventListener('pointerdown', pDown);
       window.removeEventListener('pointermove', pMove);
       window.removeEventListener('pointerup', pUp);
       window.removeEventListener('pointercancel', pUp);
+      if (view) view.dispose();
+      if (caption) caption.remove();
     },
     get score() { return score; },
     /** Exposed so the shell, and a test, can see the table without reading pixels. */
     get debug() {
+      const c = B.cueBall(state);
       return {
         score,
-        shots,
         running,
-        moving: moving(),
-        remaining: remaining(),
-        cue: { x: Math.round(cue().x), y: Math.round(cue().y) },
-        balls: balls.filter((b) => !b.potted).length,
-        pocketed,
-        toGo: toGo(),
-        striker,
+        over: state.over,
+        winner: state.winner,
+        moving: B.moving(state),
+        turn: state.turn,
+        thinking: !!botAim,
+        scores: state.scores.slice(),
+        toGo: B.toGo(state, 0),
+        remaining: B.onTable(state).length,
+        balls: state.balls.filter((b) => !b.potted).length,
+        shots: state.shots,
+        cue: { x: Math.round(c.x), y: Math.round(c.y), potted: c.potted },
         message,
+        view: view ? '3d' : '2d',
       };
     },
-    /** For the test harness: take a shot without going through a pointer. */
-    shootAt(angle, strength) { shoot(angle, strength); },
+    /** For the test harness: the player's shot without a pointer. Angle in the table's frame. */
+    shootAt(angle, strength) {
+      if (mayShoot() && B.shoot(state, angle, strength)) say('cue');
+    },
   };
 }
 
 export const meta = {
   key: 'billiards',
-  width: W,
-  height: H,
-  controls: 'Tap a ball to play it, drag back from it and release. Arrow keys to aim, SPACE to strike.',
+  width: CW,
+  height: CH,
+  hud: 'arc.g.billiards.hud',
+  controls: 'Pull back from the cue ball and let go: the longer the pull, the harder the shot. Arrow keys to aim, SPACE to strike.',
 };

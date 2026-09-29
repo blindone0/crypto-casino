@@ -32,9 +32,10 @@ const GAMES = {
   },
   billiards: {
     key: 'billiards',
-    name: 'Russian Billiards',
-    blurb: 'Free pyramid: play any ball, pot any ball. Eight wins.',
-    // Eight balls at a thousand, plus the bonus and whatever shots are left.
+    name: 'Russian Pyramid',
+    blurb: 'The classic pyramid against the machine. Eight wins.',
+    // Eight balls at a thousand, the win at five thousand, and five hundred for every ball
+    // the machine still needed: seventeen thousand at the very most.
     maxScore: 20000,
   },
   invaders: {
