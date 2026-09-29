@@ -246,3 +246,16 @@ test('a solo game is on the record: opened, every move by every seat, finished',
   assert.strictEqual(quit[quit.length - 1].k, 'q');
   assert.ok(events.round(db, 'solo', again.id).closed_at > 0);
 });
+
+test('Tron in solo: the machines\' turns are on the record like the player\'s', (t) => {
+  const { cfg, db, user } = setup();
+  t.after(() => cleanup(cfg, db));
+  const { out } = playOut(db, cfg, user, 'tron');
+  assert.strictEqual(out.status, 'done');
+  const moves = events.history(db, 'solo', out.id).filter((e) => e.k === 'p');
+  assert.ok(moves.some((e) => e.a[0] === solo.PLAYER), 'the player turned');
+  const machine = moves.filter((e) => e.a[0] !== solo.PLAYER);
+  assert.ok(machine.length > 0, 'and so did the machine, on the record');
+  assert.ok(machine.every((e) => typeof e.a[1].turn === 'string' && Number.isInteger(e.a[1].at)),
+    'each with its heading and the tick it took effect');
+});

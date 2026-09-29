@@ -233,9 +233,18 @@ function save(db, cfg, row, state, outcome) {
 function catchUp(db, cfg, row, plugin) {
   if (!plugin.catchUp || row.status !== 'playing') return row;
   const decide = (view, seat) => bots.choose(row.game, view, seat, cfg);
-  const out = plugin.catchUp(parse(row), decide);
-  if (!out) return row;
-  return save(db, cfg, row, out.state, out.winners ? out : null);
+  return db.tx(() => {
+    const before = parse(row);
+    const out = plugin.catchUp(before, decide);
+    if (!out) return row;
+    // The machines' turns, decided just now, go on the record like the player's: a race
+    // with machines in it must replay from the chain exactly like one without.
+    const had = Array.isArray(before.turns) ? before.turns.length : 0;
+    for (const turn of (out.state.turns || []).slice(had)) {
+      events.emit(db, cfg, { g: 'solo', r: row.id, k: 'p', a: [turn.seat, { turn: turn.h, at: turn.t }] });
+    }
+    return save(db, cfg, row, out.state, out.winners ? out : null);
+  });
 }
 
 /**
