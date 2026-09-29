@@ -460,3 +460,22 @@ test('the mines presets get harder from left to right', () => {
       `preset ${i} has ${nums[i]} mines, which is not more than the ${nums[i - 1]} before it`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Only the player's held hand is fanned.
+//
+// The arc is a hand--held modifier on exactly two of the six hands in app.js: the
+// Преферанс hand and the Деберц hand. The talon and the bot hands revealed at round end
+// stay flat: a two-card talon on an arc looks broken, and a revealed hand is for
+// reading, not holding. A plausible tidy-up ("put the class on .hand") would fan all
+// six, so the counts are pinned.
+
+test('only the two held hands are on the arc, and every fanned card is numbered', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const count = (needle) => src.split(needle).length - 1;
+  assert.strictEqual(count("class: 'hand hand--held'"), 2, 'the two held hands, no others');
+  assert.strictEqual(count("class: 'hand' }"), 3, 'the talon and two revealed hands stay flat');
+  // The stylesheet rotates by --i and --n; a fanned card without them sits at 0deg on
+  // top of its neighbour, a bug that looks like a design choice.
+  assert.strictEqual(count('return held(cardNode('), 2, 'each fanned hand numbers its cards');
+});

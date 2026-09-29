@@ -1017,6 +1017,36 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
 }
 .card.muted { opacity: .32; }
 .card .suit { font-size: 21px; }
+
+/* The held hand, on an arc.
+   Only the player's own hand gets this; the talon and the revealed bot hands stay
+   flat. Each card pivots about a point well below itself, so a per-card rotation swings
+   the whole row round one shared centre: that is the invisible circle, with no
+   translate maths. 3deg per card is 13.5deg at the ends of ten, which reads as held with
+   the rank corners still legible. Cards tuck behind the next by a few pixels the way a
+   held hand overlaps, and never wrap, because an arc across two rows is nonsense.
+   --i and --n arrive from app.js via setProperty (CSP blocks style attributes, not the
+   CSSOM). Specificity is deliberate: .card:hover and .card.selected assign transform
+   directly and would overwrite the rotation, so the base rule is .hand.hand--held .card,
+   which outranks .selected and ties :hover:not(:disabled), and it sits after both so the
+   tie goes its way; hover and selected here set --lift rather than transform. */
+.hand--held { flex-wrap: nowrap; gap: 0; padding: 12px 6px 4px; }
+.hand.hand--held .card {
+  --off: calc(var(--i, 0) - (var(--n, 1) - 1) / 2);
+  --rot: calc(var(--off) * 3deg);
+  --lift: 0px;
+  margin-left: -8px;
+  transform-origin: 50% 140%;
+  transform: rotate(var(--rot)) translateY(var(--lift));
+  z-index: calc(var(--i, 0) + 1);
+}
+.hand.hand--held .card:first-child { margin-left: 0; }
+.hand.hand--held .card:hover:not(:disabled) { --lift: -10px; z-index: 60; }
+.hand.hand--held .card.selected { --lift: -14px; z-index: 61; }
+@media (max-width: 560px) {
+  /* Ten cards at 38px effective is wider than a phone; tuck them tighter. */
+  .hand.hand--held .card { margin-left: -14px; }
+}
 .card.back {
   background: repeating-linear-gradient(45deg, #1a2b46 0 5px, #16243b 5px 10px);
   border-color: var(--line); color: transparent;

@@ -2455,6 +2455,20 @@ function cardStage(seats, trick, extras = []) {
   return host;
 }
 
+/**
+ * Number a card for the held-hand arc: its index and the hand's size, as custom
+ * properties the stylesheet turns into a rotation about one shared centre.
+ *
+ * Set through the CSSOM, not a style attribute. The page runs under style-src 'self',
+ * which blocks inline style attributes and does not block setProperty; jigsawboard.js
+ * takes the same route for its tray size.
+ */
+function held(node, i, n) {
+  node.style.setProperty('--i', String(i));
+  node.style.setProperty('--n', String(n));
+  return node;
+}
+
 function cardNode(card, { onclick, selected, disabled, muted } = {}) {
   const rank = card[0];
   const suit = card[1];
@@ -2574,15 +2588,15 @@ function paintPreferans() {
     const selectable = g.state === 'discard';
     const playable = g.state === 'playing' && g.yourTurn;
     const legal = playable ? new Set(legalCards(g)) : null;
-    kids.push(el('div', { class: 'hand' }, ...g.hand.map((c) => {
+    kids.push(el('div', { class: 'hand hand--held' }, ...g.hand.map((c, i) => {
       const canPlay = playable && legal.has(c);
-      return cardNode(c, {
+      return held(cardNode(c, {
         selected: (state.prefSelected || []).includes(c),
         disabled: !selectable && !canPlay,
         // Cards you are not allowed to play are dimmed rather than silently inert.
         muted: playable && !canPlay,
         onclick: selectable ? () => toggleDiscard(c) : (canPlay ? () => playPrefCard(c) : undefined),
-      });
+      }), i, g.hand.length);
     })));
   }
   if (g.state === 'done' && g.botHands) {
@@ -2801,13 +2815,13 @@ function paintDebertz() {
   if (g.hand?.length) {
     const playable = g.state === 'playing' && g.yourTurn;
     const legal = playable ? new Set(debLegal(g)) : null;
-    kids.push(el('div', { class: 'hand' }, ...g.hand.map((c) => {
+    kids.push(el('div', { class: 'hand hand--held' }, ...g.hand.map((c, i) => {
       const canPlay = playable && legal.has(c);
-      return cardNode(c, {
+      return held(cardNode(c, {
         disabled: !canPlay,
         muted: playable && !canPlay,
         onclick: canPlay ? () => debPlay(c) : undefined,
-      });
+      }), i, g.hand.length);
     })));
   }
   if (g.state === 'done' && g.dealtHands) {
