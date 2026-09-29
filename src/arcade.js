@@ -42,6 +42,13 @@ const GAMES = {
     blurb: 'Hold the line against descending waves.',
     maxScore: 1000000,
   },
+  pong: {
+    key: 'pong',
+    name: 'Pong',
+    blurb: 'First to eleven against the machine. Every hit makes it faster.',
+    // Eleven points at a hundred, plus five a hit for a long rally.
+    maxScore: 5000,
+  },
 };
 
 /** What a spend signature covers. Distinct from a transfer so the two cannot be swapped. */

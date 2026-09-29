@@ -314,6 +314,18 @@ const STRINGS = {
   },
   'arc.soon': { en: 'Cabinet under construction', ru: 'Автомат в разработке' },
   'arc.ballsLeft': { en: 'Balls left', ru: 'Осталось шаров' },
+  'arc.g.pong': { en: 'Pong', ru: 'Понг' },
+  'arc.g.pong.blurb': {
+    en: 'First to eleven against the machine. Every hit makes it faster.',
+    ru: 'До одиннадцати против автомата. Каждый удар ускоряет мяч.',
+  },
+  'arc.g.pong.controls': {
+    en: 'Arrow keys or W / S to move. On a phone, drag on the court.',
+    ru: 'Стрелки или W / S — движение. На телефоне ведите пальцем по корту.',
+  },
+  // A cabinet may name its own HUD label through meta.hud; this is Pong's, in place of
+  // "Balls left", which Pong does not have.
+  'arc.g.pong.hud': { en: 'Points to 11', ru: 'Очков до 11' },
 
   // ---- site token
   // ---- matches

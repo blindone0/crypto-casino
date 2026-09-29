@@ -3258,6 +3258,7 @@ const CABINET_MODULES = {
   pinball: () => import('./games/pinball.js'),
   billiards: () => import('./games/billiards.js'),
   invaders: () => import('./games/invaders.js'),
+  pong: () => import('./games/pong.js'),
 };
 
 async function renderArcade() {
@@ -3390,7 +3391,7 @@ async function startCabinet(game, play) {
     el('div', { class: 'arcade-screen' },
       el('div', { class: 'arcade-hud' },
         el('span', {}, 'SCORE ', scoreOut),
-        el('span', {}, `${t('arc.ballsLeft')} `, ballsOut)),
+        el('span', {}, `${t((mod.meta && mod.meta.hud) || 'arc.ballsLeft')} `, ballsOut)),
       canvas,
       el('div', { class: 'arcade-controls' }, cabinetControls(game, mod))),
   );
