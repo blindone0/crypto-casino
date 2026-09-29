@@ -327,6 +327,16 @@ const STRINGS = {
   // "Balls left", which Pong does not have.
   'arc.g.pong.hud': { en: 'Points to 11', ru: 'Очков до 11' },
   'arc.g.invaders.hud': { en: 'Lives', ru: 'Жизни' },
+  'arc.g.tron': { en: 'Tron: Legacy', ru: 'Трон: Наследие' },
+  'arc.g.tron.blurb': {
+    en: 'Light cycles against the machines. Outlive them, round after round.',
+    ru: 'Светоциклы против машин. Переживите их, раунд за раундом.',
+  },
+  'arc.g.tron.controls': {
+    en: 'Arrow keys or W A S D to turn. On a phone, swipe the way you want to go.',
+    ru: 'Стрелки или W A S D — поворот. На телефоне — свайп в нужную сторону.',
+  },
+  'arc.g.tron.hud': { en: 'Riders left', ru: 'Гонщиков на поле' },
 
   // ---- site token
   // ---- matches

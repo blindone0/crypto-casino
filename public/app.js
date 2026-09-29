@@ -3259,6 +3259,7 @@ const CABINET_MODULES = {
   billiards: () => import('./games/billiards.js'),
   invaders: () => import('./games/invaders.js'),
   pong: () => import('./games/pong.js'),
+  tron: () => import('./games/tron.js'),
 };
 
 async function renderArcade() {

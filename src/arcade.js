@@ -49,6 +49,13 @@ const GAMES = {
     // Eleven points at a hundred, plus five a hit for a long rally.
     maxScore: 5000,
   },
+  tron: {
+    key: 'tron',
+    name: 'Tron: Legacy',
+    blurb: 'Light cycles against the machines. Outlive them, round after round.',
+    // Ten a tick over a long race, plus the riders outlived and the rounds cleared.
+    maxScore: 200000,
+  },
 };
 
 /** What a spend signature covers. Distinct from a transfer so the two cannot be swapped. */
