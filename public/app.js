@@ -952,8 +952,8 @@ function renderLimbo() {
         method: 'POST', body: { amount: amount.get(), target: target.value },
       });
       const m = $('#limboMult');
-      m.textContent = `${out.drawn.toFixed(2)}×`;
       m.className = `mult ${out.won ? 'pos' : 'neg'}`;
+      rollUpTo(m, out.drawn);
       $('#limboVerdict').textContent = out.won
         ? `${t('bet.won')} +${fmtShort(out.profit)}`
         : `${t('bet.lost')} ${fmtShort(out.wager)}`;
@@ -983,6 +983,50 @@ function renderLimbo() {
   );
   infoPanel();
   recalc();
+}
+
+/**
+ * Count a number up to where it landed, instead of snapping to it.
+ *
+ * Лимбо draws one number and that is the whole game, so the number arriving is the only
+ * event there is. Setting textContent once meant the result was simply already there —
+ * correct, and with no moment in it at all.
+ *
+ * The easing is cubic-out on a fixed 620ms: fast enough not to delay the next bet, slow
+ * enough that a 40x and a 1.02x feel different on the way. The final frame always writes
+ * the exact value rather than the eased one, because a rounding error in a payout figure
+ * is not a rounding error, it is a wrong number.
+ */
+function rollUpTo(node, value) {
+  if (node._rollRaf) cancelAnimationFrame(node._rollRaf);
+  if (node._rollBail) clearTimeout(node._rollBail);
+
+  const write = (v) => { node.textContent = `${v.toFixed(2)}×`; };
+  const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Nothing to count up to, no motion wanted, or a tab that is not on screen: write the
+  // answer. requestAnimationFrame does not fire in a hidden tab, so a player who bets and
+  // switches away would otherwise come back to 1.00x sitting next to "you won" — the
+  // animation failing is cosmetic, the number being wrong is not.
+  if (reduced || document.hidden || !(value > 1)) { write(value); return; }
+
+  const MS = 620;
+  const start = performance.now();
+  const step = (now) => {
+    const t = Math.min(1, (now - start) / MS);
+    if (t >= 1) { node._rollRaf = null; write(value); return; }
+    write(1 + (value - 1) * (1 - (1 - t) ** 3));
+    node._rollRaf = requestAnimationFrame(step);
+  };
+  node._rollRaf = requestAnimationFrame(step);
+
+  // And a belt to the braces: if the tab is hidden BETWEEN the check above and the first
+  // frame, the timer still lands the real value. Timers are throttled in a hidden tab but
+  // not suspended, which is exactly the difference that matters here.
+  node._rollBail = setTimeout(() => {
+    if (node._rollRaf) { cancelAnimationFrame(node._rollRaf); node._rollRaf = null; }
+    write(value);
+  }, MS + 400);
 }
 
 // ------------------------------------------------------------------ mines
