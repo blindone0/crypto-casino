@@ -44,14 +44,41 @@ function booksBalance(db) {
 /** Every link, every signature, every balance on the token chain. */
 function chainVerifies(db, cfg) {
   if (!cfg.token.enabled) return { name: 'token chain', ok: true, detail: 'token is off' };
-  const out = tokenchain.verifyChain(db);
+  // From the latest checkpoint, so this stays quick as the chain grows. It says which:
+  // a reader should know the check was a cached one. tools/verify-chain.js is the
+  // unconditional replay, and the line below reports when it was last run.
+  const out = tokenchain.verifyChain(db, { checkpoint: true });
   const height = db.get('SELECT COUNT(*) AS n FROM token_blocks').n;
+  const how = out.from === null || out.from === undefined ? 'from genesis' : `from checkpoint at ${out.from}`;
   return {
     name: 'token chain',
     ok: out.ok,
     detail: out.ok
-      ? `${height} blocks verify, ${out.events || 0} game events among them`
+      ? `${height} blocks verify ${how}, ${out.events || 0} game events among them`
       : `broken: ${out.reason || out.why || out.error}`,
+  };
+}
+
+/**
+ * When the chain was last replayed from genesis.
+ *
+ * The doctor verifies from a checkpoint, which trusts the blocks below the anchor as
+ * long as the anchor still hashes. A rewrite that broke a link below the anchor without
+ * touching it is the one thing that mode cannot see, so a full replay is run weekly by
+ * cron (npm run verify-chain) and this line says how long ago that was. Reported, never
+ * failed: a site that has never run it is behind on a chore, not broken.
+ */
+function fullVerifyRecent(db, cfg, at) {
+  if (!cfg.token.enabled) return { name: 'full verify', ok: true, detail: 'token is off' };
+  const last = tokenchain.lastFullVerify(db);
+  if (!last) return { name: 'full verify', ok: true, detail: 'never run: schedule npm run verify-chain weekly' };
+  const days = (at - last) / 86400;
+  return {
+    name: 'full verify',
+    ok: true,
+    detail: days > 7
+      ? `${Math.floor(days)} days ago: npm run verify-chain is overdue`
+      : `${days < 1 ? 'today' : `${Math.floor(days)} day(s) ago`}`,
   };
 }
 
@@ -91,8 +118,12 @@ function supplyHolds(db, cfg) {
   const s = tokenchain.supply(db);
   const cap = cfg.token.maxSupply;
 
+  // The scan starts after the latest checkpoint: the verify that wrote it refused a
+  // mint anywhere but genesis, so the blocks below it are known clean — with the same
+  // caveat as the chain check, and the same weekly replay behind it.
+  const cp = tokenchain.latestCheckpoint(db);
   let lateMint = null;
-  for (const row of db.all('SELECT height, txs FROM token_blocks WHERE height > 0')) {
+  for (const row of db.all('SELECT height, txs FROM token_blocks WHERE height > ?', cp ? cp.height : 0)) {
     if (JSON.parse(row.txs).some((tx) => tx.type === 'mint')) { lateMint = row.height; break; }
   }
 
@@ -227,6 +258,7 @@ function checkAll(db, cfg, at = Math.floor(Date.now() / 1000)) {
     schemaCurrent(db),
     booksBalance(db),
     chainVerifies(db, cfg),
+    fullVerifyRecent(db, cfg, at),
     eventsFlowing(db, cfg),
     supplyHolds(db, cfg),
     escrowCovered(db, cfg),
@@ -243,6 +275,7 @@ module.exports = {
   schemaCurrent,
   booksBalance,
   chainVerifies,
+  fullVerifyRecent,
   eventsFlowing,
   supplyHolds,
   escrowCovered,

@@ -214,6 +214,29 @@ const STEPS = [
       `);
     },
   },
+  {
+    id: 7,
+    name: 'token_checkpoints: a verified chain state to verify from',
+    /**
+     * A checkpoint is a cache of a full verification: the balances and spent nonces as
+     * replayed up to a height, and that block's hash. A verify that starts from one is
+     * O(blocks since) rather than O(blocks), which is what keeps the doctor quick as the
+     * chain grows by a block every few seconds. Trusted only while its anchor block still
+     * hashes to what it recorded — see tokenchain.verifyChain.
+     */
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS token_checkpoints (
+          height     INTEGER PRIMARY KEY,
+          hash       TEXT NOT NULL,
+          balances   TEXT NOT NULL,
+          nonces     TEXT NOT NULL,
+          events     INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL
+        );
+      `);
+    },
+  },
 ];
 
 const latest = (steps = STEPS) => steps.reduce((n, s) => Math.max(n, s.id), 0);

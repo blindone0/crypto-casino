@@ -322,22 +322,73 @@ const balanceOf = (db, pubkey) => {
 };
 
 // ------------------------------------------------------------ verification
+/** The highest checkpoint at or below the tip, or null. */
+function latestCheckpoint(db) {
+  const tip = head(db);
+  if (!tip) return null;
+  return db.get(
+    'SELECT * FROM token_checkpoints WHERE height <= ? ORDER BY height DESC LIMIT 1', tip.height,
+  ) || null;
+}
+
 /**
- * Replay the whole chain from genesis: check every link, every server signature, every
- * transfer signature, and that the balances the database reports match a fresh replay.
- *
- * The verifier page in the browser does exactly this, which is the point. This copy
- * exists so the server can check itself and so the test suite can assert it.
+ * Whether a checkpoint can be trusted: its anchor block is still there, still hashes to
+ * what the checkpoint recorded, and still hashes to its own contents under the operator
+ * key. A rewritten anchor cannot inherit a checkpoint, because the checkpoint commits to
+ * a hash that commits to everything before it — provided the rewrite kept the links,
+ * which is the case a full verify exists for (see tools/verify-chain.js).
  */
-function verifyChain(db) {
+function anchorHolds(db, key, cp) {
+  const row = db.get('SELECT * FROM token_blocks WHERE height=?', cp.height);
+  if (!row || row.hash !== cp.hash) return false;
+  const txs = JSON.parse(row.txs);
+  const expected = blockHash({
+    height: row.height, prevHash: row.prev_hash, timestamp: row.created_at, txs,
+  });
+  if (expected !== row.hash) return false;
+  return crypto.verify(
+    null, Buffer.from(row.hash), publicKeyFromRaw(key.publicRaw), Buffer.from(row.signature, 'hex'),
+  );
+}
+
+/**
+ * Replay the chain: check every link, every server signature, every transfer signature,
+ * every event's shape, and that the balances the database reports match the replay.
+ *
+ * From genesis by default. With `checkpoint: true` it starts from the latest checkpoint
+ * whose anchor still holds, replaying only the blocks since — the doctor's mode, which
+ * stays quick as the chain grows — and says so in `from`. A checkpoint that does not hold
+ * is ignored and the replay is a full one, which is the only safe reading of a cache.
+ *
+ * The verifier page in the browser does the full replay, always: a player should not be
+ * asked to trust the operator's cache. This copy exists so the server can check itself
+ * and so the test suite can assert it.
+ */
+function verifyChain(db, { checkpoint = false } = {}) {
   const key = serverKey(db);
-  const blocks = db.all('SELECT * FROM token_blocks ORDER BY height');
-  const balances = new Map();
-  const seenNonces = new Set();
+  const total = db.get('SELECT COUNT(*) AS n FROM token_blocks').n;
+  let balances = new Map();
+  let seenNonces = new Set();
   let prevHash = GENESIS_PREV;
   let events = 0;
+  let start = 0;
+  let from = null;
 
-  for (const [i, row] of blocks.entries()) {
+  if (checkpoint) {
+    const cp = latestCheckpoint(db);
+    if (cp && anchorHolds(db, key, cp)) {
+      balances = new Map(Object.entries(JSON.parse(cp.balances)));
+      seenNonces = new Set(JSON.parse(cp.nonces));
+      prevHash = cp.hash;
+      events = cp.events;
+      start = cp.height + 1;
+      from = cp.height;
+    }
+  }
+
+  const blocks = db.all('SELECT * FROM token_blocks WHERE height >= ? ORDER BY height', start);
+  for (const [idx, row] of blocks.entries()) {
+    const i = start + idx;
     if (row.height !== i) return fail(`block ${i} claims height ${row.height}`);
     if (row.prev_hash !== prevHash) return fail(`block ${i} does not link to its predecessor`);
 
@@ -399,14 +450,52 @@ function verifyChain(db) {
   }
 
   let minted = 0;
-  for (const tx of JSON.parse(blocks[0]?.txs || '[]')) {
+  const genesis = db.get('SELECT txs FROM token_blocks WHERE height=0');
+  for (const tx of JSON.parse(genesis ? genesis.txs : '[]')) {
     if (tx.type === 'mint') minted += tx.amount;
   }
   return {
-    ok: true, blocks: blocks.length, accounts: balances.size, head: prevHash, minted, events,
+    ok: true,
+    blocks: total,
+    replayed: blocks.length,
+    from,
+    accounts: balances.size,
+    head: prevHash,
+    minted,
+    events,
+    balances,
+    nonces: seenNonces,
   };
-  function fail(reason) { return { ok: false, reason, blocks: blocks.length }; }
+  function fail(reason) { return { ok: false, reason, blocks: total, from }; }
 }
+
+/**
+ * Record the verified state at the tip, so the next verify can start there.
+ *
+ * Verifies first — from the previous checkpoint, which is what makes writing one cheap —
+ * and writes nothing if that fails: a checkpoint over a broken chain would be a cache of
+ * a lie. The server calls this every so many blocks (src/events.js) and at boot; the
+ * weekly full verify (tools/verify-chain.js) writes one after a replay from genesis. The
+ * doctor never does, because the doctor writes nothing.
+ */
+function writeCheckpoint(db, { full = false } = {}) {
+  const out = verifyChain(db, { checkpoint: !full });
+  const tip = head(db);
+  if (!out.ok || !tip) return { written: false, ...out };
+  if (db.get('SELECT 1 FROM token_checkpoints WHERE height=?', tip.height)) {
+    return { written: false, ...out, height: tip.height };
+  }
+  db.run(
+    `INSERT INTO token_checkpoints(height, hash, balances, nonces, events, created_at)
+     VALUES(?,?,?,?,?,?)`,
+    tip.height, tip.hash, JSON.stringify(Object.fromEntries(out.balances)),
+    JSON.stringify([...out.nonces]), out.events, Math.floor(Date.now() / 1000),
+  );
+  return { written: true, ...out, height: tip.height };
+}
+
+/** When the chain was last replayed from genesis, in seconds, or null. */
+const lastFullVerify = (db) => db.kvGet('chain.fullVerifiedAt', null);
 
 // -------------------------------------------------------------------- api
 /**
@@ -548,5 +637,6 @@ module.exports = {
   publicKeyFromRaw, privateKeyFromSeed, rawPublicKey,
   serverKey, treasuryKey, ensureGenesis, treasuryTransfer, supply,
   appendBlock, head, balanceOf, verifyChain, verifyTransferSignature, checkEvent,
+  latestCheckpoint, writeCheckpoint, lastFullVerify,
   registerKey, submitTransfer, chainSlice, keyFor, nextNonce,
 };

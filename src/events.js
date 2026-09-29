@@ -47,7 +47,7 @@ const nowMs = () => Date.now();
 const nowS = () => Math.floor(Date.now() / 1000);
 
 /** The dials, under cfg.token.events. A broken flusher can be switched off without a deploy. */
-const DEFAULTS = { enabled: true, batchCount: 25, batchMs: 5000, maxPerBlock: 500 };
+const DEFAULTS = { enabled: true, batchCount: 25, batchMs: 5000, maxPerBlock: 500, checkpointEvery: 500 };
 const settings = (cfg) => ({ ...DEFAULTS, ...((cfg && cfg.token && cfg.token.events) || {}) });
 
 /** The event as it goes into a block. */
@@ -123,14 +123,21 @@ function flush(db, cfg, { force = false } = {}) {
     if (!rows.length) break;
     const ripe = rows.length >= s.batchCount || nowMs() - rows[0].ms >= s.batchMs;
     if (!ripe && !force) break;
-    db.tx(() => {
-      const block = tokenchain.appendBlock(db, rows.map(toTx));
+    const block = db.tx(() => {
+      const appended = tokenchain.appendBlock(db, rows.map(toTx));
       for (const row of rows) {
-        db.run('UPDATE token_events SET height=? WHERE g=? AND r=? AND s=?', block.height, row.g, row.r, row.s);
+        db.run('UPDATE token_events SET height=? WHERE g=? AND r=? AND s=?', appended.height, row.g, row.r, row.s);
       }
+      return appended;
     });
     out.blocks += 1;
     out.events += rows.length;
+    // Every so many blocks, a checkpoint, so the doctor's verify stays quick. Its own
+    // transaction, after the block's: a checkpoint is a cache and must never roll a
+    // block back with it.
+    if (s.checkpointEvery > 0 && block.height % s.checkpointEvery === 0) {
+      try { db.tx(() => tokenchain.writeCheckpoint(db)); } catch { /* the next one will do */ }
+    }
     if (rows.length < s.maxPerBlock) break;
   }
   return out;

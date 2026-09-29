@@ -1104,6 +1104,14 @@ function build(cfg) {
     // genesis mint inside their own request. Idempotent: it returns immediately if a head
     // already exists.
     tokenchain.ensureGenesis(db, cfg);
+    // A checkpoint at boot, from the last one, so the first doctor after a deploy is
+    // quick and the chain is known good before anything is staked on it.
+    try {
+      const cp = db.tx(() => tokenchain.writeCheckpoint(db));
+      if (!cp.ok) console.error(`  the token chain does not verify: ${cp.reason}`);
+    } catch (e) {
+      console.error(`  checkpoint failed: ${e.message}`);
+    }
 
     // Rate-limit rows, and tables nobody is coming back to.
     //
