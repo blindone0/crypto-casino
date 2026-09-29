@@ -31,6 +31,14 @@
 //
 // Primitives are deliberately boring and standard: Ed25519 signatures and SHA-256
 // hashing. Boring is what "compatible" actually means.
+//
+// EVENTS. Since the games began writing their every step to the chain (src/events.js),
+// a block may also carry `ev` transactions: a game code, a round, a sequence number, a
+// kind and its arguments. An event is not money and cannot become money: applyTx has no
+// path from it to credit(), and both verifiers — this one and the browser's — refuse an
+// event that so much as carries a `to`, `from` or `amount` field. That refusal is the
+// load-bearing line, because it holds whatever a later refactor of the balance replay
+// makes of an unknown shape.
 const crypto = require('node:crypto');
 const U = require('./util');
 
@@ -205,6 +213,34 @@ const transferPayload = (tx) => ({
   nonce: tx.nonce,
 });
 
+/**
+ * What an event may look like, and nothing else.
+ *
+ * Returns null for a well-formed event and the reason for anything else. The browser
+ * verifier holds a copy of these rules (public/chainverify.js), and one test vector is
+ * run through both, so the two cannot disagree about what an event is.
+ */
+const EVENT_FIELDS = new Set(['type', 'g', 'r', 's', 'k', 'a', 'u', 'sig']);
+const EVENT_BYTES = 4096;
+
+function checkEvent(tx) {
+  for (const k of ['to', 'from', 'amount', 'nonce']) {
+    if (k in tx) return `an event carries a money field (${k})`;
+  }
+  for (const k of Object.keys(tx)) {
+    if (!EVENT_FIELDS.has(k)) return `an event carries an unknown field (${k})`;
+  }
+  if (typeof tx.g !== 'string' || !/^[a-z][a-z0-9-]{0,15}$/.test(tx.g)) return 'an event names no game';
+  if (!Number.isSafeInteger(tx.r) || tx.r < 0) return 'an event names no round';
+  if (!Number.isSafeInteger(tx.s) || tx.s < 0) return 'an event has no sequence number';
+  if (typeof tx.k !== 'string' || !/^[a-z]$/.test(tx.k)) return 'an event has no kind';
+  if (!Array.isArray(tx.a)) return 'an event has no argument list';
+  if (tx.u !== undefined && !/^[0-9a-f]{8}$/.test(String(tx.u))) return 'an event names its actor badly';
+  if (tx.sig !== undefined && !/^[0-9a-f]{128}$/.test(String(tx.sig))) return 'an event carries a malformed signature';
+  if (canonical(tx).length > EVENT_BYTES) return 'an event is too large';
+  return null;
+}
+
 function verifyTransferSignature(tx) {
   try {
     return crypto.verify(
@@ -245,6 +281,13 @@ function appendBlock(db, txs) {
 
 /** Move the materialised balances. The chain remains the source of truth. */
 function applyTx(db, tx) {
+  if (tx.type === 'ev') {
+    // Not money. The shape is checked here as well as by the verifiers, so an event
+    // that would not verify cannot be written in the first place.
+    const why = checkEvent(tx);
+    if (why) throw new U.BadRequest(why);
+    return;
+  }
   if (tx.type === 'mint') {
     credit(db, tx.to, tx.amount);
   } else if (tx.type === 'transfer') {
@@ -292,6 +335,7 @@ function verifyChain(db) {
   const balances = new Map();
   const seenNonces = new Set();
   let prevHash = GENESIS_PREV;
+  let events = 0;
 
   for (const [i, row] of blocks.entries()) {
     if (row.height !== i) return fail(`block ${i} claims height ${row.height}`);
@@ -309,6 +353,15 @@ function verifyChain(db) {
     if (!sigOk) return fail(`block ${i} is not signed by the operator key`);
 
     for (const tx of txs) {
+      if (tx.type === 'ev') {
+        // An event carries no money by construction, and the verifier holds it to that:
+        // one with a money field is refused here, before the balance replay below could
+        // make anything of it.
+        const why = checkEvent(tx);
+        if (why) return fail(`block ${i}: ${why}`);
+        events += 1;
+        continue;
+      }
       // The supply is fixed by refusing to accept a chain that creates tokens anywhere but
       // in its first block. A verifier that skipped this check would happily confirm a
       // ledger where the operator minted itself a fortune in block nine hundred.
@@ -350,7 +403,7 @@ function verifyChain(db) {
     if (tx.type === 'mint') minted += tx.amount;
   }
   return {
-    ok: true, blocks: blocks.length, accounts: balances.size, head: prevHash, minted,
+    ok: true, blocks: blocks.length, accounts: balances.size, head: prevHash, minted, events,
   };
   function fail(reason) { return { ok: false, reason, blocks: blocks.length }; }
 }
@@ -494,6 +547,6 @@ module.exports = {
   canonical, sha256, blockHash, transferPayload,
   publicKeyFromRaw, privateKeyFromSeed, rawPublicKey,
   serverKey, treasuryKey, ensureGenesis, treasuryTransfer, supply,
-  appendBlock, head, balanceOf, verifyChain, verifyTransferSignature,
+  appendBlock, head, balanceOf, verifyChain, verifyTransferSignature, checkEvent,
   registerKey, submitTransfer, chainSlice, keyFor, nextNonce,
 };

@@ -7,14 +7,42 @@
 //   2. that each block hash actually matches the block contents,
 //   3. that each block carries a valid signature from the operator key,
 //   4. that every transfer inside carries a valid signature from the account sending it,
-//   5. that no nonce is spent twice, and
-//   6. that replaying every transaction from zero produces the balances claimed.
+//   5. that no nonce is spent twice,
+//   6. that replaying every transaction from zero produces the balances claimed, and
+//   7. that every game event in a block is only an event: it has the one shape events
+//      have, and no `to`, `from` or `amount` that a balance replay could be talked into
+//      honouring.
 //
-// If all six hold, the operator has not rewritten history and has not moved anyone's
+// If all seven hold, the operator has not rewritten history and has not moved anyone's
 // tokens. If any fails, this says exactly which block and why.
 import { canonical, transferPayload, verifySignature, verifyOverString, sha256Hex } from './tokenkeys.js';
 
 const GENESIS_PREV = '0'.repeat(64);
+
+/**
+ * What an event may look like, and nothing else. The same rules as src/tokenchain.js
+ * checkEvent, and a test runs one vector through both so they cannot drift apart.
+ */
+const EVENT_FIELDS = new Set(['type', 'g', 'r', 's', 'k', 'a', 'u', 'sig']);
+const EVENT_BYTES = 4096;
+
+export function checkEvent(tx) {
+  for (const k of ['to', 'from', 'amount', 'nonce']) {
+    if (k in tx) return `an event carries a money field (${k})`;
+  }
+  for (const k of Object.keys(tx)) {
+    if (!EVENT_FIELDS.has(k)) return `an event carries an unknown field (${k})`;
+  }
+  if (typeof tx.g !== 'string' || !/^[a-z][a-z0-9-]{0,15}$/.test(tx.g)) return 'an event names no game';
+  if (!Number.isSafeInteger(tx.r) || tx.r < 0) return 'an event names no round';
+  if (!Number.isSafeInteger(tx.s) || tx.s < 0) return 'an event has no sequence number';
+  if (typeof tx.k !== 'string' || !/^[a-z]$/.test(tx.k)) return 'an event has no kind';
+  if (!Array.isArray(tx.a)) return 'an event has no argument list';
+  if (tx.u !== undefined && !/^[0-9a-f]{8}$/.test(String(tx.u))) return 'an event names its actor badly';
+  if (tx.sig !== undefined && !/^[0-9a-f]{128}$/.test(String(tx.sig))) return 'an event carries a malformed signature';
+  if (canonical(tx).length > EVENT_BYTES) return 'an event is too large';
+  return null;
+}
 
 /** Rebuild the hash a block should have from its contents alone. */
 async function hashOf(block, chainId) {
@@ -50,6 +78,7 @@ export async function verifyChain({ fetchSlice, onProgress } = {}) {
   let checked = 0;
   let transfers = 0;
   let mints = 0;
+  let events = 0;
 
   const fail = (reason, height) => ({
     ok: false, reason, height, checked, total, chain: chainId, serverKey,
@@ -74,6 +103,12 @@ export async function verifyChain({ fetchSlice, onProgress } = {}) {
       if (!signed) return fail('the block is not signed by the operator key', block.height);
 
       for (const tx of block.txs) {
+        if (tx.type === 'ev') {
+          const why = checkEvent(tx);
+          if (why) return fail(why, block.height);
+          events += 1;
+          continue;
+        }
         if (tx.type === 'transfer') {
           const good = await verifySignature(tx.from, transferPayload(tx), tx.sig);
           if (!good) {
@@ -125,6 +160,7 @@ export async function verifyChain({ fetchSlice, onProgress } = {}) {
     accounts: balances.size,
     transfers,
     mints,
+    events,
     supply,
     balances,
   };
