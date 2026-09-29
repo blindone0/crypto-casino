@@ -2104,12 +2104,12 @@ const GL_PER_DRUM = 12;
  */
 let glPainter = null;
 let glPainterTheme = null;
-function glDrawSymbol(ctx, sym, y, cell, width) {
+function glDrawSymbol(ctx, sym, y, cell, width, extra) {
   if (!glPainter || glPainterTheme !== slotTheme) {
     glPainter = cellPainter(slotTheme, slotPalette(slotTheme));
     glPainterTheme = slotTheme;
   }
-  return glPainter(ctx, sym, y, cell, width);
+  return glPainter(ctx, sym, y, cell, width, extra);
 }
 
 /** The twelve symbols on one drum, taken from that reel's real strip. */

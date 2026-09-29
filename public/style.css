@@ -714,6 +714,10 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
    between the paddings and the LEDs have their room. */
 .slot-cabinet.cabgl .slot-lever { position: absolute; right: -22px; top: 22%; margin: 0; }
 .slot-cabinet.cabgl .slot-base { min-height: 64px; margin: 0 16px; cursor: pointer; }
+/* The reel canvas covers the window box; four px of padding puts its edge exactly on
+   the bezel's inner lip, which frames the reels four px out. With the old nine the drums
+   ran under the frame and the top row was cut by nothing visible. */
+.slot-cabinet.cabgl .slot-window { padding: 4px; }
 .slot-cabinet.cabgl .slot-marquee { padding: 16px 16px 14px; }
 .slot-cabinet.cabgl .mq-main {
   background: linear-gradient(180deg, var(--mq-a, #fff3cd) 0%, var(--mq-b, #e2bd63) 48%, var(--mq-c, #9a7526) 100%);

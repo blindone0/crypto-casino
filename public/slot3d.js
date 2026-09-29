@@ -92,8 +92,10 @@ void main() {
   float sheen = pow(max(dot(n, vec3(0.0, 0.4103647, 0.9119215)), 0.0), 8.0) * 0.10;
 
   // Straight at the viewer, so the highlight sits on the payline where the glass would
-  // catch it, and 0.18 rather than 0.75.
-  float spec = pow(max(n.z, 0.0), 48.0) * 0.18;
+  // catch it, and 0.18 rather than 0.75. Under it a broad, soft gloss across the middle
+  // of the face: the lamp over the machine on a glossy printed strip, which is what
+  // says the strip is wrapped round something.
+  float spec = pow(max(n.z, 0.0), 48.0) * 0.18 + pow(max(n.z, 0.0), 10.0) * 0.14;
 
   vec4 tex = strip(vUV);
 
@@ -140,13 +142,16 @@ void main() {
   // above and below fall away from it, so letting brightness follow that gives the drum
   // depth and puts the eye where the win is read.
   float facing = max(n.z, 0.0);
-  lit *= mix(0.68, 1.0, facing);
+  // Steeper than it was: on a dark printed strip the old 0.68 floor left the top and
+  // bottom rows as bright as the payline, and five flat columns of pictures is what
+  // that looks like. The rows now fall away into shadow, which is the barrel.
+  lit *= mix(0.40, 1.0, pow(facing, 1.6));
 
   // Along the axis, which vUV.x measures and nothing used before. Darkening towards each
   // end seats the drum between its neighbours instead of leaving five flat panels butted
   // together, and is where the gap between barrels comes from.
-  float ends = smoothstep(0.0, 0.16, vUV.x) * smoothstep(1.0, 0.84, vUV.x);
-  lit *= mix(0.52, 1.0, ends);
+  float ends = smoothstep(0.0, 0.12, vUV.x) * smoothstep(1.0, 0.88, vUV.x);
+  lit *= mix(0.30, 1.0, ends);
 
   // A cool edge where the barrel turns away, so it reads as round at the top and bottom
   // of the window rather than stopping dead.
@@ -245,7 +250,7 @@ function modelMatrix(x, angle, halfWidth) {
 export const STRIP_W = 512;
 export const STRIP_H = 4096;
 
-export async function stripTexture(gl, symbols, drawSymbol, width = STRIP_W, height = STRIP_H) {
+export async function stripTexture(gl, symbols, drawSymbol, width = STRIP_W, height = STRIP_H, extra = {}) {
   // Both sides must be a power of two.
   //
   // The texture has to wrap on T to go round the drum, and WebGL 1 will not REPEAT a
@@ -268,7 +273,7 @@ export async function stripTexture(gl, symbols, drawSymbol, width = STRIP_W, hei
 
   for (let i = 0; i < symbols.length; i += 1) {
     // eslint-disable-next-line no-await-in-loop
-    await drawSymbol(ctx, symbols[i], i * cell, cell, width);
+    await drawSymbol(ctx, symbols[i], i * cell, cell, width, extra);
   }
 
   const tex = gl.createTexture();
@@ -390,6 +395,20 @@ export function createReels(host, opts = {}) {
    * every drum half a symbol off, which reads as the centre row showing the wrong one.
    */
   const angleFor = (i) => FRONT - ((i + 0.5) / perDrum) * Math.PI * 2;
+
+  /**
+   * The shape of one cell ON THE DRUM: its width over the arc it covers, in the drum's
+   * own units. The strip's cell is 512 by 341, wide; the drum's is narrow and tall, and
+   * the texture is stretched between the two. Whoever paints the strip needs this number
+   * to draw a square that lands square - without it every symbol came out more than
+   * twice as tall as it was wide. Five drums across a window of the usual shape give
+   * about 0.7; mid-construction, with no layout yet, the number is nonsense and the usual
+   * one stands in.
+   */
+  const cellAspect = () => {
+    const k = (2 * halfW) / ((Math.PI * 2) / perDrum);
+    return Number.isFinite(k) && k > 0.45 && k < 1.1 ? k : 0.7;
+  };
 
   let raf = null;
   let running = false;
@@ -566,7 +585,7 @@ export function createReels(host, opts = {}) {
       const d = drums[index];
       if (!d) return;
       if (d.tex) gl.deleteTexture(d.tex);
-      d.tex = await stripTexture(gl, symbols, drawSymbol);
+      d.tex = await stripTexture(gl, symbols, drawSymbol, STRIP_W, STRIP_H, { aspect: cellAspect() });
       draw();
     },
 
