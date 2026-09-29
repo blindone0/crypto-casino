@@ -43,6 +43,7 @@
 import {
   KEY_DIR, dot, cross, norm, identity, multiply, translation, scaling, rotation,
   normalMatrix, lookAt, perspective, shader, program, locations, loadTexture,
+  context, onLost, release,
 } from './gl.js';
 
 const VERT = `
@@ -542,9 +543,9 @@ export function createDice(host, opts = {}) {
   canvas.className = 'dice-canvas';
   host.appendChild(canvas);
 
-  const gl = canvas.getContext('webgl', {
-    antialias: true, alpha: false, premultipliedAlpha: false,
-  }) || canvas.getContext('experimental-webgl');
+  // The shared helper, so the dice ask for a context the same way as every other table:
+  // with every hint towards getting one.
+  const gl = context(canvas);
   if (!gl) {
     canvas.remove();
     return null;
@@ -559,6 +560,8 @@ export function createDice(host, opts = {}) {
     canvas.remove();
     return null;
   }
+  let lostCb = null;
+  const unlisten = onLost(canvas, () => { if (lostCb) lostCb(); });
 
   /**
    * Every attribute and uniform location, looked up once.
@@ -1092,6 +1095,9 @@ export function createDice(host, opts = {}) {
   return {
     canvas,
 
+    /** Who to tell when the context is lost; they build new dice. */
+    onLost(cb) { lostCb = cb; },
+
     /**
      * Throw the dice, landing on `faces`.
      *
@@ -1194,6 +1200,8 @@ export function createDice(host, opts = {}) {
       if (raf !== null) cancelAnimationFrame(raf);
       if (pending !== null) cancelAnimationFrame(pending);
       ro?.disconnect();
+      unlisten();
+      release(gl);
       canvas.remove();
     },
   };

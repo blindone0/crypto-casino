@@ -38,7 +38,7 @@
 // for. The parallax tilt is CSS on the whole cabinet, so every layer turns together.
 
 import {
-  context, program, locations, loadTexture, perspective, lookAt, KEY_DIR, ACES,
+  context, program, locations, loadTexture, perspective, lookAt, KEY_DIR, ACES, onLost, release,
 } from './gl.js';
 
 const FOVY = 0.62;             // the drums' field of view, so the two perspectives agree
@@ -387,6 +387,9 @@ export function createCabinet(host, opts = {}) {
   }
   host.appendChild(back);
   (opts.reels || opts.window).appendChild(glass);
+  let lostCb = null;
+  const unlistenBack = onLost(back, () => { if (lostCb) lostCb(); });
+  const unlistenGlass = onLost(glass, () => { if (lostCb) lostCb(); });
 
   const L = locations(gl, prog, {
     attrs: ['aPos', 'aNormal', 'aUV'],
@@ -577,9 +580,15 @@ export function createCabinet(host, opts = {}) {
       materials = materialsFor(theme);
       draw();
     },
+    /** Who to tell when either context is lost; they build a new cabinet. */
+    onLost(cb) { lostCb = cb; },
     dispose() {
       if (raf) cancelAnimationFrame(raf);
       ro?.disconnect();
+      unlistenBack();
+      unlistenGlass();
+      release(gl);
+      release(gg);
       back.remove();
       glass.remove();
     },

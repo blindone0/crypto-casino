@@ -981,6 +981,16 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
  * is what the canvas cannot draw, stay.
  */
 .slot-window.gl .reel { visibility: hidden; }
+/* What stands where a WebGL table should be when the browser will not give one: a
+   sentence, not a flat imitation of the table. Inside the slot window it covers the
+   window; elsewhere it is the block the renderer would have been. */
+.gl-notice {
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  min-height: 160px; padding: 24px;
+  color: #ffd166; font: 600 14px/1.5 var(--sans, system-ui);
+  background: rgba(0, 0, 0, .55); border-radius: 10px;
+}
+.slot-window > .gl-notice { position: absolute; inset: 0; z-index: 9; min-height: 0; }
 .slot-window.gl .reel > .reel-glass,
 .slot-window.gl .reel > .reel-cap { visibility: visible; }
 

@@ -125,9 +125,15 @@ const STRINGS = {
     en: 'The house holds {n}, which is all a win can pay right now.',
     ru: 'В кассе {n} — больше выигрыш сейчас не заплатит.',
   },
-  'bones.fallbackNote': {
-    en: 'Your browser cannot draw the 3D dice, so the throw is shown as numbers. The game is the same.',
-    ru: 'Браузер не рисует 3D-кости, бросок показан числами. Игра та же.',
+
+  // ---- WebGL, which every table and machine here is drawn with
+  'gl.required': {
+    en: 'This table is drawn with WebGL and your browser will not give it a context. Turn on hardware acceleration (chrome://settings/system) and reload. Trying again meanwhile.',
+    ru: 'Этот стол рисуется через WebGL, а браузер не даёт ему контекст. Включите аппаратное ускорение (chrome://settings/system) и перезагрузите страницу. Пока пробую снова.',
+  },
+  'gl.retrying': {
+    en: 'The graphics context was lost. Rebuilding…',
+    ru: 'Графический контекст потерян. Перестраиваю…',
   },
 
   // ---- limbo

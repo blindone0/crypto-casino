@@ -23,8 +23,6 @@ const MARGIN = 30;
 const THINK_S = 0.9;          // the machine's pause before it shoots
 const DRAW_MM = 900;          // a pull this long on the cloth is full power
 const SHOT_CAP = 300;         // a game that has not ended by then ends
-const CUE_RED = '#c0392b';
-const IVORY = '#f4f1e8';
 
 export function start(canvas, { onScore, onEnd, onBall, seed, sound } = {}) {
   const say = (name) => { if (sound) sound(name); };
@@ -34,37 +32,64 @@ export function start(canvas, { onScore, onEnd, onBall, seed, sound } = {}) {
 
   const state = B.create();
 
-  // The view: the table in three dimensions, or the cloth flat. A canvas that handed out a
-  // WebGL context and then failed to compile cannot hand out a 2D one, so in that one case
-  // the flat cloth goes on a fresh canvas put in its place.
+  // The view: the table in three dimensions, and nothing else. There is no flat cloth any
+  // more: a browser that will not give a context gets a sentence on the canvas saying so,
+  // and the game underneath still runs (which is also what the headless tests drive). A
+  // canvas that handed out a WebGL context cannot hand out a 2D one, so the notice goes on
+  // a fresh canvas put in its place - and so does a rebuilt view when a context is lost.
   let surface = canvas;
-  const view = createView(canvas);
+  let view = null;
   let ctx = null;
-  if (!view) {
-    ctx = canvas.getContext('2d');
-    if (!ctx && typeof document !== 'undefined') {
-      surface = document.createElement('canvas');
-      surface.width = CW;
-      surface.height = CH;
-      surface.className = canvas.className;
-      canvas.replaceWith(surface);
-      ctx = surface.getContext('2d');
+  let glTries = 0;
+  let retryAt = 0;
+  const swapCanvas = () => {
+    if (typeof document === 'undefined' || !surface.parentNode) return false;
+    const fresh = document.createElement('canvas');
+    fresh.width = CW;
+    fresh.height = CH;
+    fresh.className = surface.className;
+    surface.replaceWith(fresh);
+    surface.removeEventListener('pointerdown', pDown);
+    surface = fresh;
+    surface.addEventListener('pointerdown', pDown);
+    return true;
+  };
+  const buildView = () => {
+    view = createView(surface);
+    if (view) {
+      glTries = 0;
+      ensureCaption();
+      view.onLost(() => {
+        // Thrown away and built again on a new canvas, after a pause that grows.
+        view.dispose();
+        view = null;
+        glTries += 1;
+        retryAt = performance.now() + Math.min(30000, 500 * 2 ** Math.min(glTries, 6));
+        if (swapCanvas()) ctx = surface.getContext('2d');
+      });
+      return;
     }
-  }
+    if (!ctx) ctx = surface.getContext('2d');
+    if (!ctx && swapCanvas()) ctx = surface.getContext('2d');
+    glTries += 1;
+    retryAt = performance.now() + Math.min(30000, 1000 * 2 ** Math.min(glTries, 5));
+  };
   // In three dimensions there is no text on the canvas, so what the table has to say goes
-  // on a caption under it.
+  // on a caption under it, put there the first time a view is built.
   let caption = null;
-  if (view && typeof document !== 'undefined' && canvas.parentNode) {
+  const ensureCaption = () => {
+    if (caption || typeof document === 'undefined' || !surface.parentNode) return;
     caption = document.createElement('div');
     caption.className = 'arcade-caption';
-    canvas.parentNode.insertBefore(caption, canvas.nextSibling);
-  }
+    surface.parentNode.insertBefore(caption, surface.nextSibling);
+  };
 
-  // The flat cloth: the length runs up the canvas with the house at the bottom, near you,
-  // and +y to the left — mirrored, so it agrees with the camera in billiards3d.js.
+  // The pointer without a view: the table laid flat on the canvas, the length running up
+  // it with the house at the bottom and +y to the left, mirrored so it agrees with the
+  // camera in billiards3d.js. Nothing is drawn this way any more; the headless tests
+  // press on it, and a table waiting for WebGL still hears its pulls.
   const s2 = (CH - 2 * MARGIN) / B.L;
   const ox = (CW - B.W * s2) / 2;
-  const toScreen = (x, y) => ({ sx: ox + (B.W - y) * s2, sy: CH - MARGIN - x * s2 });
   const fromScreen = (clientX, clientY) => {
     const rect = surface.getBoundingClientRect();
     const px = ((clientX - rect.left) / rect.width) * CW;
@@ -167,79 +192,32 @@ export function start(canvas, { onScore, onEnd, onBall, seed, sound } = {}) {
     return { angle: keyAngle, power: keyCharging ? power : 0, aiming: keyCharging };
   }
 
-  // ------------------------------------------------------------- the cloth
-  function drawFlat() {
+  // ----------------------------------------------------------- the notice
+  /** What the canvas shows while there is no WebGL: the fact, and the score. */
+  function drawNotice() {
     ctx.fillStyle = '#0b1410';
     ctx.fillRect(0, 0, CW, CH);
-    const rail = 14;
-    const top = CH - MARGIN - B.L * s2;
-    ctx.fillStyle = '#5a3a1c';
-    ctx.fillRect(ox - rail, top - rail, B.W * s2 + rail * 2, B.L * s2 + rail * 2);
-    ctx.fillStyle = '#12613f';
-    ctx.fillRect(ox, top, B.W * s2, B.L * s2);
-    for (const p of B.POCKETS) {
-      const q = toScreen(p.x, p.y);
-      ctx.beginPath();
-      ctx.arc(q.sx, q.sy, ((p.corner ? B.CORNER_MOUTH : B.MIDDLE_MOUTH) / 2 + 22) * s2, 0, Math.PI * 2);
-      ctx.fillStyle = '#07100c';
-      ctx.fill();
-    }
-    ctx.strokeStyle = '#0d4a30';
-    ctx.lineWidth = 3;
-    for (const s of B.RAILS) {
-      const a = s.axis === 'y' ? toScreen(s.from, s.at) : toScreen(s.at, s.from);
-      const b = s.axis === 'y' ? toScreen(s.to, s.at) : toScreen(s.at, s.to);
-      ctx.beginPath(); ctx.moveTo(a.sx, a.sy); ctx.lineTo(b.sx, b.sy); ctx.stroke();
-    }
-    const rp = B.R * s2;
-    for (const b of state.balls) {
-      if (b.potted) continue;
-      const q = toScreen(b.x, b.y);
-      ctx.beginPath();
-      ctx.arc(q.sx, q.sy, rp, 0, Math.PI * 2);
-      const g = ctx.createRadialGradient(q.sx - rp * 0.35, q.sy - rp * 0.35, 1, q.sx, q.sy, rp);
-      g.addColorStop(0, '#ffffff');
-      g.addColorStop(0.35, b.cue ? CUE_RED : IVORY);
-      g.addColorStop(1, '#00000055');
-      ctx.fillStyle = g;
-      ctx.fill();
-    }
-    const aim = aimNow();
-    if (aim) {
-      const c = B.cueBall(state);
-      const hit = B.predict(state, aim.angle);
-      const from = toScreen(c.x, c.y);
-      const to = toScreen(hit.x, hit.y);
-      ctx.strokeStyle = 'rgba(255,255,255,.45)';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([5, 5]);
-      ctx.beginPath(); ctx.moveTo(from.sx, from.sy); ctx.lineTo(to.sx, to.sy); ctx.stroke();
-      ctx.setLineDash([]);
-      // The cue, drawn back with the power.
-      const back = B.R + 24 + aim.power * 280;
-      const tip = toScreen(c.x - Math.cos(aim.angle) * back, c.y - Math.sin(aim.angle) * back);
-      const butt = toScreen(c.x - Math.cos(aim.angle) * (back + 1400), c.y - Math.sin(aim.angle) * (back + 1400));
-      ctx.strokeStyle = '#c9a36a';
-      ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.moveTo(tip.sx, tip.sy); ctx.lineTo(butt.sx, butt.sy); ctx.stroke();
-    }
+    ctx.fillStyle = '#ffd166';
+    ctx.font = '600 15px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('This table is drawn with WebGL,', CW / 2, CH / 2 - 30);
+    ctx.fillText('and the browser will not give it a context.', CW / 2, CH / 2 - 8);
     ctx.fillStyle = '#e8edf6';
+    ctx.font = '500 13px system-ui, sans-serif';
+    ctx.fillText('Turn on hardware acceleration and reload. Trying again meanwhile.', CW / 2, CH / 2 + 22);
     ctx.font = '600 13px ui-monospace, monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText(`You ${state.scores[0]}`, 12, CH - 8);
-    ctx.textAlign = 'right';
-    ctx.fillText(`Machine ${state.scores[1]}`, CW - 12, CH - 8);
-    if (messageFor > 0 && message) {
-      ctx.fillStyle = '#ffd166';
-      ctx.font = '600 13px system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(message, CW / 2, 16);
-    }
+    ctx.fillText(`You ${state.scores[0]}   ·   Machine ${state.scores[1]}`, CW / 2, CH - 12);
     ctx.textAlign = 'left';
   }
 
   let captionText = '';
   function draw(dt) {
+    if (!view && retryAt && performance.now() >= retryAt) {
+      // Another go at a context, on a fresh canvas: the one with the notice on it has
+      // handed out a 2D context and cannot hand out WebGL.
+      retryAt = 0;
+      if (swapCanvas()) { ctx = null; buildView(); }
+    }
     if (view) {
       view.draw(state, aimNow(), dt);
       if (caption) {
@@ -248,7 +226,7 @@ export function start(canvas, { onScore, onEnd, onBall, seed, sound } = {}) {
         if (text !== captionText) { captionText = text; caption.textContent = text; }
       }
     } else if (ctx) {
-      drawFlat();
+      drawNotice();
     }
   }
 
@@ -287,6 +265,9 @@ export function start(canvas, { onScore, onEnd, onBall, seed, sound } = {}) {
   window.addEventListener('pointermove', pMove);
   window.addEventListener('pointerup', pUp);
   window.addEventListener('pointercancel', pUp);
+  // Only now, with the handlers in place: a view that fails swaps the canvas, and the
+  // swap moves the press handler with it.
+  buildView();
 
   // +y is to the left in both views, and a bigger angle turns the aim toward +y.
   const onKey = (e, down) => {
@@ -357,7 +338,7 @@ export function start(canvas, { onScore, onEnd, onBall, seed, sound } = {}) {
         shots: state.shots,
         cue: { x: Math.round(c.x), y: Math.round(c.y), potted: c.potted },
         message,
-        view: view ? '3d' : '2d',
+        view: view ? '3d' : 'none',
       };
     },
     /** For the test harness: the player's shot without a pointer. Angle in the table's frame. */

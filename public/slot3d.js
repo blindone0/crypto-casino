@@ -16,7 +16,7 @@
 // turned off — createReels returns null and the caller keeps the CSS drums. A slot that
 // does not draw is worse than a slot that draws flat.
 
-import { program, perspective, translation } from './gl.js';
+import { program, perspective, translation, onLost, release } from './gl.js';
 
 const VERT = `
 attribute vec3 aPos;
@@ -321,6 +321,8 @@ export function createReels(host, opts = {}) {
     canvas.remove();
     return null;
   }
+  let lostCb = null;
+  const unlisten = onLost(canvas, () => { if (lostCb) lostCb(); });
 
   const loc = {
     pos: gl.getAttribLocation(prog, 'aPos'),
@@ -675,9 +677,14 @@ export function createReels(host, opts = {}) {
       draw();
     },
 
+    /** Who to tell when the context is lost; they build new reels. */
+    onLost(cb) { lostCb = cb; },
+
     dispose() {
       this.stop();
+      unlisten();
       for (const d of drums) if (d.tex) gl.deleteTexture(d.tex);
+      release(gl);
       canvas.remove();
     },
   };

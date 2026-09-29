@@ -28,12 +28,48 @@
  * drawn plainly.
  */
 export function context(canvas, opts = {}) {
+  // Every hint towards getting one: no refusal on a slow renderer (software WebGL is
+  // still WebGL, and igor wants the machine drawn everywhere), and the discrete GPU
+  // where there is a choice.
   const want = {
-    antialias: true, alpha: false, premultipliedAlpha: false, ...opts,
+    antialias: true, alpha: false, premultipliedAlpha: false,
+    failIfMajorPerformanceCaveat: false, powerPreference: 'high-performance', ...opts,
   };
-  return canvas.getContext('webgl', want)
-    || canvas.getContext('experimental-webgl', want)
-    || null;
+  for (const kind of ['webgl', 'experimental-webgl']) {
+    try {
+      const gl = canvas.getContext(kind, want);
+      if (gl) return gl;
+    } catch { /* the next name */ }
+  }
+  return null;
+}
+
+/**
+ * Give a context back to the browser now, not when the canvas is collected.
+ *
+ * Chrome allows sixteen live contexts a page and, on the seventeenth, takes the OLDEST
+ * one away - which can be the one on screen. A session that opened the slots, the dice
+ * and the cards a few times each got there, and the reels went blank with nothing in the
+ * console to say why. Every renderer's dispose calls this, after it has stopped
+ * listening for the loss it is about to cause.
+ */
+export function release(gl) {
+  try {
+    const ext = gl && gl.getExtension('WEBGL_lose_context');
+    if (ext) ext.loseContext();
+  } catch { /* already gone */ }
+}
+
+/**
+ * Hear a canvas lose its context: a driver reset, memory taken by something else on the
+ * GPU, the browser's cap. The callback fires once per loss and the caller throws its
+ * renderer away and builds a new one - simpler and surer than restoring the old
+ * context's objects one by one. Returns the remover.
+ */
+export function onLost(canvas, cb) {
+  const handler = () => cb();
+  canvas.addEventListener('webglcontextlost', handler);
+  return () => canvas.removeEventListener('webglcontextlost', handler);
 }
 
 export function shader(gl, type, src) {

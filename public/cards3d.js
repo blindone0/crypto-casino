@@ -27,7 +27,7 @@
 // tools/generate-materials.js for why a model cannot be trusted to count pips.
 
 import {
-  context, program, locations, loadTexture, sizer,
+  context, program, locations, loadTexture, sizer, onLost, release,
   perspective, lookAt, multiply, translation, rotation, scaling, normalMatrix,
   KEY_DIR, ACES,
 } from './gl.js';
@@ -244,6 +244,8 @@ export function createTable(host, opts = {}) {
 
   const gl = context(canvas);
   if (!gl) { canvas.remove(); return null; }
+  let lostCb = null;
+  const unlisten = onLost(canvas, () => { if (lostCb) lostCb(); });
 
   let progCard;
   let progTable;
@@ -480,6 +482,9 @@ export function createTable(host, opts = {}) {
   return {
     canvas,
 
+    /** Who to tell when the context is lost; they build a new table. */
+    onLost(cb) { lostCb = cb; },
+
     /**
      * Put the table into a state.
      *
@@ -511,6 +516,8 @@ export function createTable(host, opts = {}) {
       if (raf !== null) cancelAnimationFrame(raf);
       if (pending !== null) cancelAnimationFrame(pending);
       size.disconnect();
+      unlisten();
+      release(gl);
       canvas.remove();
     },
   };

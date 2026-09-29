@@ -19,7 +19,7 @@
 // the rules changes either way.
 
 import {
-  context, program, locations, loadTexture, perspective, lookAt, multiply, identity, ACES,
+  context, program, locations, loadTexture, perspective, lookAt, multiply, identity, ACES, onLost, release,
 } from '../gl.js';
 import { L, W, R, RAILS, POCKETS, CORNER_MOUTH, MIDDLE_MOUTH, cueBall, predict } from './billiards-rules.js';
 
@@ -238,6 +238,8 @@ export function createView(canvas) {
   if (!gl) return null;
   let prog;
   try { prog = program(gl, VERT, FRAG); } catch { return null; }
+  let lostCb = null;
+  const unlisten = onLost(canvas, () => { if (lostCb) lostCb(); });
   const P = locations(gl, prog, {
     attrs: ['aPos', 'aNormal', 'aUV'],
     uniforms: ['uProj', 'uView', 'uModel', 'uTex', 'uRough', 'uLamp', 'uEye', 'uTint', 'uColour', 'uGloss', 'uMode'],
@@ -456,10 +458,14 @@ export function createView(canvas) {
     toTable,
     resize,
     get dirty() { return dirty; },
+    /** Who to tell when the context is lost; they build a new view on a new canvas. */
+    onLost(cb) { lostCb = cb; },
     dispose() {
       ro?.disconnect();
+      unlisten();
       for (const m of Object.values(M)) gl.deleteBuffer(m.buf);
       for (const t of Object.values(tex)) gl.deleteTexture(t);
+      release(gl);
     },
   };
 }

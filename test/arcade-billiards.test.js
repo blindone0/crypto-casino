@@ -2,12 +2,12 @@
 // Русская пирамида, the cabinet, driven headlessly.
 //
 // The rules and the pocket geometry have their own file (billiards-rules.test.js); this is
-// the cabinet around them: the pointer and the keys, the flat cloth that stands in for
-// WebGL here, the machine taking its turn, the arcade score, and the game ending once.
-// Node has no document, so createView() returns null and the cabinet draws the cloth
-// flat, which is exactly the path a browser without WebGL takes.
+// the cabinet around them: the pointer and the keys, the machine taking its turn, the
+// arcade score, and the game ending once. Node has no document, so createView() returns
+// null and nothing is drawn; the game underneath runs exactly the same, and the pointer
+// is mapped onto the table laid flat on the canvas.
 //
-// The cloth is drawn mirrored — +y to the left, as the 3D camera has it — with the house
+// That flat mapping is mirrored — +y to the left, as the 3D camera has it — with the house
 // at the bottom of a 420 by 750 canvas. The cue ball on its spot is at (210, 547.5) and
 // the apex of the pyramid at (210, 202.5); the numbers below come from that.
 
@@ -36,7 +36,7 @@ test('the table racks up in millimetres: the cue ball in the house, fifteen to p
   assert.strictEqual(s.score, 0);
   assert.strictEqual(s.moving, false);
   assert.deepStrictEqual(s.cue, { x: 888, y: 888, potted: false }, 'a quarter of the way up a 3550 mm table');
-  assert.strictEqual(s.view, '2d', 'no WebGL here: the cloth is drawn flat');
+  assert.strictEqual(s.view, 'none', 'no WebGL here: nothing is drawn, the game still runs');
   assert.deepStrictEqual(events.balls, [8], 'the HUD starts at eight to go');
 }));
 

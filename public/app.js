@@ -902,7 +902,6 @@ function renderBones() {
       // The throw is animated only after the server has spoken: `out.faces` is what the
       // seed produced, and the dice are told to land on it. Nothing here decides anything.
       if (bonesDice) await bonesDice.roll(out.faces);
-      else showBonesFallback(out.faces);
       showBonesResult(out);
       audio.sfx(out.won ? 'win' : 'lose');
       await refreshTokenBalance();
@@ -937,19 +936,9 @@ function renderBones() {
     el('div', { class: 'bones-paytable', id: 'bonesTable' }),
   );
 
-  // The 3D dice, or the honest fallback. `createDice` returns null rather than throwing
-  // when WebGL cannot be had, and the game stays fully playable either way — it just does
-  // not tumble.
-  if (bonesDice) { bonesDice.destroy(); bonesDice = null; }
-  bonesDice = createDice(board, { material: 'bone' });
-  if (!bonesDice) {
-    setKids(board,
-      el('div', { class: 'bones-flat' },
-        el('span', { id: 'bonesFlatA' }, '⚀'),
-        el('span', { id: 'bonesFlatB' }, '⚀')),
-      el('p', { class: 'hint', 'data-i18n': 'bones.fallbackNote' }));
-    applyAll(board);
-  }
+  // The 3D dice and nothing else: when WebGL cannot be had the board says so and keeps
+  // trying, and when the context is lost the dice are built again.
+  ensureBonesGl(board);
 
   paintBonesTable();
   infoPanel();
@@ -959,13 +948,33 @@ function renderBones() {
 /** What the house holds, from whichever source has answered first. */
 const houseHolds = () => state.bonesTable?.maxWin ?? state.tokenMaxWin ?? 0;
 
-/** The glyph dice, for a browser that cannot draw the real ones. */
-function showBonesFallback(faces) {
-  const glyph = (n) => String.fromCodePoint(0x2680 + Math.max(1, Math.min(6, n)) - 1);
-  const a = $('#bonesFlatA');
-  const b = $('#bonesFlatB');
-  if (a) a.textContent = glyph(faces[0]);
-  if (b) b.textContent = glyph(faces[1]);
+/**
+ * The dice, on WebGL, again and again.
+ *
+ * A context that cannot be had gets a notice on the board and another try after a
+ * pause that grows; a context that is lost gets the dice built anew. The board is the
+ * one the current game put on the stage - a timer left over from an earlier visit finds
+ * it gone from the document and does nothing.
+ */
+let bonesGlTimer = null;
+let bonesGlFails = 0;
+function ensureBonesGl(board) {
+  if (bonesGlTimer) { clearTimeout(bonesGlTimer); bonesGlTimer = null; }
+  if (bonesDice) { bonesDice.destroy(); bonesDice = null; }
+  if (!board.isConnected || state.game !== 'bones') return;
+  board.querySelector('.gl-notice')?.remove();
+  bonesDice = createDice(board, { material: 'bone' });
+  if (!bonesDice) {
+    bonesGlFails += 1;
+    board.appendChild(el('div', { class: 'gl-notice' }, t('gl.required')));
+    bonesGlTimer = setTimeout(() => { bonesGlTimer = null; ensureBonesGl(board); }, glBackoff(bonesGlFails));
+    return;
+  }
+  bonesGlFails = 0;
+  bonesDice.onLost(() => {
+    bonesGlFails += 1;
+    bonesGlTimer = setTimeout(() => { bonesGlTimer = null; ensureBonesGl(board); }, glBackoff(bonesGlFails));
+  });
 }
 
 function showBonesResult(out) {
@@ -1796,45 +1805,9 @@ async function renderSlots() {
   }
   paintReels(blankScreen());
 
-  // Real cylinders if the hardware will draw them, the DOM drums if not.
-  const win = $('.slot-window');
-  if (win) {
-    glReels = await buildGlReels(win);
-    win.classList.toggle('gl', !!glReels);
-    // The housing, on a canvas of its own behind the drums, and the glass on one in front
-    // of them. The CSS cabinet stays whole underneath as the fallback and is simply not
-    // painted while the class is on; with no context, nothing here changes at all.
-    if (glCabinet) { glCabinet.dispose(); glCabinet = null; }
-    const cab = $('.slot-cabinet');
-    const palette = slotPalette(slotTheme);
-    glCabinet = glReels && cab ? createCabinet(cab, { window: win, reels: $('#reels'), theme: palette }) : null;
-    cab?.classList.toggle('cabgl', !!glCabinet);
-    if (cab) {
-      // The marquee text is CSS on top of the GL panel; it takes the theme's colours
-      // through custom properties, which the CSP allows where a style attribute is not.
-      const [a, b, c] = palette.marquee.text;
-      cab.style.setProperty('--mq-a', a);
-      cab.style.setProperty('--mq-b', b);
-      cab.style.setProperty('--mq-c', c);
-      cab.style.setProperty('--mq-small', palette.marquee.small);
-      const glow = palette.marquee.glow.map((k) => Math.round(k * 255)).join(',');
-      cab.style.setProperty('--mq-glow', `rgba(${glow}, .6)`);
-    }
-    if (glCabinet) requestAnimationFrame(() => { if (glCabinet) glCabinet.resize(); });
-    if (glReels) {
-      glShow(null);
-      // Size it again once layout has actually happened. Measuring during the build gets
-      // whatever the box was mid-construction — it came out 543px wide inside a 634px
-      // window — and a viewport that size gives the wrong aspect, the wrong number of
-      // rows, and a gap down each side of the machine.
-      requestAnimationFrame(() => { if (glReels) glReels.resize(); });
-      if (typeof ResizeObserver === 'function') {
-        if (glWatch) glWatch.disconnect();
-        glWatch = new ResizeObserver(() => { if (glReels) glReels.resize(); });
-        glWatch.observe(win);
-      }
-    }
-  }
+  // The machine is WebGL and nothing else: the reels, the housing and the glass, built
+  // here and built again whenever a context is lost. There is no flat version.
+  await ensureSlotGl();
   recalc();
   infoPanel([
     el('div', { class: 'stat-row' },
@@ -2093,6 +2066,101 @@ let bonesDice = null;
 let glReels = null;
 let glWatch = null;
 let glCabinet = null;
+
+/** How long to wait before the n-th attempt at a context: half a second, doubling, capped. */
+const glBackoff = (n) => Math.min(30000, 500 * 2 ** Math.min(n, 6));
+
+// WEBGL, ALWAYS
+//
+// igor: "зафорси webgl работать всегда и везде" and "нам не нужна версия для бедных". The slot machine is
+// its WebGL reels, housing and glass, and there is no flat version any more: the DOM
+// drums are never shown. When a context cannot be had, the window says so and tries
+// again after a growing pause; when a context is lost - a driver reset, memory taken by
+// something else on the GPU, the browser's cap on live contexts - the reels and the
+// housing are thrown away and built again. Leaving the slots tears all of it down,
+// timers included, and releases every context at once rather than leaving it for the
+// collector, which is what let the browser run out of them before.
+let slotGlTimer = null;
+let slotGlFails = 0;
+let slotGlBuilding = false;
+
+function slotNotice(text) {
+  const win = $('.slot-window');
+  if (!win) return;
+  let n = win.querySelector('.gl-notice');
+  if (!text) { n?.remove(); return; }
+  if (!n) { n = el('div', { class: 'gl-notice' }); win.appendChild(n); }
+  n.textContent = text;
+}
+
+function teardownSlotGl() {
+  if (slotGlTimer) { clearTimeout(slotGlTimer); slotGlTimer = null; }
+  if (glWatch) { glWatch.disconnect(); glWatch = null; }
+  if (glCabinet) { glCabinet.dispose(); glCabinet = null; }
+  if (glReels) { glReels.dispose(); glReels = null; }
+}
+
+function slotGlLost() {
+  if (state.game !== 'slots') return;
+  teardownSlotGl();
+  slotGlFails += 1;
+  slotNotice(t('gl.retrying'));
+  slotGlTimer = setTimeout(() => { slotGlTimer = null; ensureSlotGl(); }, glBackoff(slotGlFails));
+}
+
+async function ensureSlotGl() {
+  if (slotGlBuilding || state.game !== 'slots') return;
+  const win = $('.slot-window');
+  const cab = $('.slot-cabinet');
+  if (!win || !cab) return;
+  slotGlBuilding = true;
+  try {
+    teardownSlotGl();
+    // The DOM drums are never shown: the window holds the machine, or the notice.
+    win.classList.add('gl');
+    glReels = await buildGlReels(win);
+    const palette = slotPalette(slotTheme);
+    glCabinet = glReels ? createCabinet(cab, { window: win, reels: $('#reels'), theme: palette }) : null;
+    if (!glReels || !glCabinet) {
+      teardownSlotGl();
+      cab.classList.remove('cabgl');
+      slotGlFails += 1;
+      slotNotice(t('gl.required'));
+      slotGlTimer = setTimeout(() => { slotGlTimer = null; ensureSlotGl(); }, glBackoff(slotGlFails));
+      return;
+    }
+    slotGlFails = 0;
+    slotNotice(null);
+    cab.classList.add('cabgl');
+    // The marquee text is CSS on top of the GL panel; it takes the theme's colours
+    // through custom properties, which the CSP allows where a style attribute is not.
+    const [a, b, c] = palette.marquee.text;
+    cab.style.setProperty('--mq-a', a);
+    cab.style.setProperty('--mq-b', b);
+    cab.style.setProperty('--mq-c', c);
+    cab.style.setProperty('--mq-small', palette.marquee.small);
+    const glow = palette.marquee.glow.map((k) => Math.round(k * 255)).join(',');
+    cab.style.setProperty('--mq-glow', `rgba(${glow}, .6)`);
+    glReels.onLost(slotGlLost);
+    glCabinet.onLost(slotGlLost);
+    // The screen as it last stood, so a rebuild mid-session shows the same reels.
+    glShow(glStops);
+    // Size it again once layout has actually happened. Measuring during the build gets
+    // whatever the box was mid-construction - it came out 543px wide inside a 634px
+    // window - and a viewport that size gives the wrong aspect, the wrong number of
+    // rows, and a gap down each side of the machine.
+    requestAnimationFrame(() => {
+      if (glReels) glReels.resize();
+      if (glCabinet) glCabinet.resize();
+    });
+    if (typeof ResizeObserver === 'function') {
+      glWatch = new ResizeObserver(() => { if (glReels) glReels.resize(); });
+      glWatch.observe(win);
+    }
+  } finally {
+    slotGlBuilding = false;
+  }
+}
 
 /** How many symbols go round one drum. Twelve reads well and keeps the texture small. */
 const GL_PER_DRUM = 12;
@@ -2509,11 +2577,29 @@ function legalCards(g) {
  * Returns the host element to put on the stage, or null when WebGL is unavailable, in
  * which case the caller keeps its flat trick slots and the game plays exactly as before.
  */
+let cardsGlTimer = null;
+let cardsGlFails = 0;
+const cardsGame = () => ['preferans', 'debertz'].includes(state.game);
 function cardStage(seats, trick, extras = []) {
   const host = el('div', { class: 'card-stage' });
+  if (cardsGlTimer) { clearTimeout(cardsGlTimer); cardsGlTimer = null; }
   if (cardTable) { cardTable.destroy(); cardTable = null; }
   cardTable = createTable(host, {});
-  if (!cardTable) return null;
+  if (!cardTable) {
+    // No flat version: the stage says what is missing, and the game is drawn again after
+    // a pause, which tries the context again. Every caller keeps its cardTable calls
+    // behind a null check, so a table that is not there is simply not animated.
+    cardsGlFails += 1;
+    host.appendChild(el('div', { class: 'gl-notice' }, t('gl.required')));
+    cardsGlTimer = setTimeout(() => { cardsGlTimer = null; if (cardsGame()) renderGame(); }, glBackoff(cardsGlFails));
+    return host;
+  }
+  cardsGlFails = 0;
+  cardTable.onLost(() => {
+    cardsGlFails += 1;
+    if (cardTable) { cardTable.destroy(); cardTable = null; }
+    cardsGlTimer = setTimeout(() => { cardsGlTimer = null; if (cardsGame()) renderGame(); }, glBackoff(cardsGlFails));
+  });
 
   // Where each seat's card lands. Seat 0 is you, nearest the camera; the rest fan away.
   const SEATS = {
@@ -4309,12 +4395,15 @@ function renderGame() {
   // The stage it was publishing onto is about to be replaced, so the loop has nothing
   // left to drive.
   if (state.parallax && !['slots', 'games'].includes(state.game)) { state.parallax.stop(); state.parallax = null; }
-  if (glCabinet && state.game !== 'slots') { glCabinet.dispose(); glCabinet = null; }
-  if (cardTable && !['preferans', 'debertz'].includes(state.game)) {
-    cardTable.destroy();
-    cardTable = null;
+  if (state.game !== 'slots') teardownSlotGl();
+  if (!['preferans', 'debertz'].includes(state.game)) {
+    if (cardsGlTimer) { clearTimeout(cardsGlTimer); cardsGlTimer = null; }
+    if (cardTable) { cardTable.destroy(); cardTable = null; }
   }
-  if (bonesDice && state.game !== 'bones') { bonesDice.destroy(); bonesDice = null; }
+  if (state.game !== 'bones') {
+    if (bonesGlTimer) { clearTimeout(bonesGlTimer); bonesGlTimer = null; }
+    if (bonesDice) { bonesDice.destroy(); bonesDice = null; }
+  }
   if (state.game !== 'match') { stopMatchPoll(); state.matchId = null; state.board = null; }
   const nav = $('#navGames');
   // Only the hue travels up here. The bar is 45px and staying that way, so the pills get
