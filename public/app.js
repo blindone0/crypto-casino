@@ -120,6 +120,54 @@ const fmtShort = (units) => {
 
 const STAKE_ROUTES = ['/api/bet/', '/api/crash/bet'];
 
+/**
+ * THE ROUND, SIGNED ONCE
+ *
+ * Every step a per-click game records comes back in its response as `event`, and is
+ * folded here into a running hash per round, exactly as the server folds its own log.
+ * When the round is closed — a cashout, a solved board — the hash is signed with the
+ * wallet key and sent along, and the server stores the signature on the finishing event:
+ * a history the operator fabricated afterwards fails a signature it cannot forge. Done in
+ * api(), the one place every request passes through, so no game has to learn about it.
+ * Nothing here blocks play: no key on the device, or a step the network lost, means a
+ * round the record calls unattested, and the game goes on exactly as before.
+ */
+const FINISH_ROUTES = { '/api/bet/mines/cashout': 'mines', '/api/bet/jigsaw/solve': 'jigsaw' };
+const rounds = new Map();          // 'mines:41207' -> { g, r, n, h }
+const roundByGame = new Map();     // 'mines' -> 'mines:41207'
+
+async function foldRound(ev) {
+  if (!ev || typeof ev !== 'object') return;
+  const key = `${ev.g}:${ev.r}`;
+  let round = rounds.get(key);
+  if (!round || ev.s === 0) {
+    round = { g: ev.g, r: ev.r, n: 0, h: await tokenKeys.sha256Hex(tokenKeys.ROUND_SEED) };
+    rounds.set(key, round);
+    roundByGame.set(ev.g, key);
+  }
+  // A step this browser never saw — a lost response — leaves a hash the server will not
+  // match. Better to know than to sign a record that is not the one we watched.
+  if (ev.s !== round.n) { round.broken = true; return; }
+  round.h = await tokenKeys.foldEvent(round.h, ev);
+  round.n += 1;
+}
+
+async function noteEvents(data) {
+  if (!data || typeof data !== 'object') return;
+  if (Array.isArray(data.events)) for (const ev of data.events) await foldRound(ev);
+  if (data.event) await foldRound(data.event);
+}
+
+async function attestRound(game) {
+  const round = rounds.get(roundByGame.get(game));
+  if (!round || round.broken || !tokenKey) return null;
+  try {
+    return await tokenKeys.signRound(tokenKey, tokenKeys.roundPayload(round));
+  } catch {
+    return null;
+  }
+}
+
 async function api(path, { method = 'GET', body } = {}) {
   const headers = {};
   // Anything that stakes money carries the active wallet, set in one place rather than
@@ -131,6 +179,10 @@ async function api(path, { method = 'GET', body } = {}) {
     // and cannot send an unsigned bet the server would refuse. There is no longer a
     // currency to name alongside it — there is only one.
     payload = { ...(body || {}), spend: await signStakeFor(body) };
+  }
+  if (method === 'POST' && FINISH_ROUTES[path]) {
+    const roundSig = await attestRound(FINISH_ROUTES[path]);
+    payload = { ...(payload || {}), ...(roundSig ? { roundSig } : {}) };
   }
   if (payload !== undefined) headers['content-type'] = 'application/json';
   if (state.csrf && method !== 'GET') headers['x-csrf-token'] = state.csrf;
@@ -145,6 +197,7 @@ async function api(path, { method = 'GET', body } = {}) {
   }
   const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  await noteEvents(data);
   return data;
 }
 
@@ -2248,6 +2301,9 @@ let jigClock = null;
  * It is not what decides the payout — the server measures the round itself — so a tampered
  * display changes nothing but itself, which is why it can be ticked here at all.
  */
+/** The jigsaw's drops, posted in order; solve() waits for the last of them. */
+let jigQueue = Promise.resolve();
+
 async function renderJigsaw() {
   stopJigClock();
   let game = null;
@@ -2350,12 +2406,12 @@ function paintJigsaw() {
   // record starts from what it says. `known` is what the record already holds, so the
   // board's first report — the one it makes on construction — is not taken for a move.
   let known = (g.placed || new Array(g.pieces).fill(null)).slice();
-  let queue = Promise.resolve();
+  jigQueue = Promise.resolve();
   const report = (arrangement) => {
     for (let slot = 0; slot < arrangement.length; slot += 1) {
       if (arrangement[slot] === known[slot]) continue;
       const piece = arrangement[slot] === null || arrangement[slot] === undefined ? -1 : arrangement[slot];
-      queue = queue
+      jigQueue = jigQueue
         .then(() => api('/api/bet/jigsaw/place', { method: 'POST', body: { slot, piece } }))
         .catch(() => { /* the record is best effort from here; the answer is still solve */ });
     }
@@ -2376,6 +2432,8 @@ function paintJigsaw() {
 async function submitJigsaw(arrangement) {
   stopJigClock();
   jigBoard?.freeze();
+  // The last drop has to be on the record before the record is signed.
+  await jigQueue;
   try {
     const out = await api('/api/bet/jigsaw/solve', { method: 'POST', body: { arrangement } });
     state.jigsaw = out;

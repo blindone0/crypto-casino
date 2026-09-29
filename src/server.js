@@ -404,7 +404,7 @@ function build(cfg) {
 
   add('POST', '/api/bet/mines/cashout', async (ctx, req) => {
     checkCsrf(req, ctx);
-    return mines.cashout(gameCtx(ctx));
+    return mines.cashout(gameCtx(ctx), await U.readJsonBody(req));
   });
 
   add('GET', '/api/bet/mines/current', async (ctx) => {

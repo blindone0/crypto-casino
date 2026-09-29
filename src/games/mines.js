@@ -73,7 +73,7 @@ function start({ db, cfg, user, bank }, body) {
     // On the record: the round, its stake, and a commitment to the layout. The layout
     // itself is revealed when the round ends, and the hash is what lets anyone check
     // that no mine moved between the two.
-    events.emit(db, cfg, {
+    const opened = events.emit(db, cfg, {
       g: 'mines',
       r: g.id,
       k: 'o',
@@ -83,6 +83,7 @@ function start({ db, cfg, user, bank }, body) {
     });
     return {
       ...view(db, cfg, g),
+      event: opened && events.shown(opened),
       table: multiplierTable(cfg, mineCount),
       serverSeedHash: seed.seed_hash,
       maxPayout: bank.capPayout(wager, Infinity).ceiling,
@@ -105,7 +106,8 @@ function reveal({ db, cfg, user, bankFor }, body) {
     // Settle against the bank this round was opened with, not the one the request asks
     // for: a round started with play money must never pay out real money.
     const bank = bankFor();
-    events.emit(db, cfg, { g: 'mines', r: g.id, k: 'r', a: [tile] });
+    const step = events.emit(db, cfg, { g: 'mines', r: g.id, k: 'r', a: [tile] });
+    const event = step && events.shown(step);
 
     if (mines.includes(tile)) {
       db.run("UPDATE mines_games SET state='lost', ended_at=? WHERE id=?", now(), g.id);
@@ -127,6 +129,7 @@ function reveal({ db, cfg, user, bankFor }, body) {
       });
       return {
         ...view(db, cfg, { ...g, state: 'lost' }),
+        event,
         safe: false,
         hit: tile,
         mines,
@@ -141,23 +144,23 @@ function reveal({ db, cfg, user, bankFor }, body) {
 
     // Clearing every safe tile ends the round at the top of the ladder.
     if (picks.length === TILES - g.mine_count) {
-      return { ...finish({ db, cfg, user, bankFor }, updated), safe: true, autoCashout: true };
+      return { ...finish({ db, cfg, user, bankFor }, updated), event, safe: true, autoCashout: true };
     }
-    return { ...view(db, cfg, updated), safe: true };
+    return { ...view(db, cfg, updated), event, safe: true };
   });
 }
 
-function cashout({ db, cfg, user, bankFor }) {
+function cashout({ db, cfg, user, bankFor }, body = {}) {
   return db.tx(() => {
     const g = activeGame(db, user.id);
     if (!g) throw new U.NotFound('no active mines round');
     if (JSON.parse(g.picks).length === 0) throw new U.BadRequest('reveal at least one tile first');
-    return finish({ db, cfg, user, bankFor }, g);
+    return finish({ db, cfg, user, bankFor }, g, body);
   });
 }
 
 /** Pay out a mines round. Caller must already be inside a transaction. */
-function finish({ db, cfg, user, bankFor }, g) {
+function finish({ db, cfg, user, bankFor }, g, body = {}) {
   const bank = bankFor();
   const picks = JSON.parse(g.picks);
   const mines = JSON.parse(g.mines);
@@ -167,8 +170,14 @@ function finish({ db, cfg, user, bankFor }, g) {
   const { payout, capped } = bank.capPayout(g.wager, raw);
 
   db.run("UPDATE mines_games SET state='cashed', payout=?, ended_at=? WHERE id=?", payout, now(), g.id);
-  events.emit(db, cfg, { g: 'mines', r: g.id, k: 'c', a: [payout, multiplier, mines] });
-  events.close(db, { g: 'mines', r: g.id });
+  // The player's signature over the round so far, if the request carried one, goes on
+  // the cashout event: the record of this round is then theirs as much as the house's.
+  const att = events.attest(db, cfg, {
+    g: 'mines', r: g.id, sig: body.roundSig, pubkey: tokenchain.keyFor(db, user.id)?.pubkey || null,
+  });
+  const sig = att.attested ? String(body.roundSig) : null;
+  events.emit(db, cfg, { g: 'mines', r: g.id, k: 'c', a: [payout, multiplier, mines], sig });
+  events.close(db, { g: 'mines', r: g.id, sig });
   bank.settle({
     user,
     game: 'mines',
@@ -192,6 +201,7 @@ function finish({ db, cfg, user, bankFor }, g) {
     payout,
     capped,
     profit: payout - g.wager,
+    attested: att.attested,
     balance: bank.balance(user.id),
   };
 }
@@ -199,7 +209,12 @@ function finish({ db, cfg, user, bankFor }, g) {
 function current({ db, cfg, user }) {
   const g = activeGame(db, user.id);
   if (!g) return { state: 'none' };
-  return { ...view(db, cfg, g), table: multiplierTable(cfg, g.mine_count) };
+  return {
+    ...view(db, cfg, g),
+    table: multiplierTable(cfg, g.mine_count),
+    // The round's record so far, for a browser that reopened it to fold again.
+    events: events.history(db, 'mines', g.id).map(events.shown),
+  };
 }
 
 module.exports = { start, reveal, cashout, current, multiplierTable, TILES };

@@ -291,6 +291,29 @@ async function signSpend(key, spend) {
   return hex(sig);
 }
 
+/**
+ * The round, signed once. See src/tokenchain.js for why once rather than every click.
+ * Every event a game's response carries is folded into a running hash, exactly as the
+ * server folds its own log, and the hash is signed in the request that closes the round.
+ * Its own type, so it can never be replayed as a transfer.
+ */
+const ROUND_SEED = 'nullstake-round-v1';
+
+const roundPayload = ({ g, r, n, h }) => ({
+  chain: 'nullstake-token-v1', type: 'round', g, r, n, h,
+});
+
+/** One step of the running hash, over the event as the server showed it. */
+const foldEvent = (hHex, ev) => sha256Hex(
+  hHex + canonical({ g: ev.g, r: ev.r, s: ev.s, k: ev.k, a: ev.a }),
+);
+
+async function signRound(key, payload) {
+  const bytes = new TextEncoder().encode(canonical(payload));
+  const sig = await crypto.subtle.sign({ name: 'Ed25519' }, key.privateKey, bytes);
+  return hex(sig);
+}
+
 /** Verify a signature against a raw public key. Used by the chain verifier. */
 async function verifySignature(pubHex, payload, sigHex) {
   try {
@@ -327,4 +350,5 @@ export {
   seedFromPhrase, keyFromPhrase, signTransfer, signSpend, spendPayload,
   verifySignature, verifyOverString,
   canonical, transferPayload, sha256Hex, hex, unhex,
+  ROUND_SEED, roundPayload, foldEvent, signRound,
 };

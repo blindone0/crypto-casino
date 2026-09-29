@@ -241,6 +241,46 @@ function checkEvent(tx) {
   return null;
 }
 
+/**
+ * THE ROUND, SIGNED ONCE
+ *
+ * Signing every click would make every click wait on the wallet key, make a locked
+ * wallet unplayable rather than merely unspendable, and shut out a browser without
+ * Ed25519. Almost everything per-click signing would buy — a history the operator cannot
+ * fabricate — is had for one signature: the browser folds each event the server shows it
+ * into a running hash, and signs the hash in the request that closes the round. The
+ * server folds its own log the same way, checks the signature, and stores it on the
+ * finishing event. A round whose log the operator rewrote afterwards fails a signature
+ * the operator cannot forge. A round with no signature — no key on the device, a step
+ * the network lost — is the operator's assertion and not the player's, and the
+ * anti-cheat weighs it accordingly.
+ *
+ * The payload has its own type so it can never be replayed as a transfer.
+ */
+const ROUND_SEED = 'nullstake-round-v1';
+
+const roundPayload = ({ g, r, n, h }) => ({
+  chain: CHAIN_ID, type: 'round', g, r, n, h,
+});
+
+/** One step of the running hash, over the event as the browser saw it: no receipt time. */
+const foldEvent = (hHex, ev) => sha256(
+  hHex + canonical({ g: ev.g, r: ev.r, s: ev.s, k: ev.k, a: ev.a }),
+);
+
+function verifyRoundSignature(pubkey, payload, sig) {
+  try {
+    return crypto.verify(
+      null,
+      Buffer.from(canonical(payload)),
+      publicKeyFromRaw(pubkey),
+      Buffer.from(String(sig), 'hex'),
+    );
+  } catch {
+    return false;
+  }
+}
+
 function verifyTransferSignature(tx) {
   try {
     return crypto.verify(
@@ -638,5 +678,6 @@ module.exports = {
   serverKey, treasuryKey, ensureGenesis, treasuryTransfer, supply,
   appendBlock, head, balanceOf, verifyChain, verifyTransferSignature, checkEvent,
   latestCheckpoint, writeCheckpoint, lastFullVerify,
+  ROUND_SEED, roundPayload, foldEvent, verifyRoundSignature,
   registerKey, submitTransfer, chainSlice, keyFor, nextNonce,
 };

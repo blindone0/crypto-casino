@@ -65,7 +65,7 @@ function toTx(row) {
  * numbers from then on — one UPDATE on one row, no scan, no race. Returns the event as
  * it will appear on the chain, or null when events are switched off.
  */
-function emit(db, cfg, { g, r, k, a = [], userId = null, pubkey = null }) {
+function emit(db, cfg, { g, r, k, a = [], userId = null, pubkey = null, sig = null }) {
   if (!settings(cfg).enabled) return null;
   const ms = nowMs();
   db.run(
@@ -80,11 +80,12 @@ function emit(db, cfg, { g, r, k, a = [], userId = null, pubkey = null }) {
   const u = round.pubkey ? String(round.pubkey).slice(0, 8) : null;
   const args = JSON.stringify([...a, ms]);
   db.run(
-    'INSERT INTO token_events(g, r, s, k, a, u, ms) VALUES(?,?,?,?,?,?,?)',
-    g, r, round.s, k, args, u, ms,
+    'INSERT INTO token_events(g, r, s, k, a, u, sig, ms) VALUES(?,?,?,?,?,?,?,?)',
+    g, r, round.s, k, args, u, sig || null, ms,
   );
   const tx = { type: 'ev', g, r, s: round.s, k, a: JSON.parse(args) };
   if (u) tx.u = u;
+  if (sig) tx.sig = sig;
   const why = tokenchain.checkEvent(tx);
   // A game emitting something the chain would refuse is a bug worth failing the request
   // for: the whole point is that every step reaches the chain.
@@ -92,9 +93,41 @@ function emit(db, cfg, { g, r, k, a = [], userId = null, pubkey = null }) {
   return tx;
 }
 
-/** Close a round: the moment after its last event, for the doctor and the resume path. */
-function close(db, { g, r }) {
-  db.run('UPDATE token_rounds SET closed_at=? WHERE g=? AND r=? AND closed_at IS NULL', nowS(), g, r);
+/** Close a round: the moment after its last event, and the player's signature if any. */
+function close(db, { g, r, sig = null }) {
+  db.run(
+    'UPDATE token_rounds SET closed_at=?, sig=COALESCE(?, sig) WHERE g=? AND r=? AND closed_at IS NULL',
+    nowS(), sig, g, r,
+  );
+}
+
+/** An event as the browser is shown it: no receipt time, so both sides fold the same bytes. */
+const shown = (ev) => ({ g: ev.g, r: ev.r, s: ev.s, k: ev.k, a: ev.a.slice(0, -1) });
+
+/** The running hash over a round's record so far, and how many events are in it. */
+function digest(db, g, r) {
+  let h = tokenchain.sha256(tokenchain.ROUND_SEED);
+  let n = 0;
+  for (const ev of history(db, g, r)) {
+    h = tokenchain.foldEvent(h, shown(ev));
+    n += 1;
+  }
+  return { n, h };
+}
+
+/**
+ * Check the player's signature over the round as recorded so far.
+ *
+ * Returns { attested, n, h }. Never throws and never refuses the round: a signature that
+ * does not verify — a step the network lost on the way to the log, a key that changed —
+ * leaves a round the record calls unattested, which is what it is.
+ */
+function attest(db, cfg, { g, r, sig, pubkey }) {
+  const { n, h } = digest(db, g, r);
+  if (!sig || !pubkey) return { attested: false, n, h };
+  const ok = /^[0-9a-f]{128}$/.test(String(sig))
+    && tokenchain.verifyRoundSignature(pubkey, tokenchain.roundPayload({ g, r, n, h }), sig);
+  return { attested: ok, n, h };
 }
 
 /** What is waiting for a block: how many, and how long the oldest has waited. */
@@ -171,4 +204,7 @@ function round(db, g, r) {
   return db.get('SELECT * FROM token_rounds WHERE g=? AND r=?', g, r) || null;
 }
 
-module.exports = { DEFAULTS, settings, emit, close, pending, flush, history, fromChain, round, toTx };
+module.exports = {
+  DEFAULTS, settings, emit, close, pending, flush, history, fromChain, round, toTx,
+  shown, digest, attest,
+};

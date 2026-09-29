@@ -227,7 +227,7 @@ function start({ db, cfg, user, bank }, body) {
       seed.id, nonce, user.client_seed, now(), now(),
     );
     const g = activeGame(db, user.id);
-    events.emit(db, cfg, {
+    const opened = events.emit(db, cfg, {
       g: 'jigsaw',
       r: g.id,
       k: 'o',
@@ -237,6 +237,7 @@ function start({ db, cfg, user, bank }, body) {
     });
     return {
       ...view(db, cfg, g),
+      event: opened && events.shown(opened),
       serverSeedHash: seed.seed_hash,
       balance: bank.balance(user.id),
     };
@@ -264,8 +265,8 @@ function place({ db, cfg, user }, body) {
     if (round && round.next_seq >= board.pieces * MOVE_CAP) {
       throw new U.BadRequest('too many moves for one round');
     }
-    events.emit(db, cfg, { g: 'jigsaw', r: g.id, k: 'p', a: [slot, piece] });
-    return { ok: true };
+    const step = events.emit(db, cfg, { g: 'jigsaw', r: g.id, k: 'p', a: [slot, piece] });
+    return { ok: true, event: step && events.shown(step) };
   });
 }
 
@@ -344,12 +345,19 @@ function solve({ db, cfg, user, bankFor }, body) {
       stakeTaken: true,
       logged: true,
     });
-    events.emit(db, cfg, { g: 'jigsaw', r: g.id, k: 'f', a: [seconds, multiplier, payout, tooFast] });
-    events.close(db, { g: 'jigsaw', r: g.id });
+    // The player's signature over the round so far, if the request carried one, goes on
+    // the finishing event: the record of this round is then theirs as much as the house's.
+    const att = events.attest(db, cfg, {
+      g: 'jigsaw', r: g.id, sig: body.roundSig, pubkey: tokenchain.keyFor(db, user.id)?.pubkey || null,
+    });
+    const sig = att.attested ? String(body.roundSig) : null;
+    events.emit(db, cfg, { g: 'jigsaw', r: g.id, k: 'f', a: [seconds, multiplier, payout, tooFast], sig });
+    events.close(db, { g: 'jigsaw', r: g.id, sig });
 
     const done = db.get('SELECT * FROM jigsaw_games WHERE id=?', g.id);
     return {
       ...view(db, cfg, done),
+      attested: att.attested,
       tooFast,
       capped,
       balance: bank.balance(user.id),
@@ -372,7 +380,13 @@ function give({ db, cfg, user }) {
 
 function current({ db, cfg, user }) {
   const g = activeGame(db, user.id);
-  return g ? { ...view(db, cfg, g), placed: placedFrom(db, g) } : null;
+  if (!g) return null;
+  return {
+    ...view(db, cfg, g),
+    placed: placedFrom(db, g),
+    // The round's record so far, for a browser that reopened it to fold again.
+    events: events.history(db, 'jigsaw', g.id).map(events.shown),
+  };
 }
 
 module.exports = {
