@@ -37,13 +37,23 @@ async function api(pathname, options) {
  */
 function workflow(positive, seed, {
   negative = '', size = 1024, steps = 36, cfg = 4.5, prefix = 'casino', model = MODEL,
+  init = null, denoise = 1,
 } = {}) {
+  // With `init` (the name of an image already uploaded, see uploadImage) the sampler
+  // starts from that picture rather than from noise, and `denoise` says how far it may
+  // wander from it: image to image. A letter drawn with a real font and handed in this
+  // way stays the letter it was, which a bare prompt cannot promise.
+  const latent = init
+    ? {
+      10: { class_type: 'LoadImage', inputs: { image: init, upload: 'image' } },
+      11: { class_type: 'VAEEncode', inputs: { pixels: ['10', 0], vae: ['4', 2] } },
+    }
+    : {
+      5: { class_type: 'EmptyLatentImage', inputs: { width: size, height: size, batch_size: 1 } },
+    };
   return {
     4: { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: model } },
-    5: {
-      class_type: 'EmptyLatentImage',
-      inputs: { width: size, height: size, batch_size: 1 },
-    },
+    ...latent,
     6: { class_type: 'CLIPTextEncode', inputs: { text: positive, clip: ['4', 1] } },
     7: { class_type: 'CLIPTextEncode', inputs: { text: negative, clip: ['4', 1] } },
     3: {
@@ -54,16 +64,33 @@ function workflow(positive, seed, {
         cfg,
         sampler_name: 'dpmpp_2m',
         scheduler: 'karras',
-        denoise: 1,
+        denoise: init ? denoise : 1,
         model: ['4', 0],
         positive: ['6', 0],
         negative: ['7', 0],
-        latent_image: ['5', 0],
+        latent_image: init ? ['11', 0] : ['5', 0],
       },
     },
     8: { class_type: 'VAEDecode', inputs: { samples: ['3', 0], vae: ['4', 2] } },
     9: { class_type: 'SaveImage', inputs: { filename_prefix: prefix, images: ['8', 0] } },
   };
+}
+
+/** Put a local PNG into ComfyUI's input folder; returns the name LoadImage wants. */
+async function uploadImage(file) {
+  const boundary = `----casino${Date.now().toString(16)}`;
+  const name = path.basename(file);
+  const head = Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="${name}"\r\n`
+    + 'Content-Type: image/png\r\n\r\n',
+  );
+  const mid = Buffer.from(`\r\n--${boundary}\r\nContent-Disposition: form-data; name="overwrite"\r\n\r\ntrue\r\n--${boundary}--\r\n`);
+  const body = Buffer.concat([head, fs.readFileSync(file), mid]);
+  const res = await api('/upload/image', {
+    method: 'POST', headers: { 'content-type': `multipart/form-data; boundary=${boundary}` }, body,
+  });
+  const out = await res.json();
+  return out.subfolder ? `${out.subfolder}/${out.name}` : out.name;
 }
 
 /** Queue one prompt and wait for its first image. Up to fifteen minutes, polled each second. */
@@ -109,4 +136,4 @@ function python() {
   return py;
 }
 
-module.exports = { HOST, COMFY, MODEL, sleep, api, workflow, run, fetchImage, python };
+module.exports = { HOST, COMFY, MODEL, sleep, api, workflow, run, fetchImage, uploadImage, python };

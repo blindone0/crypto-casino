@@ -9,7 +9,7 @@
 // upscaled. The barrel's lighting is the shader's job; nothing here is lit.
 
 import { PACKS } from './slotpacks.js';
-import { symbolImage, symbolSvgStandalone } from './symbols.js';
+import { symbolSvgStandalone } from './symbols.js';
 
 const atlases = new Map();     // theme -> Promise<HTMLImageElement | null>
 
@@ -36,16 +36,15 @@ export async function symbolBitmap(sym, theme) {
     const img = await atlasFor(theme);
     if (img) return { img, sx: cellOf[0], sy: cellOf[1], sw: pack.cell, sh: pack.cell, alpha: true };
   }
-  const rendered = symbolImage(sym, theme);
   return new Promise((resolve) => {
     const img = new Image();
     // Drawn whole, never through a source rectangle: Chrome takes the rectangle of an
     // SVG image in a coordinate space of its own and hands back one corner of it,
-    // enlarged. The artwork is square (a 100 by 100 viewBox, or a 256 px render).
-    img.onload = () => resolve({ img, whole: true, sw: 1, sh: 1, alpha: false, screen: !!rendered });
+    // enlarged. The artwork is square: a 100 by 100 viewBox.
+    img.onload = () => resolve({ img, whole: true, sw: 1, sh: 1, alpha: false });
     img.onerror = () => resolve(null);
     // Standalone: an img is its own document and cannot see the page's shared defs.
-    img.src = rendered || `data:image/svg+xml;charset=utf-8,${encodeURIComponent(symbolSvgStandalone(sym, theme))}`;
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(symbolSvgStandalone(sym, theme))}`;
   });
 }
 
@@ -105,20 +104,17 @@ export function cellPainter(theme, palette, bitmap = symbolBitmap) {
     // The symbol, with a shadow under it, filling most of the cell.
     const b = await bitmap(sym, theme);
     if (b && b.img) {
-      const box = Math.min(width, cell) * (b.alpha ? 0.80 : 0.74);
-      const scale = Math.min(box / b.sw, box / b.sh);
+      // A rendered symbol, cut out to alpha, fills the cell's height; the drawn artwork
+      // keeps its own plate and sits a little smaller.
+      const boxH = cell * (b.alpha ? 0.90 : 0.74);
+      const boxW = width * (b.alpha ? 0.78 : 0.74);
+      const scale = Math.min(boxW / b.sw, boxH / b.sh);
       const dw = b.sw * scale;
       const dh = b.sh * scale;
       ctx.save();
-      if (b.screen) {
-        // A render on a black ground: 'screen' lifts the object off the plate and never
-        // reaches white, so its highlights survive as highlights.
-        ctx.globalCompositeOperation = 'screen';
-      } else {
-        ctx.shadowColor = 'rgba(0,0,0,0.65)';
-        ctx.shadowBlur = width * 0.035;
-        ctx.shadowOffsetY = width * 0.018;
-      }
+      ctx.shadowColor = 'rgba(0,0,0,0.65)';
+      ctx.shadowBlur = width * 0.035;
+      ctx.shadowOffsetY = width * 0.018;
       if (b.whole) ctx.drawImage(b.img, cx - dw / 2, cy - dh / 2, dw, dh);
       else ctx.drawImage(b.img, b.sx, b.sy, b.sw, b.sh, cx - dw / 2, cy - dh / 2, dw, dh);
       ctx.restore();

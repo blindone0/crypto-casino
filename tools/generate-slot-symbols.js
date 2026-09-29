@@ -55,11 +55,63 @@ const NEGATIVE = 'text, letters, writing, watermark, logo, signature, frame, bor
   + 'collage, grid, cropped, cut off, blurry, grey background, gradient background, scenery, '
   + 'person, face, hands';
 // The ranks are letters, and a letter prompt must be allowed its letter.
-const RANK_NEGATIVE = 'watermark, logo, signature, frame, border, multiple letters, words, sentence, '
-  + 'collage, grid, cropped, cut off, blurry, grey background, gradient background, scenery, '
-  + 'person, face, hands';
+const RANK_NEGATIVE = 'watermark, logo, signature, multiple letters, two letters, repeated letter, duplicate, '
+  + 'extra letters, small letters, words, sentence, collage, grid, cropped, cut off, blurry, '
+  + 'grey background, gradient background, scenery, person, face, hands';
 
-const RANK_NAME = { T: 'the number 10', J: 'the capital letter J', Q: 'the capital letter Q', K: 'the capital letter K', A: 'the capital letter A' };
+// "one single large glyph": asked for a letter alone, the model likes to add a second,
+// smaller one beside it (classic's first J came back as two).
+const RANK_NAME = {
+  T: 'the number 10, one single large glyph',
+  J: 'the capital letter J, one single large glyph',
+  Q: 'the capital letter Q, one single large glyph',
+  K: 'the capital letter K, one single large glyph',
+  A: 'the capital letter A, one single large glyph',
+};
+const RANK_TEXT = { T: '10', J: 'J', Q: 'Q', K: 'K', A: 'A' };
+
+// --glyph: the rank is drawn first, with a real font, and the model is started from that
+// picture (image to image, see comfy.js) rather than from noise. Asked for a bare letter
+// from nothing, SDXL returned a second small J beside the first, a C for a Q, a B for a
+// J and a neon squiggle for a J five times running; started from the drawn glyph it
+// keeps the letter and adds the material. The glyph is tinted towards the theme's metal
+// so the colour has less to fight.
+const GLYPH_FONT = process.env.GLYPH_FONT || 'C:\\Windows\\Fonts\\georgiab.ttf';
+// 0.62 kept the letter but returned it nearly flat; 0.7 lets the material and a little
+// ornament in while the letterform still holds.
+const GLYPH_DENOISE = 0.7;
+const GLYPH_TINT = {
+  classic: '#e6c060', afterdark: '#ff4fa3', russian: '#e8a83c', noir: '#cfd8e4', couch: '#8fa6e8',
+};
+
+const GLYPH_PY = `
+import sys
+from PIL import Image, ImageDraw, ImageFont
+text, out, font_path, tint = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+SIZE = 1024
+im = Image.new('RGB', (SIZE, SIZE), (0, 0, 0))
+d = ImageDraw.Draw(im)
+size = 700
+font = ImageFont.truetype(font_path, size)
+box = d.textbbox((0, 0), text, font=font)
+w, h = box[2] - box[0], box[3] - box[1]
+# Fit the glyph to about seventy percent of the frame either way.
+scale = min(SIZE * 0.70 / max(w, 1), SIZE * 0.70 / max(h, 1))
+font = ImageFont.truetype(font_path, max(10, int(size * scale)))
+box = d.textbbox((0, 0), text, font=font)
+w, h = box[2] - box[0], box[3] - box[1]
+rgb = tuple(int(tint.lstrip('#')[i:i + 2], 16) for i in (0, 2, 4))
+d.text(((SIZE - w) / 2 - box[0], (SIZE - h) / 2 - box[1]), text, font=font, fill=rgb)
+im.save(out, 'PNG')
+print('glyph ' + text + ' ' + str(w) + 'x' + str(h))
+`;
+
+/** Draw the rank with a font and upload it: the picture the model starts from. */
+async function glyphInit(themeKey, key, work) {
+  const file = path.join(work, `${key}.init.png`);
+  execFileSync(comfy.python(), ['-c', GLYPH_PY, RANK_TEXT[key], file, GLYPH_FONT, GLYPH_TINT[themeKey] || '#e6c060'], { encoding: 'utf8' });
+  return comfy.uploadImage(file);
+}
 
 /**
  * Each theme: the seed its pack is reproducible from, the material its ranks are cut
@@ -130,12 +182,13 @@ const THEMES = {
   },
 };
 
-/** One render job per symbol of one theme. */
-function jobs(themeKey, seed) {
+/** One render job per symbol of one theme. `override` replaces one key's subject. */
+function jobs(themeKey, seed, override = null) {
   const t = THEMES[themeKey];
   return KEYS.map((key, i) => {
     const rank = RANK_NAME[key];
-    const subject = rank ? t.rank(rank) : t.objects[key];
+    const own = override && override.key === key ? override.subject : null;
+    const subject = own || (rank ? t.rank(rank) : t.objects[key]);
     return {
       key,
       seed: seed * 1000 + i + 1,
@@ -201,6 +254,11 @@ for i, key in enumerate(keys):
 
 os.makedirs(out, exist_ok=True)
 atlas.save(os.path.join(out, theme + '.webp'), 'WEBP', quality=92, method=6)
+# A contact sheet beside the renders, for looking at: the atlas over the strip's dark
+# plate colour, as a JPEG any viewer opens. Not shipped.
+sheet = Image.new('RGB', atlas.size, (18, 16, 40))
+sheet.paste(atlas, (0, 0), atlas)
+sheet.save(os.path.join(work, 'sheet.jpg'), 'JPEG', quality=85)
 with open(os.path.join(out, theme + '.json'), 'w', encoding='utf-8') as fh:
     json.dump(manifest, fh, indent=2)
     fh.write(chr(10))
@@ -237,6 +295,15 @@ async function main() {
   const only = args.includes('--only') ? args[args.indexOf('--only') + 1] : null;
   const themeArg = args.includes('--theme') ? args[args.indexOf('--theme') + 1] : null;
   const seedArg = args.includes('--seed') ? Number(args[args.indexOf('--seed') + 1]) : NaN;
+  // A subject of your own for one symbol, when the model keeps missing the one in the
+  // table (a bare letter is what it misses most); the theme's style is still appended.
+  const promptArg = args.includes('--prompt') ? args[args.indexOf('--prompt') + 1] : null;
+  if (promptArg && !only) throw new Error('--prompt needs --only KEY');
+  const glyph = args.includes('--glyph');
+  if (glyph && !fs.existsSync(GLYPH_FONT)) throw new Error(`--glyph needs a font: ${GLYPH_FONT} (set GLYPH_FONT)`);
+  // How far the model may wander from the drawn glyph: more ornament, less letter.
+  const denoiseArg = args.includes('--denoise') ? Number(args[args.indexOf('--denoise') + 1]) : NaN;
+  const denoise = denoiseArg > 0 && denoiseArg <= 1 ? denoiseArg : GLYPH_DENOISE;
   const themes = themeArg ? [themeArg] : Object.keys(THEMES);
   for (const t of themes) if (!THEMES[t]) throw new Error(`no such theme: ${t} (${Object.keys(THEMES).join(', ')})`);
   if (only && !KEYS.includes(only)) throw new Error(`no such symbol: ${only} (${KEYS.join(', ')})`);
@@ -244,9 +311,10 @@ async function main() {
   console.log(`\n  themes    ${themes.join(', ')}`);
   console.log(`  renders   ${themes.length * (only ? 1 : KEYS.length)} at 1024, packed into ${CELL} px cells`);
   console.log(`  into      ${OUT}\n`);
+  const override = promptArg ? { key: only, subject: promptArg } : null;
   for (const t of themes) {
     const seed = Number.isInteger(seedArg) && seedArg > 0 ? seedArg : THEMES[t].seed;
-    for (const j of jobs(t, seed)) {
+    for (const j of jobs(t, seed, override)) {
       if (only && j.key !== only) continue;
       console.log(`  ${t.padEnd(10)} ${j.key.padEnd(6)} ${j.prompt}`);
     }
@@ -262,11 +330,13 @@ async function main() {
     const work = path.join(WORK, t);
     fs.mkdirSync(work, { recursive: true });
     if (!packOnly) {
-      for (const j of jobs(t, seed)) {
+      for (const j of jobs(t, seed, override)) {
         if (only && j.key !== only) continue;
         process.stdout.write(`  ${t.padEnd(10)} ${j.key.padEnd(6)} `);
+        const init = glyph && RANK_TEXT[j.key] ? await glyphInit(t, j.key, work) : null;
         const img = await comfy.run(j.prompt, j.seed, {
           negative: j.negative, size: j.size, steps: 30, cfg: 5, prefix: `slot-${t}`, client: 'casino-slots',
+          init, denoise,
         });
         await comfy.fetchImage(img, path.join(work, `${j.key}.png`));
         console.log('ok');

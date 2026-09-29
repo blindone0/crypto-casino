@@ -1,6 +1,6 @@
 import { LANGS, t, setLocale, getLocale, applyAll } from './i18n.js';
 import {
-  ensureSymbolDefs, symbolSvg, symbolImage, THEME_KEYS,
+  ensureSymbolDefs, symbolSvg, THEME_KEYS,
 } from './symbols.js';
 import { pictureSvg } from './pictures.js';
 import { createCut } from './jigsaw.js';
@@ -2017,9 +2017,7 @@ function paintReel(reelNode, symbols, litRows, reelIndex = 0, stop = null) {
       style: `--i:${k};--shade:${shade.toFixed(3)}`,
     });
     if (visible) face.dataset.row = String(row);
-    const rendered = symbolImage(sym, slotTheme);
-    if (rendered) face.innerHTML = `<img class="sym-img" src="${rendered}" alt="">`;
-    else face.innerHTML = symbolSvg(sym, slotTheme);
+    face.innerHTML = symbolSvg(sym, slotTheme);
     drum.appendChild(face);
   }
 

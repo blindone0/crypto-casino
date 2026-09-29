@@ -181,7 +181,6 @@ const STRINGS = {
   'slots.theme.russian': { en: 'Golden Ring', ru: 'Золотое кольцо' },
   'slots.theme.noir': { en: 'Knife and Smoke', ru: 'Нож и дым' },
   'slots.theme.couch': { en: 'The Couch', ru: 'Кушетка' },
-  'slots.theme.rendered': { en: 'Gilded Royale', ru: 'Золотая корона' },
 
   // ---- puzzle
 
