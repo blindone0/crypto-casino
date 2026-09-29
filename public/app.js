@@ -1204,16 +1204,49 @@ function renderCrash() {
 }
 
 function crashCurve() {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('class', 'crash-curve');
-  svg.setAttribute('viewBox', '0 0 300 130');
-  svg.setAttribute('preserveAspectRatio', 'none');
-  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  p.setAttribute('id', 'crashPath');
-  p.setAttribute('fill', 'none');
-  p.setAttribute('stroke', 'var(--accent)');
-  p.setAttribute('stroke-width', '2');
-  addKids(svg, p);
+  const NS = 'http://www.w3.org/2000/svg';
+  const make = (tag, attrs) => {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    return n;
+  };
+
+  const svg = make('svg', { class: 'crash-curve', viewBox: '0 0 300 130' });
+
+  // The area under the curve, which is what makes a climb read as a climb rather than
+  // as a line that happens to slope. Drawn first so the stroke sits on top of it.
+  const fill = make('path', { id: 'crashFill', fill: 'url(#crashGrad)', stroke: 'none', opacity: '0.5' });
+
+  // The gradient goes INSIDE defs. Appending it as a sibling of an empty defs, which is
+  // what this did first, leaves a paint server that browsers are not obliged to resolve —
+  // and Chrome duly rendered the fill as nothing at all.
+  const grad = make('linearGradient', { id: 'crashGrad', x1: '0', y1: '0', x2: '0', y2: '1' });
+  addKids(grad,
+    make('stop', { offset: '0', 'stop-color': 'var(--accent)', 'stop-opacity': '0.55' }),
+    make('stop', { offset: '1', 'stop-color': 'var(--accent)', 'stop-opacity': '0' }));
+  const defs = make('defs', {});
+  addKids(defs, grad);
+  addKids(svg, defs);
+
+  const p = make('path', {
+    id: 'crashPath', fill: 'none', stroke: 'var(--accent)',
+    'stroke-width': '2.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+  });
+
+  // The rocket rides the end of the curve. It is a group so it can be moved and turned
+  // as one thing; the shapes inside it are in its own local space, nose pointing right.
+  //
+  // preserveAspectRatio is deliberately NOT set to none any more: the viewBox used to be
+  // stretched to the element, which is fine for a line and would have squashed the
+  // rocket into an oval at most window widths.
+  const ship = make('g', { id: 'crashShip' });
+  addKids(ship,
+    // Exhaust first, so the body covers where they meet.
+    make('path', { id: 'crashFlame', d: 'M-5 0 L-13 -3.2 L-10 0 L-13 3.2 Z', fill: 'var(--gold-bright)', opacity: '0.95' }),
+    make('path', { d: 'M7 0 L-5 -4 L-5 4 Z', fill: 'var(--accent)' }),
+    make('circle', { cx: '-0.5', cy: '0', r: '1.5', fill: 'var(--bg)', opacity: '0.85' }));
+
+  addKids(svg, fill, p, ship);
   return svg;
 }
 
@@ -1221,15 +1254,45 @@ function crashCurve() {
 function drawCurve(mult, busted) {
   const p = document.getElementById('crashPath');
   if (!p) return;
+  const fill = document.getElementById('crashFill');
+  const ship = document.getElementById('crashShip');
+
+  const W = 300;
+  const H = 130;
+  const TOP = 8;               // headroom so the rocket never clips the top edge
   const span = Math.max(2, mult);
+
+  // The multiplier grows exponentially in time, so the curve has to as well. The old
+  // version interpolated the multiplier LINEARLY across x, which draws a straight line
+  // at every value — the one shape a crash curve must never be, because the whole point
+  // is that it is getting away from you.
   const pts = [];
-  for (let i = 0; i <= 40; i += 1) {
-    const frac = i / 40;
-    const m = 1 + (mult - 1) * frac;
-    pts.push(`${(frac * 300).toFixed(1)},${(130 - ((m - 1) / (span - 1 || 1)) * 120).toFixed(1)}`);
+  for (let i = 0; i <= 48; i += 1) {
+    const frac = i / 48;
+    const m = Math.pow(mult, frac);                       // 1 at the left, mult at the right
+    const y = H - ((m - 1) / (span - 1 || 1)) * (H - TOP);
+    pts.push([frac * W, Math.max(TOP, y)]);
   }
-  p.setAttribute('d', `M${pts.join(' L')}`);
+
+  const d = 'M' + pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' L');
+  p.setAttribute('d', d);
   p.setAttribute('stroke', busted ? 'var(--danger)' : 'var(--accent)');
+
+  // Close the same path down to the baseline for the fill.
+  if (fill) {
+    fill.setAttribute('d', `${d} L${W},${H} L0,${H} Z`);
+    fill.setAttribute('opacity', busted ? '0.22' : '0.5');
+  }
+
+  // The rocket sits at the tip, turned along the curve. The angle comes from the last
+  // two points rather than from the derivative, so it matches what is actually drawn.
+  if (ship) {
+    const [x1, y1] = pts[pts.length - 2];
+    const [x2, y2] = pts[pts.length - 1];
+    const deg = (Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI;
+    ship.setAttribute('transform', `translate(${x2.toFixed(1)},${y2.toFixed(1)}) rotate(${deg.toFixed(1)})`);
+    ship.setAttribute('opacity', busted ? '0' : '1');
+  }
 }
 
 function connectCrash() {
