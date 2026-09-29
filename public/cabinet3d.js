@@ -42,10 +42,11 @@ import {
 } from './gl.js';
 
 const FOVY = 0.62;             // the drums' field of view, so the two perspectives agree
-const CHAMFER = 16;            // the case edge, in px
-const CASE_DEPTH = 22;
+const CHAMFER = 22;            // the case edge, in px
+const CASE_DEPTH = 34;
 const BEZEL = 18;              // the frame around the window, and how far it stands proud
-const WELL = 6;                // the drums sit this far behind the frame's outer face
+const WELL = 44;               // the drums sit in a recess this deep behind the face
+const MARQUEE_DEPTH = 10;      // the lit panel sits back in the band behind its frame
 const TEX_PX = 220;            // one texture repeat every so many px
 const LED_W = 5;               // an LED strip's width
 const BUTTON_R = 27;           // the spin button's radius, at most
@@ -114,6 +115,17 @@ void main() {
     gl_FragColor = vec4(tonemap(uGlow * (0.30 + 0.75 * core) * breathe), 1.0);
     return;
   }
+  if (uMode == 4) {
+    // A cast shadow under a lip: dark at the edge it hangs from, gone a little below.
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 0.55 * vUV.y * vUV.y);
+    return;
+  }
+  if (uMode == 5) {
+    // A cast shadow under something round, soft at its rim.
+    float r = length(vUV - 0.5) * 2.0;
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 0.6 * (1.0 - smoothstep(0.45, 1.0, r)));
+    return;
+  }
   vec3 n = normalize(vNormal);
   vec3 base = texture2D(uTex, vUV).rgb * uTint;
   float rough = texture2D(uRough, vUV).r;
@@ -124,11 +136,16 @@ void main() {
   vec3 h = normalize(uKey + v);
   float gloss = 1.0 - rough;
   float spec = pow(max(dot(n, h), 0.0), mix(14.0, 96.0, gloss)) * gloss * uSpec;
-  // Lacquer reads as lacquer by what it reflects: a broad sheen where the surface turns
-  // away from the eye, warmer on faces that look up towards the marquee's light.
-  float fres = pow(1.0 - max(dot(n, v), 0.0), 3.0) * gloss * 0.45;
-  vec3 room = mix(vec3(0.10, 0.11, 0.15), vec3(0.34, 0.30, 0.24), clamp(n.y * 0.5 + 0.5, 0.0, 1.0));
-  vec3 lit = base * (0.22 + diff * 0.92 + fill) * uShade + vec3(spec) + room * fres;
+  // What the surface reflects: the room, in the mirror direction - a lit ceiling above,
+  // dark below. A black lacquer panel with nothing in it is a black rectangle; the same
+  // panel with the room sliding across it as the eye moves is a glossy solid, and every
+  // chamfer, wall and bevel of the case shows its angle by what it catches. A little of
+  // it even face-on, as real lacquer does, and nearly all of it at a graze.
+  vec3 R = reflect(-v, n);
+  float sky = clamp(R.y * 0.5 + 0.5, 0.0, 1.0);
+  vec3 env = mix(vec3(0.012, 0.012, 0.018), vec3(0.34, 0.31, 0.27), pow(sky, 2.4));
+  float fres = 0.12 + 0.88 * pow(1.0 - max(dot(n, v), 0.0), 4.0);
+  vec3 lit = base * (0.22 + diff * 0.92 + fill) * uShade + vec3(spec) + env * fres * gloss * uSpec;
   gl_FragColor = vec4(tonemap(lit), 1.0);
 }`;
 
@@ -175,7 +192,7 @@ const DEFAULT_THEME = {
 };
 
 /** The material ids the geometry carries; the draw loop groups faces by them. */
-const IDS = { lacquer: 0, brass: 1, steel: 2, well: 3, glow: 4, led: 5, lamp: 6 };
+const IDS = { lacquer: 0, brass: 1, steel: 2, well: 3, glow: 4, led: 5, lamp: 6, shade: 7, disc: 8 };
 
 /**
  * The materials for a palette, and how each is drawn. A lit material names its texture
@@ -194,7 +211,26 @@ export function materialsFor(theme) {
     glow: { file: 'cab-vinyl', mode: 1, colour: (t.marquee && t.marquee.glow) || DEFAULT_THEME.marquee.glow },
     led: { file: 'cab-vinyl', mode: 2, colour: t.accent || DEFAULT_THEME.accent },
     lamp: { file: 'cab-vinyl', mode: 3, colour: t.lamp || t.accent || DEFAULT_THEME.lamp },
+    // The cast shadows, blended over everything above them: last, so they are.
+    shade: { file: 'cab-vinyl', mode: 4, blend: true },
+    disc: { file: 'cab-vinyl', mode: 5, blend: true },
   };
+}
+
+/** A shadow strip hanging from its top edge: v runs 1 at the edge to 0 at the bottom. */
+function shade(out, x0, yTop, x1, yBottom, z) {
+  tri(out, IDS.shade, [x0, yBottom, z], [x1, yBottom, z], [x1, yTop, z], [[0, 0], [1, 0], [1, 1]]);
+  tri(out, IDS.shade, [x0, yBottom, z], [x1, yTop, z], [x0, yTop, z], [[0, 0], [1, 1], [0, 1]]);
+}
+
+/** A round shadow, centred UVs so the shader can fade its rim. */
+function disc(out, cx, cy, r, z, segments = 24) {
+  for (let i = 0; i < segments; i += 1) {
+    const a0 = (i / segments) * Math.PI * 2;
+    const a1 = ((i + 1) / segments) * Math.PI * 2;
+    tri(out, IDS.disc, [cx, cy, z], [cx + Math.cos(a0) * r, cy + Math.sin(a0) * r, z], [cx + Math.cos(a1) * r, cy + Math.sin(a1) * r, z],
+      [[0.5, 0.5], [0.5 + Math.cos(a0) * 0.5, 0.5 + Math.sin(a0) * 0.5], [0.5 + Math.cos(a1) * 0.5, 0.5 + Math.sin(a1) * 0.5]]);
+  }
 }
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -279,14 +315,31 @@ export function buildGeometry({ W, H, win, marqueeH = 0, base = null }) {
   const bx0 = win.x - BEZEL; const by0 = win.y - BEZEL; const bx1 = win.x + win.w + BEZEL; const by1 = win.y + win.h + BEZEL;
   const baseTop = base ? base.y : inY1;
   const mqBottom = Math.max(inY0, Math.min(by0, inY0 + marqueeH));
-  rect(M.lacquer, inX0, inY0, inX1, mqBottom, 0);                                                // the marquee band
-  // The marquee light: a backlit panel inset in the band, in a brass frame.
+  // The marquee light: a backlit panel set back into the band, behind a brass frame,
+  // with the walls of its recess between them - depth you can see from the middle of
+  // the room, not just shading. The band's face is drawn round the opening, never across
+  // it: a face across a recess hides the recess.
   let marqueeLight = null;
   if (mqBottom - inY0 > 26) {
     const mx0 = inX0 + 14; const mx1 = inX1 - 14; const my0 = inY0 + 10; const my1 = mqBottom - 8;
-    rect(M.brass, mx0 - 3, my0 - 3, mx1 + 3, my1 + 3, 0.5);
-    rect(M.glow, mx0, my0, mx1, my1, 1.0);
+    const f = 3;
+    const zm = -MARQUEE_DEPTH;
+    rect(M.lacquer, inX0, inY0, inX1, my0 - f, 0);
+    rect(M.lacquer, inX0, my1 + f, inX1, mqBottom, 0);
+    rect(M.lacquer, inX0, my0 - f, mx0 - f, my1 + f, 0);
+    rect(M.lacquer, mx1 + f, my0 - f, inX1, my1 + f, 0);
+    rect(M.brass, mx0 - f, my0 - f, mx1 + f, my0, 0.5);
+    rect(M.brass, mx0 - f, my1, mx1 + f, my1 + f, 0.5);
+    rect(M.brass, mx0 - f, my0, mx0, my1, 0.5);
+    rect(M.brass, mx1, my0, mx1 + f, my1, 0.5);
+    quad(v, M.lacquer, [mx0, Y(my0), 0.5], [mx1, Y(my0), 0.5], [mx1, Y(my0), zm], [mx0, Y(my0), zm]);
+    quad(v, M.lacquer, [mx0, Y(my1), zm], [mx1, Y(my1), zm], [mx1, Y(my1), 0.5], [mx0, Y(my1), 0.5]);
+    quad(v, M.lacquer, [mx0, Y(my1), zm], [mx0, Y(my1), 0.5], [mx0, Y(my0), 0.5], [mx0, Y(my0), zm]);
+    quad(v, M.lacquer, [mx1, Y(my1), 0.5], [mx1, Y(my1), zm], [mx1, Y(my0), zm], [mx1, Y(my0), 0.5]);
+    rect(M.glow, mx0, my0, mx1, my1, zm);
     marqueeLight = [mx0, Y(my1), mx1, Y(my0)];
+  } else {
+    rect(M.lacquer, inX0, inY0, inX1, mqBottom, 0);                                              // the band, unlit
   }
   rect(M.brass, inX0, mqBottom, inX1, mqBottom + 3, 1);                                          // a brass rule under it
   rect(M.lacquer, inX0, mqBottom, inX1, by0, 0);                                                  // above the window
@@ -320,8 +373,18 @@ export function buildGeometry({ W, H, win, marqueeH = 0, base = null }) {
     quad(v, M.steel, [tx0, Y(ty1), 0], [tx0 + lip, Y(ty1 - lip), zt], [tx0 + lip, Y(ty0 + lip), zt], [tx0, Y(ty0), 0]);
     quad(v, M.steel, [tx1 - lip, Y(ty1 - lip), zt], [tx1, Y(ty1), 0], [tx1, Y(ty0), 0], [tx1 - lip, Y(ty0 + lip), zt]);
     const r = Math.min(BUTTON_R, base.h * 0.42);
-    if (r > 8) button(v, base.x + base.w * 0.74, Y(base.y + base.h / 2), r);
+    if (r > 8) {
+      const cx = base.x + base.w * 0.74;
+      const cy = Y(base.y + base.h / 2);
+      // The button's shadow on the deck, thrown down and to the right by the key light.
+      disc(v, cx + r * 0.25, cy - r * 0.3, r * 1.3, 0.3);
+      button(v, cx, cy, r);
+    }
   }
+  // What the lips cast: a soft dark strip under the bezel and under the marquee frame.
+  // Nothing sells the frame standing proud like the shadow it drops on the case.
+  shade(v, bx0, Y(by1), bx1, Y(by1 + 16), 0.3);
+  if (marqueeLight) shade(v, inX0 + 11, Y(mqBottom - 5), inX1 - 11, Y(mqBottom + 8), 1.2);
 
   // The bezel: four chamfered strips from the face (z = 0) to a lip that stands proud.
   const wx0 = win.x; const wy0 = win.y; const wx1 = win.x + win.w; const wy1 = win.y + win.h;
@@ -330,12 +393,14 @@ export function buildGeometry({ W, H, win, marqueeH = 0, base = null }) {
   quad(v, M.brass, [wx0, Y(wy1), zl], [wx1, Y(wy1), zl], [bx1, Y(by1), 0], [bx0, Y(by1), 0]);    // bottom
   quad(v, M.brass, [bx0, Y(by1), 0], [wx0, Y(wy1), zl], [wx0, Y(wy0), zl], [bx0, Y(by0), 0]);    // left
   quad(v, M.brass, [wx1, Y(wy1), zl], [bx1, Y(by1), 0], [bx1, Y(by0), 0], [wx1, Y(wy0), zl]);    // right
-  // The lip's inner face, back to the well: what you see past the drums' edges.
+  // The recess the drums sit in: its walls run from the lip back to the well, in lacquer,
+  // so they catch the room like the rest of the case and read as walls - what you see
+  // past the drums' ends and between them. The well itself is black.
   const zw = -WELL;
-  quad(v, M.well, [wx0, Y(wy0), zl], [wx1, Y(wy0), zl], [wx1, Y(wy0), zw], [wx0, Y(wy0), zw]);
-  quad(v, M.well, [wx0, Y(wy1), zw], [wx1, Y(wy1), zw], [wx1, Y(wy1), zl], [wx0, Y(wy1), zl]);
-  quad(v, M.well, [wx0, Y(wy1), zw], [wx0, Y(wy1), zl], [wx0, Y(wy0), zl], [wx0, Y(wy0), zw]);
-  quad(v, M.well, [wx1, Y(wy1), zl], [wx1, Y(wy1), zw], [wx1, Y(wy0), zw], [wx1, Y(wy0), zl]);
+  quad(v, M.lacquer, [wx0, Y(wy0), zl], [wx1, Y(wy0), zl], [wx1, Y(wy0), zw], [wx0, Y(wy0), zw]);
+  quad(v, M.lacquer, [wx0, Y(wy1), zw], [wx1, Y(wy1), zw], [wx1, Y(wy1), zl], [wx0, Y(wy1), zl]);
+  quad(v, M.lacquer, [wx0, Y(wy1), zw], [wx0, Y(wy1), zl], [wx0, Y(wy0), zl], [wx0, Y(wy0), zw]);
+  quad(v, M.lacquer, [wx1, Y(wy1), zl], [wx1, Y(wy1), zw], [wx1, Y(wy0), zw], [wx1, Y(wy0), zl]);
   // The well itself, behind the drums.
   rect(M.well, wx0, wy0, wx1, wy1, zw);
 
@@ -499,6 +564,15 @@ export function createCabinet(host, opts = {}) {
       const id = geometry.materials[name];
       const spans = runs.get(id);
       if (!spans) continue;
+      // The shadows are blended over the faces already drawn, and do not write depth.
+      if (m.blend) {
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.depthMask(false);
+      } else {
+        gl.disable(gl.BLEND);
+        gl.depthMask(true);
+      }
       const t = tex[m.file] || tex['cab-vinyl'];
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, t.colour);
@@ -511,6 +585,8 @@ export function createCabinet(host, opts = {}) {
       gl.uniform1f(L.u.uShade, m.shade ?? 1);
       for (const [start, count] of spans) gl.drawArrays(gl.TRIANGLES, start, count);
     }
+    gl.disable(gl.BLEND);
+    gl.depthMask(true);
   }
 
   const stage = host.closest('.slot-stage');

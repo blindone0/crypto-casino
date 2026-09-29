@@ -93,6 +93,13 @@ export function cellPainter(theme, palette, bitmap = symbolBitmap) {
     sides.addColorStop(1, 'rgba(0,0,0,0.45)');
     ctx.fillStyle = sides;
     ctx.fillRect(0, 0, W, H);
+    // A fine brushed grain across the plate, so it is a material and not a fill. The
+    // same pattern in every cell, from a small fixed sequence rather than the random.
+    for (let yy = 0; yy < H; yy += 2) {
+      const a = 0.02 + 0.035 * (((yy * 7919) % 97) / 97);
+      ctx.fillStyle = `rgba(255,255,255,${a.toFixed(3)})`;
+      ctx.fillRect(0, yy, W, 1);
+    }
 
     // A breath of the theme's colour behind the symbol, so it sits in light rather than
     // on black - faint, and round on the drum.

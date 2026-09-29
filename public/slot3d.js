@@ -144,13 +144,19 @@ void main() {
   // depth and puts the eye where the win is read. Steep: the rows fall into shadow,
   // which is the barrel.
   float facing = max(n.z, 0.0);
-  lit *= mix(0.32, 1.0, pow(facing, 1.5));
+  lit *= mix(0.16, 1.0, pow(facing, 2.2));
 
   // Along the axis, which vUV.x measures. Darkening towards each end seats the drum
   // between its neighbours instead of leaving five flat panels butted together, and is
   // where the gap between barrels comes from.
   float ends = smoothstep(0.0, 0.10, vUV.x) * smoothstep(1.0, 0.90, vUV.x);
-  lit *= mix(0.22, 1.0, ends);
+  lit *= mix(0.10, 1.0, ends);
+
+  // Where one row of the strip meets the next, fifteen degrees either side of the
+  // payline, a thread of the lamp: two thin lines that bend with the surface, which is
+  // what says it is round. Nothing lies across the symbols themselves.
+  float seam = exp(-pow((acos(facing) - 0.2618) / 0.02, 2.0)) * 0.16;
+  lit += vec3(0.85, 0.88, 1.0) * seam;
 
   // A cool edge where the barrel turns away, so it reads as round at the top and bottom
   // of the window rather than stopping dead. Faint.
