@@ -9,47 +9,46 @@
 // another one IN FRONT of it: the reel canvas is already transparent, which is what this
 // design was built for. Stacking, all in style.css: cabinet 1, reels 3, glass 4, sparks 8.
 //
-// WHAT THE MACHINE IS MADE OF
+// NO STRAIGHT EDGES
 //
-// A lacquered case with a chamfered edge and brass trim, in the theme's colour; a marquee
-// band with a backlit panel in it, framed in brass, that the CSS title sits on; a bezel
-// round the window that stands proud, brass or steel by theme; a strip of LEDs down each
-// side of the window in the theme's accent, with a pulse running along them; the dark
-// well behind the drums; and a deck along the bottom with the coin tray sunk into it and
-// the spin button rising out of it, lit. Every theme reaches all of it through the
-// palette in slotthemes.js — before that, every machine was walnut and brass whatever
-// the selector said. Lit by the same key direction the drums use (gl.js), textured with
-// the materials the RTX drew (tools/generate-materials.js) and their roughness, and
-// tonemapped the same way.
+// igor: "все должно быть обтекаемое и выпуклое полукруглое. без прямых углов вообще".
+// So the case is a pillow, not a box: its silhouette is a rounded shape with wide radii,
+// its edge is a bullnose all the way round, and its front comes forward at the centre and
+// falls away towards the sides, so the room slides across it. The bezel round the drums
+// is a rounded moulding with rounded corners, a ring of light runs round it, the
+// marquee's lamp is a domed pillow behind a brass rim, the coin slot is a capsule and
+// the button a dome. Every one of them is an outline of a rounded rectangle, sampled
+// into the same number of points, and a band of quads between two such outlines - that
+// one helper is the whole cabinet.
 //
-// CSS: the marquee text, the lever, the payline, the sparks and the room. The CSS cabinet
-// stays whole underneath as the fallback: when this returns null - no context, no
-// shaders - not one rule changes, because everything here is gated on a class the app
-// only adds when this succeeded.
-//
-// THE CAMERA MAPS THE FRONT PLANE 1:1
-//
-// Model units are CSS pixels of the cabinet box, x right, y up, z towards the viewer, and
-// the camera sits on the centre line at the distance that makes the z = 0 plane fill the
-// canvas exactly. So a quad drawn at the window's DOM rectangle lands on the window's DOM
-// rectangle, and the bezel frames the drums to the pixel. Depth is real: the bezel's
-// inner lip is closer than the case, the chamfers slope away, the tray sinks and the
-// button rises, and the perspective is the same perspective the reel canvas was solved
-// for. The parallax tilt is CSS on the whole cabinet, so every layer turns together.
+// The reels are flat in the page (a canvas in the DOM), so the bezel's inner lip has to
+// land on the window's DOM rectangle to the pixel however far forward it stands; each
+// lip point is pulled towards the camera's centre line by exactly the amount the
+// perspective would push it out. The theme reaches all of it through the palette in
+// slotthemes.js. Lit by the same key direction the drums use (gl.js), textured with the
+// materials the RTX drew (tools/generate-materials.js) and their roughness, and
+// tonemapped the same way. When this returns null - no context, no shaders - the app
+// shows a notice; there is no flat version.
 
 import {
   context, program, locations, loadTexture, perspective, lookAt, KEY_DIR, ACES, onLost, release,
 } from './gl.js';
 
 const FOVY = 0.62;             // the drums' field of view, so the two perspectives agree
-const CHAMFER = 22;            // the case edge, in px
-const CASE_DEPTH = 34;
-const BEZEL = 18;              // the frame around the window, and how far it stands proud
-const WELL = 44;               // the drums sit in a recess this deep behind the face
-const MARQUEE_DEPTH = 10;      // the lit panel sits back in the band behind its frame
+const BULGE_X = 36;            // how far the front comes forward at its centre, across
+const BULGE_Y = 18;            // and down
+const EDGE_R = 28;             // the bullnose round the case
+const CORNER_TOP = 140;        // the silhouette's radii, top and bottom
+const CORNER_BOTTOM = 70;
+const BEZEL = 18;              // the moulding round the window, and how far it stands proud
+const WIN_R = 30;              // the window's corner radius - generous rounded curve
+const WELL = 44;               // the drums sit in a recess this deep behind the lip
 const TEX_PX = 220;            // one texture repeat every so many px
-const LED_W = 5;               // an LED strip's width
+const LED_W = 5;               // the ring of light's width
 const BUTTON_R = 27;           // the spin button's radius, at most
+const K = 8;                   // points per corner arc of every outline
+const E = 12;                  // points per straight edge of every outline
+const PROFILE = 6;             // steps round a bullnose or a moulding
 
 const VERT = `
 attribute vec3 aPos;
@@ -67,8 +66,9 @@ void main() {
   gl_Position = uProj * uView * vec4(aPos, 1.0);
 }`;
 
-// One shader, four ways of using it, picked by uMode per material: 0 a lit, textured
-// surface; 1 the marquee's backlit panel; 2 a strip of LEDs; 3 the lamp in the button.
+// One shader, six ways of using it, picked by uMode per material: 0 a lit, textured
+// surface; 1 the marquee's lamp; 2 the ring of LEDs; 3 the lamp in the button; 4 and 5
+// the cast shadows, a strip and a disc.
 const FRAG = `
 precision highp float;
 varying vec3 vNormal;
@@ -101,9 +101,10 @@ void main() {
     return;
   }
   if (uMode == 2) {
-    // A strip of LEDs: the diodes are the peaks, and a pulse runs along them.
-    float pulse = 0.55 + 0.45 * sin(vWorld.y * 0.055 - uPhase * 2.2);
-    float diode = pow(0.5 + 0.5 * sin(vWorld.y * 0.9), 6.0) * 0.6;
+    // A ring of LEDs: the diodes are the peaks, and a pulse runs round them.
+    float along = vWorld.x + vWorld.y;
+    float pulse = 0.55 + 0.45 * sin(along * 0.05 - uPhase * 2.2);
+    float diode = pow(0.5 + 0.5 * sin(along * 0.9), 6.0) * 0.6;
     gl_FragColor = vec4(tonemap(uGlow * (0.40 + pulse * 0.9 + diode)), 1.0);
     return;
   }
@@ -138,9 +139,9 @@ void main() {
   float spec = pow(max(dot(n, h), 0.0), mix(14.0, 96.0, gloss)) * gloss * uSpec;
   // What the surface reflects: the room, in the mirror direction - a lit ceiling above,
   // dark below. A black lacquer panel with nothing in it is a black rectangle; the same
-  // panel with the room sliding across it as the eye moves is a glossy solid, and every
-  // chamfer, wall and bevel of the case shows its angle by what it catches. A little of
-  // it even face-on, as real lacquer does, and nearly all of it at a graze.
+  // panel with the room sliding across its curve is a glossy solid, and every bullnose,
+  // moulding and dome shows its shape by what it catches. A little of it even face-on,
+  // as real lacquer does, and nearly all of it at a graze.
   vec3 R = reflect(-v, n);
   float sky = clamp(R.y * 0.5 + 0.5, 0.0, 1.0);
   vec3 env = mix(vec3(0.012, 0.012, 0.018), vec3(0.34, 0.31, 0.27), pow(sky, 2.4));
@@ -158,9 +159,9 @@ void main() {
 }`;
 
 // The glass adds light and never takes it: this canvas is composited with plus-lighter,
-// so black is nothing and a symbol can never be hidden by it. A specular sweep slides
-// with the viewer - the tell a fixed gradient cannot fake - the edges brighten where the
-// pane is seen at a graze, and a faint room sits in it the other way round.
+// so black is nothing and a symbol can never be hidden by it. Barely there: a thread of
+// light that bows with the pane - the pane is convex like everything else - and moves
+// with the viewer, and a little brightening where the glass meets the frame.
 const GLASS_FRAG = `
 precision highp float;
 varying vec2 vUV;
@@ -168,16 +169,13 @@ uniform vec2 uTilt;
 uniform float uAspect;
 void main() {
   vec2 uv = vUV;
-  // Barely there. The pane used to carry a broad bright band and a lit room, and both
-  // lay across the symbols like a film; now it is a thread of light that moves with the
-  // viewer and a little brightening where the glass meets the frame, and nothing else.
-  float d = uv.x * 0.9 + uv.y * 0.45 - 0.58 - uTilt.y * 0.03 + uTilt.x * 0.01;
-  float band = exp(-d * d * 260.0) * 0.045;
+  float bow = (uv.x - 0.5) * (uv.x - 0.5) * 0.9;
+  float d = uv.y - 0.74 + bow - uTilt.x * 0.02 + uTilt.y * 0.01;
+  float band = exp(-d * d * 900.0) * 0.05;
   float ex = pow(abs(uv.x * 2.0 - 1.0), 8.0);
   float ey = pow(abs(uv.y * 2.0 - 1.0), 10.0);
   float fres = (ex + ey) * 0.06;
-  float room = 0.0;
-  vec3 c = vec3(0.90, 0.95, 1.0) * (band + fres) + vec3(1.0, 0.95, 0.85) * room;
+  vec3 c = vec3(0.90, 0.95, 1.0) * (band + fres);
   float a = clamp(max(c.r, max(c.g, c.b)), 0.0, 1.0);
   gl_FragColor = vec4(c, a);
 }`;
@@ -217,10 +215,117 @@ export function materialsFor(theme) {
   };
 }
 
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const crossV = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const unit = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+const sq = (x) => x * x;
+
+/** One vertex, with the normal and UVs given (UVs default to the world's, for textures). */
+function pushV(out, mat, p, n, uv) {
+  out.push(mat, p[0], p[1], p[2], n[0], n[1], n[2], uv ? uv[0] : p[0] / TEX_PX, uv ? uv[1] : p[1] / TEX_PX);
+}
+
+/**
+ * One quad, four corners in order round the face, with a flat normal from the winding
+ * and UVs from world position, so a texture repeats at the same scale on every face.
+ */
+function quad(out, mat, a, b, c, d) {
+  const raw = crossV(sub(b, a), sub(d, a));
+  // A rectangle the layout squeezed to nothing has no face to light: skipped, not drawn.
+  if (Math.hypot(raw[0], raw[1], raw[2]) < 1e-6) return;
+  const n = unit(raw);
+  pushV(out, mat, a, n); pushV(out, mat, b, n); pushV(out, mat, c, n);
+  pushV(out, mat, a, n); pushV(out, mat, c, n); pushV(out, mat, d, n);
+}
+
+/** One triangle with its own UVs, for the faces whose texture is not the world's. */
+function tri(out, mat, a, b, c, uvs) {
+  const raw = crossV(sub(b, a), sub(c, a));
+  if (Math.hypot(raw[0], raw[1], raw[2]) < 1e-6) return;
+  const n = unit(raw);
+  pushV(out, mat, a, n, uvs[0]); pushV(out, mat, b, n, uvs[1]); pushV(out, mat, c, n, uvs[2]);
+}
+
+/**
+ * A rounded rectangle, sampled counter-clockwise from the bottom edge with an outward
+ * normal at every point: E points per edge and K per corner arc, so every outline has
+ * the same count and a band can be laid between any two. Radii in the order bottom-left,
+ * bottom-right, top-right, top-left; model coordinates, y up.
+ */
+function outline({ x0, y0, x1, y1, r, bow = [0, 0, 0, 0] }) {
+  const pts = [];
+  const nrm = [];
+  const cap = Math.max(0, Math.min((x1 - x0) / 2, (y1 - y0) / 2));
+  const [rBL, rBR, rTR, rTL] = r.map((v) => Math.max(0, Math.min(v, cap)));
+  const edge = (ax, ay, bx, by, nx, ny, b = 0) => {
+    const dx = bx - ax;
+    const dy = by - ay;
+    for (let i = 0; i < E; i += 1) {
+      const t = i / E;
+      if (b === 0) {
+        pts.push([ax + dx * t, ay + dy * t]);
+        nrm.push([nx, ny]);
+      } else {
+        const offset = b * Math.sin(t * Math.PI);
+        pts.push([ax + dx * t + nx * offset, ay + dy * t + ny * offset]);
+        const tx = dx + nx * b * Math.PI * Math.cos(t * Math.PI);
+        const ty = dy + ny * b * Math.PI * Math.cos(t * Math.PI);
+        const l = Math.hypot(ty, -tx) || 1;
+        nrm.push([ty / l, -tx / l]);
+      }
+    }
+  };
+  const arc = (cx, cy, rr, a0, a1) => {
+    for (let i = 0; i < K; i += 1) {
+      const a = a0 + (a1 - a0) * (i / (K - 1));
+      pts.push([cx + Math.cos(a) * rr, cy + Math.sin(a) * rr]);
+      nrm.push([Math.cos(a), Math.sin(a)]);
+    }
+  };
+  edge(x0 + rBL, y0, x1 - rBR, y0, 0, -1, bow[0]);
+  arc(x1 - rBR, y0 + rBR, rBR, -Math.PI / 2, 0);
+  edge(x1, y0 + rBR, x1, y1 - rTR, 1, 0, bow[1]);
+  arc(x1 - rTR, y1 - rTR, rTR, 0, Math.PI / 2);
+  edge(x1 - rTR, y1, x0 + rTL, y1, 0, 1, bow[2]);
+  arc(x0 + rTL, y1 - rTL, rTL, Math.PI / 2, Math.PI);
+  edge(x0, y1 - rTL, x0, y0 + rBL, -1, 0, bow[3]);
+  arc(x0 + rBL, y0 + rBL, rBL, Math.PI, Math.PI * 1.5);
+  return { pts, nrm };
+}
+
+/** The same rounded rectangle, `d` further in (or out, for a negative d): a parallel curve. */
+const inset = (s, d) => ({
+  x0: s.x0 + d,
+  y0: s.y0 + d,
+  x1: s.x1 - d,
+  y1: s.y1 - d,
+  r: s.r.map((v) => Math.max(0, v - d)),
+  bow: s.bow ? s.bow.map((b) => Math.max(0, b - d * 0.15)) : [0, 0, 0, 0],
+});
+
+/** A band of quads between two outlines: `va(i)` and `vb(i)` give { p, n, uv? } for point i. */
+function band(out, mat, N, va, vb) {
+  for (let i = 0; i < N; i += 1) {
+    const j = (i + 1) % N;
+    const a = va(i); const b = va(j); const c = vb(j); const d = vb(i);
+    pushV(out, mat, a.p, a.n, a.uv); pushV(out, mat, b.p, b.n, b.uv); pushV(out, mat, c.p, c.n, c.uv);
+    pushV(out, mat, a.p, a.n, a.uv); pushV(out, mat, c.p, c.n, c.uv); pushV(out, mat, d.p, d.n, d.uv);
+  }
+}
+
+/** A fan of triangles from one centre vertex out to an outline. */
+function fan(out, mat, N, centre, v) {
+  for (let i = 0; i < N; i += 1) {
+    const j = (i + 1) % N;
+    const b = v(i); const c = v(j);
+    pushV(out, mat, centre.p, centre.n, centre.uv); pushV(out, mat, b.p, b.n, b.uv); pushV(out, mat, c.p, c.n, c.uv);
+  }
+}
+
 /** A shadow strip hanging from its top edge: v runs 1 at the edge to 0 at the bottom. */
-function shade(out, x0, yTop, x1, yBottom, z) {
-  tri(out, IDS.shade, [x0, yBottom, z], [x1, yBottom, z], [x1, yTop, z], [[0, 0], [1, 0], [1, 1]]);
-  tri(out, IDS.shade, [x0, yBottom, z], [x1, yTop, z], [x0, yTop, z], [[0, 0], [1, 1], [0, 1]]);
+function shadeStrip(out, x0, yTop, x1, yBottom, zAt) {
+  tri(out, IDS.shade, [x0, yBottom, zAt(x0, yBottom)], [x1, yBottom, zAt(x1, yBottom)], [x1, yTop, zAt(x1, yTop)], [[0, 0], [1, 0], [1, 1]]);
+  tri(out, IDS.shade, [x0, yBottom, zAt(x0, yBottom)], [x1, yTop, zAt(x1, yTop)], [x0, yTop, zAt(x0, yTop)], [[0, 0], [1, 1], [0, 1]]);
 }
 
 /** A round shadow, centred UVs so the shader can fade its rim. */
@@ -233,53 +338,43 @@ function disc(out, cx, cy, r, z, segments = 24) {
   }
 }
 
-const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-const crossV = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-const unit = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
-
 /**
- * One quad, four corners in order round the face, with a flat normal from the winding
- * and UVs from world position, so a texture repeats at the same scale on every face.
+ * The spin button: a rounded brass bevel rising from the deck to a domed lamp. `cx`, `cy`
+ * in model units, y up, `z0` the deck's surface there. The lamp's UVs are centred on
+ * it, so the shader can light it from the middle.
  */
-function quad(out, mat, a, b, c, d) {
-  const raw = crossV(sub(b, a), sub(d, a));
-  // A rectangle the layout squeezed to nothing has no face to light: skipped, not drawn.
-  if (Math.hypot(raw[0], raw[1], raw[2]) < 1e-6) return;
-  const n = unit(raw);
-  const push = (p) => out.push(mat, p[0], p[1], p[2], n[0], n[1], n[2], p[0] / TEX_PX, p[1] / TEX_PX);
-  push(a); push(b); push(c);
-  push(a); push(c); push(d);
-}
-
-/** One triangle with its own UVs, for the faces whose texture is not the world's. */
-function tri(out, mat, a, b, c, uvs) {
-  const raw = crossV(sub(b, a), sub(c, a));
-  if (Math.hypot(raw[0], raw[1], raw[2]) < 1e-6) return;
-  const n = unit(raw);
-  const push = (p, uv) => out.push(mat, p[0], p[1], p[2], n[0], n[1], n[2], uv[0], uv[1]);
-  push(a, uvs[0]); push(b, uvs[1]); push(c, uvs[2]);
-}
-
-/**
- * The spin button: a bevel rising from the deck to a lamp. `cx`, `cy` in model units,
- * y up. The lamp's UVs are centred on it, so the shader can light it from the middle.
- */
-function button(out, cx, cy, r, segments = 28) {
+function button(out, cx, cy, r, z0, segments = 28) {
   const top = 9;
+  const dome = 7;
   const ri = r * 0.78;
   for (let i = 0; i < segments; i += 1) {
     const a0 = (i / segments) * Math.PI * 2;
     const a1 = ((i + 1) / segments) * Math.PI * 2;
     const c0 = Math.cos(a0); const s0 = Math.sin(a0);
     const c1 = Math.cos(a1); const s1 = Math.sin(a1);
-    // The bevel, outward and up.
-    quad(out, IDS.brass,
-      [cx + c0 * r, cy + s0 * r, 0], [cx + c1 * r, cy + s1 * r, 0],
-      [cx + c1 * ri, cy + s1 * ri, top], [cx + c0 * ri, cy + s0 * ri, top]);
-    // The lamp.
-    tri(out, IDS.lamp,
-      [cx, cy, top], [cx + c0 * ri, cy + s0 * ri, top], [cx + c1 * ri, cy + s1 * ri, top],
-      [[0.5, 0.5], [0.5 + c0 * 0.5, 0.5 + s0 * 0.5], [0.5 + c1 * 0.5, 0.5 + s1 * 0.5]]);
+    // The bevel: a quarter round from the deck up to the rim.
+    for (let s = 0; s < 3; s += 1) {
+      const f0 = (s / 3) * Math.PI / 2; const f1 = ((s + 1) / 3) * Math.PI / 2;
+      const at = (c, sn, f) => ({
+        p: [cx + c * (r - (r - ri) * (1 - Math.cos(f))), cy + sn * (r - (r - ri) * (1 - Math.cos(f))), z0 + top * Math.sin(f)],
+        n: [c * Math.cos(f), sn * Math.cos(f), Math.sin(f)],
+      });
+      const a = at(c0, s0, f0); const b = at(c1, s1, f0); const c = at(c1, s1, f1); const d = at(c0, s0, f1);
+      pushV(out, IDS.brass, a.p, a.n); pushV(out, IDS.brass, b.p, b.n); pushV(out, IDS.brass, c.p, c.n);
+      pushV(out, IDS.brass, a.p, a.n); pushV(out, IDS.brass, c.p, c.n); pushV(out, IDS.brass, d.p, d.n);
+    }
+    // The lamp: a dome, in rings.
+    for (let s = 0; s < 3; s += 1) {
+      const f0 = (s / 3) * Math.PI / 2; const f1 = ((s + 1) / 3) * Math.PI / 2;
+      const at = (c, sn, f) => ({
+        p: [cx + c * ri * Math.cos(f), cy + sn * ri * Math.cos(f), z0 + top + dome * Math.sin(f)],
+        n: [c * Math.cos(f) * 0.6, sn * Math.cos(f) * 0.6, Math.sqrt(1 - 0.36 * Math.cos(f) * Math.cos(f))],
+        uv: [0.5 + c * 0.5 * Math.cos(f), 0.5 + sn * 0.5 * Math.cos(f)],
+      });
+      const a = at(c0, s0, f0); const b = at(c1, s1, f0); const c = at(c1, s1, f1); const d = at(c0, s0, f1);
+      pushV(out, IDS.lamp, a.p, a.n, a.uv); pushV(out, IDS.lamp, b.p, b.n, b.uv); pushV(out, IDS.lamp, c.p, c.n, c.uv);
+      pushV(out, IDS.lamp, a.p, a.n, a.uv); pushV(out, IDS.lamp, c.p, c.n, c.uv); pushV(out, IDS.lamp, d.p, d.n, d.uv);
+    }
   }
 }
 
@@ -287,122 +382,143 @@ function button(out, cx, cy, r, segments = 28) {
  * The cabinet, as quads, from the rectangles the DOM measured.
  *
  * `W`, `H` are the cabinet's size; `win` is the window's rectangle within it; `base` the
- * deck strip; all in CSS px with y down, as the DOM reports them. Returns a flat list of
- * vertices tagged with their material, and is pure so a test can hold it.
+ * deck strip; all in CSS px with y down, as the DOM reports them. `dist` is the camera's
+ * distance, so the lip can be placed to land on the window; left out, it is the one
+ * createCabinet uses. Returns a flat list of vertices tagged with their material, and is
+ * pure so a test can hold it.
  */
-export function buildGeometry({ W, H, win, marqueeH = 0, base = null }) {
+export function buildGeometry({ W, H, win, marqueeH = 0, base = null, dist = null }) {
   const Y = (y) => H - y;              // DOM y down to model y up
+  const D = dist || (H / 2) / Math.tan(FOVY / 2);
   const v = [];
   const M = IDS;
+  const cx = W / 2;
+  const cy = H / 2;
   const rect = (m, x0, y0, x1, y1, z) => quad(v, m,
     [x0, Y(y1), z], [x1, Y(y1), z], [x1, Y(y0), z], [x0, Y(y0), z]);
 
-  // The case edge: a chamfer all round, sloping back from the face to the outside.
-  const inX0 = CHAMFER; const inY0 = CHAMFER; const inX1 = W - CHAMFER; const inY1 = H - CHAMFER;
-  const zb = -CASE_DEPTH;
-  quad(v, M.lacquer, [0, Y(0), zb], [W, Y(0), zb], [inX1, Y(inY0), 0], [inX0, Y(inY0), 0]);        // top
-  quad(v, M.lacquer, [inX0, Y(inY1), 0], [inX1, Y(inY1), 0], [W, Y(H), zb], [0, Y(H), zb]);        // bottom
-  quad(v, M.lacquer, [0, Y(H), zb], [inX0, Y(inY1), 0], [inX0, Y(inY0), 0], [0, Y(0), zb]);        // left
-  quad(v, M.lacquer, [inX1, Y(inY1), 0], [W, Y(H), zb], [W, Y(0), zb], [inX1, Y(inY0), 0]);        // right
-  // Brass trim where the chamfer meets the face.
-  rect(M.brass, inX0, inY0, inX1, inY0 + 2, 0.4);
-  rect(M.brass, inX0, inY1 - 2, inX1, inY1, 0.4);
-  rect(M.brass, inX0, inY0, inX0 + 2, inY1, 0.4);
-  rect(M.brass, inX1 - 2, inY0, inX1, inY1, 0.4);
+  // The front is a pillow: forward at the centre, back at the sides and, less, at the top
+  // and bottom. Everything that sits on the front sits on this.
+  const bulge = (x, y) => BULGE_X * (1 - sq((x - cx) / cx)) + BULGE_Y * (1 - sq((y - cy) / cy));
+  const bulgeN = (x, y) => unit([2 * BULGE_X * (x - cx) / (cx * cx), 2 * BULGE_Y * (y - cy) / (cy * cy), 1]);
+  const onFront = (p, lift = 0) => ({ p: [p[0], p[1], bulge(p[0], p[1]) + lift], n: bulgeN(p[0], p[1]) });
+  // Where a point at depth z has to be to land on the screen where a DOM point is.
+  const toward = (p, z) => { const k = (D - z) / D; return [cx + (p[0] - cx) * k, cy + (p[1] - cy) * k]; };
 
-  // The front: lacquer everywhere the window is not, with the marquee band at the top
-  // and the deck at the bottom.
-  const bx0 = win.x - BEZEL; const by0 = win.y - BEZEL; const bx1 = win.x + win.w + BEZEL; const by1 = win.y + win.h + BEZEL;
-  const baseTop = base ? base.y : inY1;
-  const mqBottom = Math.max(inY0, Math.min(by0, inY0 + marqueeH));
-  // The marquee light: a backlit panel set back into the band, behind a brass frame,
-  // with the walls of its recess between them - depth you can see from the middle of
-  // the room, not just shading. The band's face is drawn round the opening, never across
-  // it: a face across a recess hides the recess.
+  // --- the case: silhouette, bullnose, front
+  // The case has vaulted top and bottom, and bowed convex barrel sides: no straight edges.
+  const body = {
+    x0: 0, y0: 0, x1: W, y1: H,
+    r: [CORNER_BOTTOM, CORNER_BOTTOM, CORNER_TOP, CORNER_TOP],
+    bow: [8, 14, 26, 14],
+  };
+  const bodyIn = inset(body, EDGE_R);
+  const oOut = outline(body);
+  const oIn = outline(bodyIn);
+  const N = oIn.pts.length;
+  for (let s = 0; s < PROFILE; s += 1) {
+    const f0 = (s / PROFILE) * Math.PI / 2;
+    const f1 = ((s + 1) / PROFILE) * Math.PI / 2;
+    const at = (i, f) => {
+      const a = oIn.pts[i]; const o = oOut.pts[i]; const n2 = oOut.nrm[i];
+      const zf = bulge(a[0], a[1]);
+      return {
+        p: [a[0] + (o[0] - a[0]) * Math.sin(f), a[1] + (o[1] - a[1]) * Math.sin(f), zf - EDGE_R * (1 - Math.cos(f))],
+        n: [n2[0] * Math.sin(f), n2[1] * Math.sin(f), Math.cos(f)],
+      };
+    };
+    band(v, M.lacquer, N, (i) => at(i, f0), (i) => at(i, f1));
+  }
+
+  // --- the window: its outline, the bezel's, the ring of light's
+  // The window is generously rounded with subtle vaulted arches on top and bottom: no right angles.
+  const wr = {
+    x0: win.x, y0: Y(win.y + win.h), x1: win.x + win.w, y1: Y(win.y),
+    r: [WIN_R, WIN_R, WIN_R, WIN_R],
+    bow: [6, 0, 8, 0],
+  };
+  const oWin = outline(wr);
+  const oBez = outline(inset(wr, -BEZEL));
+  const oLedIn = outline(inset(wr, -(BEZEL + 6)));
+  const oLedOut = outline(inset(wr, -(BEZEL + 6 + LED_W)));
+
+  // The front itself: from the bezel's outer edge out to the bullnose, on the pillow.
+  band(v, M.lacquer, N, (i) => onFront(oBez.pts[i]), (i) => onFront(oIn.pts[i]));
+  // A brass piping just inside the bullnose, all the way round.
+  const oPipeA = outline(inset(bodyIn, 2));
+  const oPipeB = outline(inset(bodyIn, 5));
+  band(v, M.brass, N, (i) => onFront(oPipeA.pts[i], 0.4), (i) => onFront(oPipeB.pts[i], 0.4));
+  // The ring of light round the bezel.
+  band(v, M.led, N, (i) => onFront(oLedIn.pts[i], 0.6), (i) => onFront(oLedOut.pts[i], 0.6));
+
+  // The bezel: a rounded moulding from its outer edge on the front up and in to the lip,
+  // which is put exactly where it lands on the window's DOM rectangle.
+  const lipZ = (i) => bulge(oWin.pts[i][0], oWin.pts[i][1]) + BEZEL;
+  const lip = (i) => { const q = toward(oWin.pts[i], lipZ(i)); return [q[0], q[1], lipZ(i)]; };
+  for (let s = 0; s < PROFILE; s += 1) {
+    const f0 = (s / PROFILE) * Math.PI / 2;
+    const f1 = ((s + 1) / PROFILE) * Math.PI / 2;
+    const at = (i, f) => {
+      const o = oBez.pts[i]; const zo = bulge(o[0], o[1]); const l = lip(i); const nn = oWin.nrm[i];
+      const dh = Math.hypot(l[0] - o[0], l[1] - o[1]); const dz = l[2] - zo;
+      const n = unit([nn[0] * dz * Math.cos(f), nn[1] * dz * Math.cos(f), dh * Math.sin(f)]);
+      return { p: [o[0] + (l[0] - o[0]) * (1 - Math.cos(f)), o[1] + (l[1] - o[1]) * (1 - Math.cos(f)), zo + dz * Math.sin(f)], n };
+    };
+    band(v, M.brass, N, (i) => at(i, f0), (i) => at(i, f1));
+  }
+  // The recess the drums sit in: walls from the lip back to the well, in lacquer, so they
+  // catch the room like the rest of the case. The well itself is black.
+  band(v, M.lacquer, N,
+    (i) => { const l = lip(i); const nn = oWin.nrm[i]; return { p: l, n: [-nn[0], -nn[1], 0] }; },
+    (i) => { const l = lip(i); const nn = oWin.nrm[i]; return { p: [l[0], l[1], -WELL], n: [-nn[0], -nn[1], 0] }; });
+  const cWin = [(win.x + win.x + win.w) / 2, Y((win.y + win.y + win.h) / 2)];
+  fan(v, M.well, N, { p: [cWin[0], cWin[1], -WELL], n: [0, 0, 1] },
+    (i) => { const l = lip(i); return { p: [l[0], l[1], -WELL], n: [0, 0, 1] }; });
+  // What the lip casts: a soft dark strip on the front under the bezel.
+  const by1 = win.y + win.h + BEZEL;
+  shadeStrip(v, win.x + 10, Y(by1), win.x + win.w - 10, Y(by1 + 16), (x, y) => bulge(x, y) + 0.3);
+
+  // --- the marquee: a domed lamp behind a brass rim, on the band above the window
   let marqueeLight = null;
-  if (mqBottom - inY0 > 26) {
-    const mx0 = inX0 + 14; const mx1 = inX1 - 14; const my0 = inY0 + 10; const my1 = mqBottom - 8;
-    const f = 3;
-    const zm = -MARQUEE_DEPTH;
-    rect(M.lacquer, inX0, inY0, inX1, my0 - f, 0);
-    rect(M.lacquer, inX0, my1 + f, inX1, mqBottom, 0);
-    rect(M.lacquer, inX0, my0 - f, mx0 - f, my1 + f, 0);
-    rect(M.lacquer, mx1 + f, my0 - f, inX1, my1 + f, 0);
-    rect(M.brass, mx0 - f, my0 - f, mx1 + f, my0, 0.5);
-    rect(M.brass, mx0 - f, my1, mx1 + f, my1 + f, 0.5);
-    rect(M.brass, mx0 - f, my0, mx0, my1, 0.5);
-    rect(M.brass, mx1, my0, mx1 + f, my1, 0.5);
-    quad(v, M.lacquer, [mx0, Y(my0), 0.5], [mx1, Y(my0), 0.5], [mx1, Y(my0), zm], [mx0, Y(my0), zm]);
-    quad(v, M.lacquer, [mx0, Y(my1), zm], [mx1, Y(my1), zm], [mx1, Y(my1), 0.5], [mx0, Y(my1), 0.5]);
-    quad(v, M.lacquer, [mx0, Y(my1), zm], [mx0, Y(my1), 0.5], [mx0, Y(my0), 0.5], [mx0, Y(my0), zm]);
-    quad(v, M.lacquer, [mx1, Y(my1), 0.5], [mx1, Y(my1), zm], [mx1, Y(my0), zm], [mx1, Y(my0), 0.5]);
-    rect(M.glow, mx0, my0, mx1, my1, zm);
-    marqueeLight = [mx0, Y(my1), mx1, Y(my0)];
-  } else {
-    rect(M.lacquer, inX0, inY0, inX1, mqBottom, 0);                                              // the band, unlit
-  }
-  rect(M.brass, inX0, mqBottom, inX1, mqBottom + 3, 1);                                          // a brass rule under it
-  rect(M.lacquer, inX0, mqBottom, inX1, by0, 0);                                                  // above the window
-  rect(M.lacquer, inX0, by0, bx0, by1, 0);                                                        // left of it
-  rect(M.lacquer, bx1, by0, inX1, by1, 0);                                                        // right of it
-  rect(M.lacquer, inX0, by1, inX1, baseTop, 0);                                                   // below it
-  // The LEDs: a strip down each side of the window, where the lacquer leaves room.
-  if (bx0 - inX0 > LED_W + 14 && inX1 - bx1 > LED_W + 14) {
-    rect(M.led, inX0 + 8, by0 + 6, inX0 + 8 + LED_W, by1 - 6, 0.6);
-    rect(M.led, inX1 - 8 - LED_W, by0 + 6, inX1 - 8, by1 - 6, 0.6);
+  if (marqueeH > 40) {
+    const pm = {
+      x0: EDGE_R + 16, y0: Y(marqueeH - 10), x1: W - EDGE_R - 16, y1: Y(16),
+      r: [24, 24, 44, 44],
+      bow: [4, 6, 14, 6],
+    };
+    const oP = outline(pm);
+    const oPin = outline(inset(pm, 9));
+    const oPrim = outline(inset(pm, -3));
+    const at = (o, lift) => (i) => onFront(o.pts[i], lift);
+    band(v, M.brass, N, at(oPrim, 1.2), at(oP, 1.6));
+    band(v, M.glow, N, at(oP, 1.8), at(oPin, 5.5));
+    const c = [(pm.x0 + pm.x1) / 2, (pm.y0 + pm.y1) / 2];
+    fan(v, M.glow, N, { p: [c[0], c[1], bulge(c[0], c[1]) + 7], n: [0, 0, 1] }, at(oPin, 5.5));
+    marqueeLight = [pm.x0, pm.y0, pm.x1, pm.y1];
+    shadeStrip(v, pm.x0 + 14, Y(marqueeH - 7), pm.x1 - 14, Y(marqueeH + 6), (x, y) => bulge(x, y) + 0.5);
   }
 
+  // --- the deck: the coin slot, a capsule; the button, a dome
   if (base) {
-    // The deck: lacquer with a brass edge, the tray sunk into its left, the button
-    // rising from its right.
     const th = Math.min(base.h * 0.62, 34);
     const tx0 = base.x + base.w * 0.06; const tx1 = base.x + base.w * 0.42;
     const ty0 = base.y + (base.h - th) / 2; const ty1 = ty0 + th;
-    // The deck face, with the tray's mouth left open in it: a face drawn across the
-    // recess would hide the recess, and did.
-    rect(M.lacquer, inX0, base.y, inX1, ty0, 0);
-    rect(M.lacquer, inX0, ty1, inX1, inY1, 0);
-    rect(M.lacquer, inX0, ty0, tx0, ty1, 0);
-    rect(M.lacquer, tx1, ty0, inX1, ty1, 0);
-    rect(M.brass, inX0, base.y, inX1, base.y + 2, 0.5);
-    const lip = 7;
-    const zt = -12;
-    rect(M.well, tx0 + lip, ty0 + lip, tx1 - lip, ty1 - lip, zt);
-    quad(v, M.steel, [tx0, Y(ty0), 0], [tx1, Y(ty0), 0], [tx1 - lip, Y(ty0 + lip), zt], [tx0 + lip, Y(ty0 + lip), zt]);
-    quad(v, M.steel, [tx0 + lip, Y(ty1 - lip), zt], [tx1 - lip, Y(ty1 - lip), zt], [tx1, Y(ty1), 0], [tx0, Y(ty1), 0]);
-    quad(v, M.steel, [tx0, Y(ty1), 0], [tx0 + lip, Y(ty1 - lip), zt], [tx0 + lip, Y(ty0 + lip), zt], [tx0, Y(ty0), 0]);
-    quad(v, M.steel, [tx1 - lip, Y(ty1 - lip), zt], [tx1, Y(ty1), 0], [tx1, Y(ty0), 0], [tx1 - lip, Y(ty0 + lip), zt]);
+    const pill = { x0: tx0, y0: Y(ty1), x1: tx1, y1: Y(ty0), r: [th / 2, th / 2, th / 2, th / 2] };
+    const oT = outline(pill);
+    const oTr = outline(inset(pill, -2.5));
+    band(v, M.steel, N, (i) => onFront(oTr.pts[i], 0.5), (i) => onFront(oT.pts[i], 0.5));
+    const c = [(tx0 + tx1) / 2, Y((ty0 + ty1) / 2)];
+    fan(v, M.well, N, { p: [c[0], c[1], bulge(c[0], c[1]) + 0.3], n: [0, 0, 1] }, (i) => onFront(oT.pts[i], 0.3));
+    shadeStrip(v, tx0 + th / 2, Y(ty0), tx1 - th / 2, Y(ty0 + th * 0.55), (x, y) => bulge(x, y) + 0.6);
     const r = Math.min(BUTTON_R, base.h * 0.42);
     if (r > 8) {
-      const cx = base.x + base.w * 0.74;
-      const cy = Y(base.y + base.h / 2);
-      // The button's shadow on the deck, thrown down and to the right by the key light.
-      disc(v, cx + r * 0.25, cy - r * 0.3, r * 1.3, 0.3);
-      button(v, cx, cy, r);
+      const bx = base.x + base.w * 0.74;
+      const byy = Y(base.y + base.h / 2);
+      const z0 = bulge(bx, byy);
+      disc(v, bx + r * 0.25, byy - r * 0.3, r * 1.3, z0 + 0.4);
+      button(v, bx, byy, r, z0);
     }
   }
-  // What the lips cast: a soft dark strip under the bezel and under the marquee frame.
-  // Nothing sells the frame standing proud like the shadow it drops on the case.
-  shade(v, bx0, Y(by1), bx1, Y(by1 + 16), 0.3);
-  if (marqueeLight) shade(v, inX0 + 11, Y(mqBottom - 5), inX1 - 11, Y(mqBottom + 8), 1.2);
-
-  // The bezel: four chamfered strips from the face (z = 0) to a lip that stands proud.
-  const wx0 = win.x; const wy0 = win.y; const wx1 = win.x + win.w; const wy1 = win.y + win.h;
-  const zl = BEZEL;
-  quad(v, M.brass, [bx0, Y(by0), 0], [bx1, Y(by0), 0], [wx1, Y(wy0), zl], [wx0, Y(wy0), zl]);    // top
-  quad(v, M.brass, [wx0, Y(wy1), zl], [wx1, Y(wy1), zl], [bx1, Y(by1), 0], [bx0, Y(by1), 0]);    // bottom
-  quad(v, M.brass, [bx0, Y(by1), 0], [wx0, Y(wy1), zl], [wx0, Y(wy0), zl], [bx0, Y(by0), 0]);    // left
-  quad(v, M.brass, [wx1, Y(wy1), zl], [bx1, Y(by1), 0], [bx1, Y(by0), 0], [wx1, Y(wy0), zl]);    // right
-  // The recess the drums sit in: its walls run from the lip back to the well, in lacquer,
-  // so they catch the room like the rest of the case and read as walls - what you see
-  // past the drums' ends and between them. The well itself is black.
-  const zw = -WELL;
-  quad(v, M.lacquer, [wx0, Y(wy0), zl], [wx1, Y(wy0), zl], [wx1, Y(wy0), zw], [wx0, Y(wy0), zw]);
-  quad(v, M.lacquer, [wx0, Y(wy1), zw], [wx1, Y(wy1), zw], [wx1, Y(wy1), zl], [wx0, Y(wy1), zl]);
-  quad(v, M.lacquer, [wx0, Y(wy1), zw], [wx0, Y(wy1), zl], [wx0, Y(wy0), zl], [wx0, Y(wy0), zw]);
-  quad(v, M.lacquer, [wx1, Y(wy1), zl], [wx1, Y(wy1), zw], [wx1, Y(wy0), zw], [wx1, Y(wy0), zl]);
-  // The well itself, behind the drums.
-  rect(M.well, wx0, wy0, wx1, wy1, zw);
 
   return { vertices: new Float32Array(v), stride: 9, count: v.length / 9, materials: M, marqueeLight };
 }
@@ -497,6 +613,8 @@ export function createCabinet(host, opts = {}) {
   function layout() {
     W = host.offsetWidth || 660;
     H = host.offsetHeight || 500;
+    // The camera on the centre line, at the distance that maps the front plane 1:1.
+    const dist = (H / 2) / Math.tan(FOVY / 2);
     // The bezel frames the drums themselves, a few px out, not the padded window box
     // round them: framed at the box, the well showed as a black band inside the lip.
     const framed = rectIn(host, opts.reels || opts.window);
@@ -505,7 +623,7 @@ export function createCabinet(host, opts = {}) {
     const marquee = host.querySelector('.slot-marquee');
     const base = host.querySelector('.slot-base');
     geometry = buildGeometry({
-      W, H, win,
+      W, H, win, dist,
       marqueeH: marquee ? marquee.offsetHeight : 0,
       base: base ? rectIn(host, base) : null,
     });
@@ -524,8 +642,6 @@ export function createCabinet(host, opts = {}) {
         start = i;
       }
     }
-    // The camera on the centre line, at the distance that maps the front plane 1:1.
-    const dist = (H / 2) / Math.tan(FOVY / 2);
     eye = [W / 2, H / 2, dist];
     proj = perspective(FOVY, W / H, 1, dist + 400);
     view = lookAt(eye, [W / 2, H / 2, 0], [0, 1, 0]);

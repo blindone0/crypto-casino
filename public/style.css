@@ -692,15 +692,17 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
 .slot-stage .slot-cabinet.cabgl {
   background: none;
   border-color: transparent;
-  box-shadow: 0 30px 70px rgba(0,0,0,.7);
+  /* No box shadow: the GL case is a rounded pillow, and a rectangle's shadow under it
+     would give the box away. The stage's contact shadow is the one it stands on. */
+  box-shadow: none;
 }
 .slot-cabinet.cabgl .cab-top,
 .slot-cabinet.cabgl .cab-side { display: none; }
 .slot-cabinet.cabgl .slot-marquee,
 .slot-cabinet.cabgl .slot-body,
 .slot-cabinet.cabgl .slot-base { position: relative; z-index: 2; }
-.slot-cabinet.cabgl .slot-marquee { background: none; box-shadow: none; }
-.slot-cabinet.cabgl .slot-window { background: none; box-shadow: none; }
+.slot-cabinet.cabgl .slot-marquee { background: none; box-shadow: none; border-bottom: none; clip-path: none; }
+.slot-cabinet.cabgl .slot-window { background: none; box-shadow: none; border: none; border-radius: 28px; }
 .slot-cabinet.cabgl .slot-base,
 .slot-cabinet.cabgl .slot-tray { background: none; box-shadow: none; border-color: transparent; }
 .slot-cabinet.cabgl .reel > .reel-glass { visibility: hidden; }
@@ -712,7 +714,10 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
 .slot-cabinet.cabgl .slot-body { position: relative; }
 /* Out of the flow, hung off the case's right edge, so the window keeps the whole width
    between the paddings and the LEDs have their room. */
-.slot-cabinet.cabgl .slot-lever { position: absolute; right: -22px; top: 22%; margin: 0; }
+.slot-cabinet.cabgl .slot-lever {
+  position: absolute; right: -28px; top: 18%; margin: 0;
+  filter: drop-shadow(4px 8px 14px rgba(0, 0, 0, .75));
+}
 .slot-cabinet.cabgl .slot-base { min-height: 64px; margin: 0 16px; cursor: pointer; }
 /* The reel canvas covers the window box; four px of padding puts its edge exactly on
    the bezel's inner lip, which frames the reels four px out. With the old nine the drums
@@ -763,7 +768,7 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
 .slot-lever {
   flex: 0 0 auto;
   transform: translateZ(26px);
-  width: 34px; height: 190px;
+  width: 44px; height: 195px;
   cursor: pointer;
   /* Hangs off the side of the cabinet, the way the real one is bolted on. */
   margin-right: -14px;
@@ -771,7 +776,7 @@ table.grid tbody tr:hover td { background: rgba(255, 255, 255, .02); }
 .slot-lever svg { width: 100%; height: 100%; display: block; overflow: visible; }
 /* The arm swings about its pivot, which is the circle at the bottom. */
 .slot-lever .lever-arm {
-  transform-origin: 20px 152px;
+  transform-origin: 24px 162px;
   transition: transform .18s cubic-bezier(.3, 1.6, .5, 1);
 }
 .slot-lever:hover .lever-arm { transform: rotate(6deg); }

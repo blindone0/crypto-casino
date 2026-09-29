@@ -1827,31 +1827,53 @@ async function renderSlots() {
 function slotLever() {
   const box = el('div', { class: 'slot-lever', id: 'slotLever' });
   box.innerHTML = `
-    <svg viewBox="0 0 40 200" aria-hidden="true">
+    <svg viewBox="0 0 48 210" aria-hidden="true">
       <defs>
-        <linearGradient id="lvGold" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0" stop-color="#8a6a24"/>
-          <stop offset=".35" stop-color="#f0d68a"/>
-          <stop offset=".6" stop-color="#d9b45a"/>
-          <stop offset="1" stop-color="#6d5119"/>
+        <linearGradient id="lvSocket" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#14100c"/>
+          <stop offset=".2" stop-color="#3d3020"/>
+          <stop offset=".45" stop-color="#c8a85c"/>
+          <stop offset=".65" stop-color="#fff4d0"/>
+          <stop offset=".85" stop-color="#8a6e30"/>
+          <stop offset="1" stop-color="#1c160e"/>
         </linearGradient>
-        <radialGradient id="lvBall" cx=".34" cy=".3">
-          <stop offset="0" stop-color="#ff9a8f"/>
-          <stop offset=".45" stop-color="#d92d20"/>
-          <stop offset="1" stop-color="#5e0f08"/>
+        <linearGradient id="lvGold" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#4a3710"/>
+          <stop offset=".18" stop-color="#9a7628"/>
+          <stop offset=".42" stop-color="#fdf0be"/>
+          <stop offset=".68" stop-color="#d4af4a"/>
+          <stop offset=".9" stop-color="#7a5a1c"/>
+          <stop offset="1" stop-color="#322209"/>
+        </linearGradient>
+        <radialGradient id="lvBall" cx=".32" cy=".28" r=".68">
+          <stop offset="0" stop-color="#ffb3ab"/>
+          <stop offset=".18" stop-color="#f84b3c"/>
+          <stop offset=".55" stop-color="#b8160c"/>
+          <stop offset=".88" stop-color="#600804"/>
+          <stop offset="1" stop-color="#2c0301"/>
         </radialGradient>
-        <radialGradient id="lvPivot" cx=".35" cy=".32">
-          <stop offset="0" stop-color="#f4e6b4"/>
-          <stop offset="1" stop-color="#7a5c1f"/>
+        <radialGradient id="lvPivot" cx=".36" cy=".32" r=".64">
+          <stop offset="0" stop-color="#fff6d8"/>
+          <stop offset=".35" stop-color="#e0be6c"/>
+          <stop offset=".7" stop-color="#8c6a24"/>
+          <stop offset="1" stop-color="#36260a"/>
         </radialGradient>
       </defs>
-      <g class="lever-arm">
-        <rect x="16" y="30" width="8" height="120" rx="4" fill="url(#lvGold)"/>
-        <circle cx="20" cy="26" r="13" fill="url(#lvBall)"/>
-        <ellipse cx="16" cy="21" rx="4" ry="3" fill="#fff" fill-opacity=".45"/>
+      <g class="lever-base">
+        <ellipse cx="24" cy="162" rx="16" ry="20" fill="url(#lvSocket)"/>
+        <ellipse cx="24" cy="162" rx="12" ry="15" fill="#18120a"/>
+        <circle cx="24" cy="162" r="11" fill="url(#lvPivot)"/>
+        <circle cx="24" cy="162" r="4.5" fill="#1b1206"/>
+        <circle cx="23" cy="161" r="1.5" fill="#fff" fill-opacity=".6"/>
       </g>
-      <circle cx="20" cy="152" r="11" fill="url(#lvPivot)"/>
-      <circle cx="20" cy="152" r="4" fill="#2a1f08"/>
+      <g class="lever-arm">
+        <rect x="20" y="146" width="8" height="18" rx="3" fill="url(#lvGold)"/>
+        <path d="M21 34 Q20 85 20.5 148 L27.5 148 Q28 85 27 34 Z" fill="url(#lvGold)"/>
+        <rect x="18" y="32" width="12" height="5" rx="2" fill="url(#lvSocket)"/>
+        <circle cx="24" cy="22" r="16" fill="url(#lvBall)"/>
+        <ellipse cx="19" cy="16" rx="5" ry="3.5" transform="rotate(-20 19 16)" fill="#fff" fill-opacity=".65"/>
+        <circle cx="27" cy="28" r="1.5" fill="#fff" fill-opacity=".25"/>
+      </g>
     </svg>`;
   box.title = 'Pull';
   return box;
