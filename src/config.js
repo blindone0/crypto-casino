@@ -178,6 +178,21 @@ const DEFAULTS = {
     heartbeatSeconds: 15,
   },
 
+  // ---- THE БИРЖА: lending between members of the chain (src/loans.js) ------
+  // Every figure is a dial, not a decision baked into code. The rate and term caps are
+  // the operator's stand against usury; the rounds floor and the loan cap are what a
+  // reputation-gated unsecured loan means in practice.
+  credit: {
+    enabled: true,
+    minAmount: 10 * 100000000,
+    maxAmount: 5000 * 100000000,
+    maxRate: 0.5,            // at most fifty percent for the term, whatever the term
+    maxTermDays: 30,
+    minRounds: 5,            // finished rounds on the record before a first loan
+    firstLoanFloor: 100 * 100000000,
+    repaidMultiple: 3,       // the cap grows with what has been repaid, this many times over
+  },
+
   // ---- CRASH ROUND PACING ----------------------------------------------
   // Round length is a direct revenue lever: revenue is volume times edge, and volume is
   // rounds per hour times stake. Shorter betting windows mean more rounds, but too short

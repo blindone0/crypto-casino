@@ -298,12 +298,21 @@ const KEY_RE = /^[0-9a-f]{64}$/;
 
 function checkAdminTx(tx) {
   if (tx.type === 'seize') {
+    // Two shapes and no third: the anti-cheat's, citing a ban, or the loans', citing a
+    // loan and the block it is in.
+    const forLoan = 'loan' in tx;
+    const allowed = forLoan ? ['type', 'from', 'to', 'amount', 'loan', 'at'] : ['type', 'from', 'to', 'amount', 'ban'];
     for (const k of Object.keys(tx)) {
-      if (!['type', 'from', 'to', 'amount', 'ban'].includes(k)) return `a seize carries an unknown field (${k})`;
+      if (!allowed.includes(k)) return `a seize carries an unknown field (${k})`;
     }
     if (!KEY_RE.test(String(tx.from))) return 'a seize names no account';
     if (!KEY_RE.test(String(tx.to))) return 'a seize names no destination';
     if (!Number.isSafeInteger(tx.amount) || tx.amount <= 0) return 'a seize has no amount';
+    if (forLoan) {
+      if (!Number.isSafeInteger(tx.loan) || tx.loan < 1) return 'a seize names no loan';
+      if (!Number.isSafeInteger(tx.at) || tx.at < 0) return 'a seize cites no loan block';
+      return null;
+    }
     if (!Number.isSafeInteger(tx.ban) || tx.ban < 0) return 'a seize cites no ban';
     return null;
   }
@@ -317,6 +326,80 @@ function checkAdminTx(tx) {
   }
   if (tx.type === 'ban' && !tx.why) return 'a ban says why';
   return null;
+}
+
+/**
+ * THE LOANS' TRANSACTIONS (src/loans.js)
+ *
+ * `loan` is the server-signed release of an escrowed offer to the borrower: it must come
+ * from the house key, so the operator cannot lend from nowhere, and it names the lender,
+ * the rate and the due date so that everything after it can be checked against it.
+ * `repay` is a borrower-signed transfer to the lender under its own payload type, naming
+ * the loan. A `seize` naming a loan is the second exception to the central claim, held
+ * to four words by every verifier: a loan already on the chain, past due by the block
+ * clock, at most what is outstanding, at most what is held.
+ */
+const LOAN_TYPES = new Set(['loan', 'repay']);
+
+const repayPayload = (tx) => ({
+  chain: CHAIN_ID, type: 'repay', from: tx.from, to: tx.to, amount: tx.amount, nonce: tx.nonce, loan: tx.loan,
+});
+
+function verifyRepaySignature(tx) {
+  try {
+    return crypto.verify(
+      null, Buffer.from(canonical(repayPayload(tx))), publicKeyFromRaw(tx.from), Buffer.from(tx.sig, 'hex'),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** What a loan costs in full: the principal plus the interest fixed when it was offered. */
+const loanOwed = (principal, rate) => principal + Math.floor(principal * rate);
+
+function checkLoanTx(tx) {
+  const isInt = (v, min = 0) => Number.isSafeInteger(v) && v >= min;
+  if (tx.type === 'loan') {
+    for (const k of Object.keys(tx)) {
+      if (!['type', 'from', 'to', 'amount', 'id', 'offer', 'lender', 'rate', 'due'].includes(k)) return `a loan carries an unknown field (${k})`;
+    }
+    if (!KEY_RE.test(String(tx.from)) || !KEY_RE.test(String(tx.to)) || !KEY_RE.test(String(tx.lender))) return 'a loan names its keys badly';
+    if (!isInt(tx.amount, 1)) return 'a loan has no amount';
+    if (!isInt(tx.id, 1) || !isInt(tx.offer, 1)) return 'a loan names no offer';
+    if (!Number.isFinite(tx.rate) || tx.rate < 0 || tx.rate > 10) return 'a loan has a bad rate';
+    if (!isInt(tx.due, 1)) return 'a loan has no due date';
+    if (tx.to === tx.lender) return 'a loan cannot be to its own lender';
+    return null;
+  }
+  for (const k of Object.keys(tx)) {
+    if (!['type', 'from', 'to', 'amount', 'nonce', 'loan', 'sig'].includes(k)) return `a repayment carries an unknown field (${k})`;
+  }
+  if (!KEY_RE.test(String(tx.from)) || !KEY_RE.test(String(tx.to))) return 'a repayment names its keys badly';
+  if (!isInt(tx.amount, 1)) return 'a repayment has no amount';
+  if (!isInt(tx.nonce)) return 'a repayment has no nonce';
+  if (!isInt(tx.loan, 1)) return 'a repayment names no loan';
+  if (!/^[0-9a-f]{128}$/.test(String(tx.sig))) return 'a repayment is not signed';
+  return null;
+}
+
+/** The loan a seize or a repayment names, as the chain recorded it, or null. */
+function loanOnChain(db, height, id, before) {
+  if (!Number.isSafeInteger(height) || height >= before) return null;
+  const row = db.get('SELECT txs FROM token_blocks WHERE height=?', height);
+  if (!row) return null;
+  return JSON.parse(row.txs).find((tx) => tx.type === 'loan' && tx.id === id) || null;
+}
+
+/** What the chain says has been paid against a loan since it was made. */
+function repaidOnChain(db, loanId, fromHeight, before) {
+  let sum = 0;
+  for (const row of db.all('SELECT txs FROM token_blocks WHERE height > ? AND height < ? ORDER BY height', fromHeight, before)) {
+    for (const tx of JSON.parse(row.txs)) {
+      if ((tx.type === 'repay' || tx.type === 'seize') && tx.loan === loanId) sum += tx.amount;
+    }
+  }
+  return sum;
 }
 
 /** The house key, as the anti-cheat and the loans need it: the only place a seize may go. */
@@ -380,15 +463,36 @@ function applyTx(db, tx) {
     if (why) throw new U.BadRequest(why);
     return;
   }
+  if (LOAN_TYPES.has(tx.type)) {
+    const why = checkLoanTx(tx);
+    if (why) throw new U.BadRequest(why);
+    if (tx.type === 'loan' && tx.from !== houseKeyRaw(db)) throw new U.BadRequest('a loan is released from escrow, never from nowhere');
+    if (tx.type === 'repay' && !verifyRepaySignature(tx)) throw new U.BadRequest('signature does not match this repayment');
+    if (balanceOf(db, tx.from) < tx.amount) throw new U.BadRequest('insufficient token balance');
+    credit(db, tx.from, -tx.amount);
+    credit(db, tx.to, tx.amount);
+    return;
+  }
   if (ADMIN_TYPES.has(tx.type)) {
     const why = checkAdminTx(tx);
     if (why) throw new U.BadRequest(why);
     if (tx.type !== 'seize') return;
-    // The narrow exception: only to the house, only after a ban already on the chain.
-    if (tx.to !== houseKeyRaw(db)) throw new U.BadRequest('a seize may only go to the house');
     const tip = head(db);
-    if (!banIn(db, tx.ban, tx.from, tip ? tip.height + 1 : 0)) {
-      throw new U.BadRequest('a seize follows a ban on the chain, never precedes one');
+    const next = tip ? tip.height + 1 : 0;
+    if ('loan' in tx) {
+      // The loans' exception: a loan on the chain, past due, at most what is outstanding.
+      const loan = loanOnChain(db, tx.at, tx.loan, next);
+      if (!loan) throw new U.BadRequest('a seize for a loan cites a loan that is not on the chain');
+      if (loan.to !== tx.from || loan.lender !== tx.to) throw new U.BadRequest('a seize for a loan goes from its borrower to its lender');
+      if (Math.floor(Date.now() / 1000) < loan.due) throw new U.BadRequest('a loan is not seized before it is due');
+      const left = loanOwed(loan.amount, loan.rate) - repaidOnChain(db, tx.loan, tx.at, next);
+      if (tx.amount > left) throw new U.BadRequest('a seize takes at most what is outstanding');
+    } else {
+      // The anti-cheat's: only to the house, only after a ban already on the chain.
+      if (tx.to !== houseKeyRaw(db)) throw new U.BadRequest('a seize may only go to the house');
+      if (!banIn(db, tx.ban, tx.from, next)) {
+        throw new U.BadRequest('a seize follows a ban on the chain, never precedes one');
+      }
     }
     const from = balanceOf(db, tx.from);
     if (from < tx.amount) throw new U.BadRequest('insufficient token balance');
@@ -483,12 +587,14 @@ function verifyChain(db, { checkpoint = false } = {}) {
   let start = 0;
   let from = null;
   const house = houseKeyRaw(db);
+  let loans = new Map();
 
   if (checkpoint) {
     const cp = latestCheckpoint(db);
     if (cp && anchorHolds(db, key, cp)) {
       balances = new Map(Object.entries(JSON.parse(cp.balances)));
       seenNonces = new Set(JSON.parse(cp.nonces));
+      loans = new Map(Object.entries(JSON.parse(cp.loans || '{}')).map(([k, v]) => [Number(k), v]));
       prevHash = cp.hash;
       events = cp.events;
       start = cp.height + 1;
@@ -523,14 +629,43 @@ function verifyChain(db, { checkpoint = false } = {}) {
         events += 1;
         continue;
       }
+      if (LOAN_TYPES.has(tx.type)) {
+        const why = checkLoanTx(tx);
+        if (why) return fail(`block ${i}: ${why}`);
+        if (tx.type === 'loan') {
+          if (tx.from !== house) return fail(`block ${i} lends from a key that is not the escrow`);
+          if (loans.has(tx.id)) return fail(`block ${i} makes loan ${tx.id} twice`);
+          loans.set(tx.id, { lender: tx.lender, borrower: tx.to, principal: tx.amount, rate: tx.rate, due: tx.due, repaid: 0 });
+        } else {
+          if (!verifyRepaySignature(tx)) return fail(`block ${i} contains an unsigned repayment`);
+          const nonceKey = `${tx.from}:${tx.nonce}`;
+          if (seenNonces.has(nonceKey)) return fail(`block ${i} replays a spent nonce`);
+          seenNonces.add(nonceKey);
+          const loan = loans.get(tx.loan);
+          if (!loan) return fail(`block ${i} repays a loan that is not on the chain`);
+          if (loan.borrower !== tx.from || loan.lender !== tx.to) return fail(`block ${i} repays the wrong way round`);
+          if (tx.amount > loanOwed(loan.principal, loan.rate) - loan.repaid) return fail(`block ${i} repays more than is owed`);
+          loan.repaid += tx.amount;
+        }
+      }
       if (ADMIN_TYPES.has(tx.type)) {
         const why = checkAdminTx(tx);
         if (why) return fail(`block ${i}: ${why}`);
         admin += 1;
         if (tx.type !== 'seize') continue;
-        // The narrow exception, held to by the verifier as well as by applyTx.
-        if (tx.to !== house) return fail(`block ${i} seizes to a key that is not the house`);
-        if (!banIn(db, tx.ban, tx.from, i)) return fail(`block ${i} seizes without a ban on the chain before it`);
+        if ('loan' in tx) {
+          // The loans' exception, held to by the verifier as well as by applyTx.
+          const loan = loans.get(tx.loan);
+          if (!loan) return fail(`block ${i} seizes for a loan that is not on the chain before it`);
+          if (loan.borrower !== tx.from || loan.lender !== tx.to) return fail(`block ${i} seizes for a loan the wrong way round`);
+          if (row.created_at < loan.due) return fail(`block ${i} seizes for a loan before it is due`);
+          if (tx.amount > loanOwed(loan.principal, loan.rate) - loan.repaid) return fail(`block ${i} seizes more than is outstanding`);
+          loan.repaid += tx.amount;
+        } else {
+          // The anti-cheat's, held to by the verifier as well as by applyTx.
+          if (tx.to !== house) return fail(`block ${i} seizes to a key that is not the house`);
+          if (!banIn(db, tx.ban, tx.from, i)) return fail(`block ${i} seizes without a ban on the chain before it`);
+        }
       }
       // The supply is fixed by refusing to accept a chain that creates tokens anywhere but
       // in its first block. A verifier that skipped this check would happily confirm a
@@ -553,7 +688,7 @@ function verifyChain(db, { checkpoint = false } = {}) {
         if (tx.type === 'mint') move(tx.to, tx.amount);
         else if (tx.type === 'transfer') { move(tx.from, -tx.amount); move(tx.to, tx.amount); }
         else if (tx.type === 'burn') move(tx.from, -tx.amount);
-        else if (tx.type === 'seize') { move(tx.from, -tx.amount); move(tx.to, tx.amount); }
+        else if (tx.type === 'seize' || tx.type === 'loan' || tx.type === 'repay') { move(tx.from, -tx.amount); move(tx.to, tx.amount); }
         else return fail(`block ${i} contains an unknown transaction type`);
       } catch (e) {
         return fail(e.message);
@@ -586,6 +721,7 @@ function verifyChain(db, { checkpoint = false } = {}) {
     admin,
     balances,
     nonces: seenNonces,
+    loans,
   };
   function fail(reason) { return { ok: false, reason, blocks: total, from }; }
 }
@@ -607,10 +743,11 @@ function writeCheckpoint(db, { full = false } = {}) {
     return { written: false, ...out, height: tip.height };
   }
   db.run(
-    `INSERT INTO token_checkpoints(height, hash, balances, nonces, events, created_at)
-     VALUES(?,?,?,?,?,?)`,
+    `INSERT INTO token_checkpoints(height, hash, balances, nonces, events, loans, created_at)
+     VALUES(?,?,?,?,?,?,?)`,
     tip.height, tip.hash, JSON.stringify(Object.fromEntries(out.balances)),
-    JSON.stringify([...out.nonces]), out.events, Math.floor(Date.now() / 1000),
+    JSON.stringify([...out.nonces]), out.events, JSON.stringify(Object.fromEntries(out.loans)),
+    Math.floor(Date.now() / 1000),
   );
   return { written: true, ...out, height: tip.height };
 }
@@ -762,5 +899,6 @@ module.exports = {
   latestCheckpoint, writeCheckpoint, lastFullVerify,
   ROUND_SEED, roundPayload, foldEvent, verifyRoundSignature,
   ADMIN_TYPES, checkAdminTx, houseKeyRaw, banIn,
+  LOAN_TYPES, checkLoanTx, repayPayload, verifyRepaySignature, loanOwed, loanOnChain, repaidOnChain,
   registerKey, submitTransfer, chainSlice, keyFor, nextNonce,
 };

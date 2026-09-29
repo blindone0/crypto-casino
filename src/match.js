@@ -634,8 +634,11 @@ function stats(db) {
  * stakes were taken and paid away, or paid out twice.
  */
 function escrowHealth(db) {
+  // Live tables, and the Биржа's untaken offers: both sit in the house key until they
+  // are released, and the house must be able to release every one of them.
   const owed = db.get(
     `SELECT COALESCE(SUM(m.stake * (SELECT COUNT(*) FROM match_seats s WHERE s.match_id = m.id)), 0)
+       + (SELECT COALESCE(SUM(amount), 0) FROM loan_offers WHERE state = 'open')
        AS n FROM matches m WHERE m.status IN ('open','playing')`,
   ).n;
   const held = tokenchain.balanceOf(db, houseKey(db).publicRaw);

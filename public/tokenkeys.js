@@ -308,6 +308,20 @@ const foldEvent = (hHex, ev) => sha256Hex(
   hHex + canonical({ g: ev.g, r: ev.r, s: ev.s, k: ev.k, a: ev.a }),
 );
 
+/**
+ * A repayment: an ordinary transfer to the lender, but under a payload type of its own
+ * that names the loan, so the signature cannot be replayed as anything else.
+ */
+const repayPayload = (tx) => ({
+  chain: 'nullstake-token-v1', type: 'repay', from: tx.from, to: tx.to, amount: tx.amount, nonce: tx.nonce, loan: tx.loan,
+});
+
+async function signRepay(key, tx) {
+  const bytes = new TextEncoder().encode(canonical(repayPayload(tx)));
+  const sig = await crypto.subtle.sign({ name: 'Ed25519' }, key.privateKey, bytes);
+  return hex(sig);
+}
+
 async function signRound(key, payload) {
   const bytes = new TextEncoder().encode(canonical(payload));
   const sig = await crypto.subtle.sign({ name: 'Ed25519' }, key.privateKey, bytes);
@@ -351,4 +365,5 @@ export {
   verifySignature, verifyOverString,
   canonical, transferPayload, sha256Hex, hex, unhex,
   ROUND_SEED, roundPayload, foldEvent, signRound,
+  repayPayload, signRepay,
 };

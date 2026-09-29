@@ -254,6 +254,53 @@ const STEPS = [
       `);
     },
   },
+  {
+    id: 9,
+    name: 'loan_offers and loans: the Биржа; checkpoints carry the loans',
+    /**
+     * src/loans.js. An offer escrows the lender's funds when posted; a loan is the
+     * server-signed release to the borrower; repayments and a default's seize are
+     * matched to the loan on the chain. A checkpoint now also carries what each loan
+     * had repaid at its height, since a verify that starts there needs it.
+     */
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS loan_offers (
+          id            INTEGER PRIMARY KEY,
+          lender_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          lender_pubkey TEXT NOT NULL,
+          amount        INTEGER NOT NULL,
+          rate          REAL NOT NULL,
+          term_days     INTEGER NOT NULL,
+          state         TEXT NOT NULL CHECK (state IN ('open','taken','withdrawn')),
+          escrow_height INTEGER,
+          created_at    INTEGER NOT NULL,
+          taken_at      INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS ix_loan_offers_state ON loan_offers(state, rate);
+        CREATE TABLE IF NOT EXISTS loans (
+          id              INTEGER PRIMARY KEY,
+          offer_id        INTEGER NOT NULL REFERENCES loan_offers(id),
+          lender_id       INTEGER NOT NULL,
+          lender_pubkey   TEXT NOT NULL,
+          borrower_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          borrower_pubkey TEXT NOT NULL,
+          principal       INTEGER NOT NULL,
+          rate            REAL NOT NULL,
+          due             INTEGER NOT NULL,
+          repaid          INTEGER NOT NULL DEFAULT 0,
+          state           TEXT NOT NULL CHECK (state IN ('open','repaid','defaulted')),
+          loan_height     INTEGER,
+          seized_at       INTEGER,
+          created_at      INTEGER NOT NULL,
+          settled_at      INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS ix_loans_borrower ON loans(borrower_id, state);
+        CREATE INDEX IF NOT EXISTS ix_loans_due ON loans(state, due);
+        ALTER TABLE token_checkpoints ADD COLUMN loans TEXT NOT NULL DEFAULT '{}';
+      `);
+    },
+  },
 ];
 
 const latest = (steps = STEPS) => steps.reduce((n, s) => Math.max(n, s.id), 0);

@@ -22,6 +22,7 @@ const tokenchain = require('./tokenchain');
 const matches = require('./match');
 const events = require('./events');
 const anticheat = require('./anticheat');
+const loans = require('./loans');
 
 const fmt = (units) => (units / 100000000).toFixed(8);
 
@@ -128,6 +129,24 @@ function cheatsReported(db, cfg) {
     detail: out.findings.length
       ? `${out.findings.length} finding(s) in ${out.rounds} rounds await review; ${state}`
       : `nothing found in ${out.rounds} rounds; ${state}`,
+  };
+}
+
+/**
+ * The Биржа's books.
+ *
+ * Untaken offers are in the escrow check above; this is the loans themselves: how many
+ * are open, how many are past due and waiting for the sweeper, how many defaulted. A
+ * loan past due for long means the sweeper is not running. Reported, not failed.
+ */
+function loansHealthy(db, cfg) {
+  if (!cfg.token.enabled) return { name: 'loans', ok: true, detail: 'token is off' };
+  const h = loans.health(db);
+  return {
+    name: 'loans',
+    ok: true,
+    detail: `${h.open} open, ${h.pastDue} past due awaiting the sweep, ${h.defaulted} in default, `
+      + `${fmt(h.offered)} offered and held in escrow`,
   };
 }
 
@@ -288,6 +307,7 @@ function checkAll(db, cfg, at = Math.floor(Date.now() / 1000)) {
     cheatsReported(db, cfg),
     supplyHolds(db, cfg),
     escrowCovered(db, cfg),
+    loansHealthy(db, cfg),
     nothingStranded(db, cfg, at),
     noOrphans(db),
     walInCheck(db, cfg),
@@ -306,6 +326,7 @@ module.exports = {
   cheatsReported,
   supplyHolds,
   escrowCovered,
+  loansHealthy,
   nothingStranded,
   noOrphans,
 };

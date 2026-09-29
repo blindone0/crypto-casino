@@ -147,7 +147,7 @@ test('every game in the nav has a name and a price', () => {
 
   // Games you play against the bankroll have an edge; the other two do not, and each of
   // those has its own panel that never looks the edge up.
-  const NO_EDGE = { arcade: 'arcadeInfoPanel', match: 'matchInfoPanel' };
+  const NO_EDGE = { arcade: 'arcadeInfoPanel', match: 'matchInfoPanel', credit: 'creditInfoPanel' };
   for (const game of games) {
     assert.ok(STRINGS.has(`game.${game}`), `game.${game} has no name`);
     if (game in NO_EDGE) {

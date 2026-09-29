@@ -118,7 +118,7 @@ const fmtShort = (units) => {
   return n.toFixed(6);
 };
 
-const STAKE_ROUTES = ['/api/bet/', '/api/crash/bet'];
+const STAKE_ROUTES = ['/api/bet/', '/api/crash/bet', '/api/credit/offer'];
 
 /**
  * THE ROUND, SIGNED ONCE
@@ -183,6 +183,12 @@ async function api(path, { method = 'GET', body } = {}) {
   if (method === 'POST' && FINISH_ROUTES[path]) {
     const roundSig = await attestRound(FINISH_ROUTES[path]);
     payload = { ...(payload || {}), ...(roundSig ? { roundSig } : {}) };
+  }
+  if (method === 'POST' && path === '/api/credit/repay') {
+    // A repayment is the borrower's signature bound to the loan; see signRepayFor.
+    const tx = await signRepayFor(body);
+    if (!tx) throw new Error(t('arc.needUnlock'));
+    payload = { ...(payload || {}), tx };
   }
   if (payload !== undefined) headers['content-type'] = 'application/json';
   if (state.csrf && method !== 'GET') headers['x-csrf-token'] = state.csrf;
@@ -546,6 +552,23 @@ function applyWallet() {
  * already been paid for (revealing a tile, cashing out) has no amount and needs no
  * signature: the stake went in when the round opened.
  */
+/**
+ * Sign a repayment. Like a stake, an ordinary transfer signed by the player — to the
+ * lender rather than the house — but under a payload type of its own that names the
+ * loan, so the signature cannot be replayed as anything else.
+ */
+async function signRepayFor(body) {
+  if (!body) return null;
+  const units = Math.round(Number(body.amount) * UNIT);
+  if (!Number.isSafeInteger(units) || units <= 0) return null;
+  if (!tokenKey && !(await ensureWallet())) return null;
+  const info = await api('/api/credit');
+  if (!info.pubkey || !tokenKey || tokenKey.publicKey !== info.pubkey) return null;
+  const tx = { from: tokenKey.publicKey, to: body.to, amount: units, nonce: info.nextNonce, loan: Number(body.loanId) };
+  const sig = await tokenKeys.signRepay(tokenKey, tx);
+  return { from: tx.from, amount: units, nonce: tx.nonce, sig };
+}
+
 async function signStakeFor(payload) {
   // A bodyless POST is a continuation, not a stake: revealing a tile and cashing out both
   // belong to a round that was already paid for when it opened. They arrive here because
@@ -3521,6 +3544,154 @@ function showGameOver(game, score, result) {
 }
 
 // ------------------------------------------------------------------- boot
+// ------------------------------------------------------------------- credit
+// The Биржа: lending tugriks between members of the chain (src/loans.js).
+//
+// Nothing here decides anything. The server says who may borrow and how much, from the
+// chain's own record; this shows the offers, signs a lender's escrow the way a stake is
+// signed (api() does it, from the `amount` on the body), and signs a borrower's
+// repayment bound to the loan.
+
+async function renderCredit() {
+  let info;
+  try { info = await api('/api/credit'); } catch (e) {
+    setKids($('#stage'), el('p', { class: 'hint neg' }, e.message));
+    return;
+  }
+  state.credit = info;
+  paintCredit();
+}
+
+/** No house edge: the house takes nothing here. Lenders set the price. */
+function creditInfoPanel(info) {
+  const p = $('#infoPanel');
+  setKids(p,
+    el('h3', {}, t('credit.title')),
+    el('div', { class: 'stat-row' },
+      el('span', { class: 'k' }, t('credit.maxRate')),
+      el('span', { class: 'v' }, `${(info.dials.maxRate * 100).toFixed(0)}%`)),
+    el('div', { class: 'stat-row' },
+      el('span', { class: 'k' }, t('credit.maxTerm')),
+      el('span', { class: 'v' }, t('credit.days', { n: info.dials.maxTermDays }))),
+    el('div', { class: 'stat-row' },
+      el('span', { class: 'k' }, t('credit.minRounds')),
+      el('span', { class: 'v' }, String(info.dials.minRounds))),
+    el('p', { class: 'hint' }, t('credit.noEdge')));
+  applyAll(p);
+}
+
+const daysLeft = (due) => Math.max(0, Math.ceil((due - Date.now() / 1000) / 86400));
+
+function paintCredit() {
+  const info = state.credit;
+  const amount = el('input', { class: 'mono', inputmode: 'decimal', value: fmt(info.dials.minAmount, 2) });
+  const rate = el('input', { class: 'mono', inputmode: 'decimal', value: '10' });
+  const term = el('input', { class: 'mono', inputmode: 'numeric', value: '7' });
+  const figure = el('span', { class: 'v pos' }, '');
+  const repaint = () => {
+    const units = Math.round(Number(amount.value || 0) * UNIT);
+    const r = Number(rate.value || 0) / 100;
+    figure.textContent = `${fmt(units + Math.floor(units * r))} ${info.symbol}`;
+  };
+  amount.oninput = repaint;
+  rate.oninput = repaint;
+  repaint();
+
+  const line = info.credit;
+  setKids($('#betPanel'),
+    el('div', { class: 'stat-card' },
+      el('div', { class: 'k' }, t('arc.balance')),
+      el('div', { class: 'v pos' }, `${fmt(info.balance)} ${info.symbol}`)),
+    el('label', { class: 'field' }, el('span', {}, t('credit.amount')), amount),
+    el('label', { class: 'field' }, el('span', {}, t('credit.rate')), rate),
+    el('label', { class: 'field' }, el('span', {}, t('credit.term')), term),
+    el('div', { class: 'stat-row' }, el('span', { class: 'k' }, t('credit.repayFigure')), figure),
+    el('button', {
+      class: 'primary big', style: 'margin-top:10px',
+      onclick: () => postOffer(amount.value, rate.value, term.value),
+    }, t('credit.post')),
+    el('p', { class: 'hint' }, t('credit.intro')),
+    line ? el('div', { class: 'stat-card', style: 'margin-top:10px' },
+      el('div', { class: 'k' }, t('credit.line')),
+      el('div', { class: `v ${line.eligible ? 'pos' : 'neg'}` },
+        line.eligible ? `${fmt(line.available)} ${info.symbol}` : t('credit.notEligible')),
+      line.eligible ? null : el('div', { class: 'hint' }, line.why)) : null,
+    !info.pubkey
+      ? el('button', { class: 'big', style: 'margin-top:8px', onclick: tokenModal }, t('tok.nav'))
+      : null);
+  applyAll($('#betPanel'));
+
+  const offerRow = (o, mine) => el('div', { class: 'challenge' },
+    el('div', {},
+      el('strong', {}, `${fmt(o.amount)} ${info.symbol}`),
+      el('span', { class: 'hint' },
+        ` ${(o.rate * 100).toFixed(1)}% · ${t('credit.days', { n: o.termDays })} · ${t('credit.repayFigure')} ${fmt(o.repay)}`)),
+    mine
+      ? el('button', { class: 'tiny', onclick: () => creditAct('/api/credit/withdraw', { id: o.id }) }, t('credit.withdraw'))
+      : el('button', { class: 'tiny primary', onclick: () => creditAct('/api/credit/take', { id: o.id }) }, t('credit.take')));
+
+  const loanRow = (l, borrowed) => {
+    const pay = el('input', { class: 'mono', inputmode: 'decimal', value: fmt(l.outstanding, 2), style: 'width:120px' });
+    const when = l.state === 'open'
+      ? (l.overdue ? t('credit.overdue') : t('credit.due', { n: daysLeft(l.due) }))
+      : t(`credit.state.${l.state}`);
+    return el('div', { class: 'challenge' },
+      el('div', {},
+        el('strong', {}, `${fmt(l.principal)} ${info.symbol}`),
+        el('span', { class: 'hint' },
+          ` ${t('credit.owed')} ${fmt(l.owed)} · ${t('credit.repaid')} ${fmt(l.repaid)} · ${when}`)),
+      borrowed && l.state !== 'repaid'
+        ? el('span', { class: 'row' }, pay, el('button', {
+          class: 'tiny primary',
+          onclick: () => creditAct('/api/credit/repay', { loanId: l.id, amount: pay.value, to: l.lender }),
+        }, t('credit.repay')))
+        : null);
+  };
+
+  const mineIds = new Set(info.myOffers.map((o) => o.id));
+  const others = info.offers.filter((o) => !mineIds.has(o.id));
+  setKids($('#stage'),
+    el('h2', { style: 'text-align:center' }, t('credit.title')),
+    info.myOffers.length
+      ? el('div', {}, el('h3', {}, t('credit.myOffers')),
+        el('div', { class: 'challenges' }, ...info.myOffers.map((o) => offerRow(o, true))))
+      : null,
+    el('h3', {}, t('credit.offers')),
+    others.length
+      ? el('div', { class: 'challenges' }, ...others.map((o) => offerRow(o, false)))
+      : el('p', { class: 'hint' }, t('credit.noneOpen')),
+    info.borrowed.length
+      ? el('div', {}, el('h3', {}, t('credit.borrowed')),
+        el('div', { class: 'challenges' }, ...info.borrowed.map((l) => loanRow(l, true))))
+      : null,
+    info.lent.length
+      ? el('div', {}, el('h3', {}, t('credit.lent')),
+        el('div', { class: 'challenges' }, ...info.lent.map((l) => loanRow(l, false))))
+      : null);
+  creditInfoPanel(info);
+}
+
+async function postOffer(amountText, rateText, termText) {
+  if (!requireLogin()) return;
+  try {
+    // `amount` on the body is what api() signs the escrow for, exactly as a stake.
+    await api('/api/credit/offer', {
+      method: 'POST', body: { amount: amountText, rate: Number(rateText) / 100, termDays: Number(termText) },
+    });
+    toast(t('credit.posted'));
+    renderCredit();
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
+async function creditAct(path, body) {
+  if (!requireLogin()) return;
+  try {
+    await api(path, { method: 'POST', body });
+    renderCredit();
+    loadFeed();
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
 // ------------------------------------------------------------------ matches
 // Head-to-head games played for tokens.
 //
@@ -4084,7 +4255,7 @@ async function claimFlag(id) {
 
 // Slots first: it is the game the site is built around and the one a new arrival should
 // land on. The rest follow in the order they were built.
-const GAMES = ['slots', 'bones', 'limbo', 'mines', 'crash', 'jigsaw', 'preferans', 'debertz', 'arcade', 'match'];
+const GAMES = ['slots', 'bones', 'limbo', 'mines', 'crash', 'jigsaw', 'preferans', 'debertz', 'arcade', 'match', 'credit'];
 
 /**
  * What each game is made of.
@@ -4107,6 +4278,7 @@ const GAME_SKIN = {
   preferans: { m: 'cotton', hue: 158 },  // felt table
   debertz:   { m: 'cotton', hue: 128 },
   match:     { m: 'cotton', hue: 32 },
+  credit:    { m: 'brass',  hue: 52 },   // a teller's brass grille
 };
 const skinOf = (g) => GAME_SKIN[g] || { m: 'tile', hue: 42 };
 
@@ -4185,6 +4357,7 @@ function renderGame() {
   else if (state.game === 'debertz') renderDebertz();
   else if (state.game === 'arcade') renderArcade();
   else if (state.game === 'match') renderMatch();
+  else if (state.game === 'credit') renderCredit();
   else renderCrash();
 }
 

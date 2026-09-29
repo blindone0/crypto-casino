@@ -29,6 +29,7 @@ const limbo = require('./games/limbo');
 const mines = require('./games/mines');
 const events = require('./events');
 const anticheat = require('./anticheat');
+const loans = require('./loans');
 const slots = require('./games/slots');
 const preferans = require('./games/preferans');
 const debertz = require('./games/debertz');
@@ -605,6 +606,34 @@ function build(cfg) {
     return tokenchain.registerKey(db, user.id, body.pubkey, cfg, { replace: !!body.replace });
   });
 
+  // ------------------------------------------------------------------ credit
+  add('GET', '/api/credit', async (ctx) => loans.lobby(db, cfg, ctx.auth ? ctx.auth.user : null));
+
+  add('POST', '/api/credit/offer', async (ctx, req) => {
+    const user = requireUser(ctx);
+    checkCsrf(req, ctx);
+    return loans.postOffer(db, cfg, user, await U.readJsonBody(req));
+  });
+
+  add('POST', '/api/credit/withdraw', async (ctx, req) => {
+    const user = requireUser(ctx);
+    checkCsrf(req, ctx);
+    return loans.withdrawOffer(db, cfg, user, (await U.readJsonBody(req)).id);
+  });
+
+  add('POST', '/api/credit/take', async (ctx, req) => {
+    const user = requireUser(ctx);
+    checkCsrf(req, ctx);
+    return loans.takeOffer(db, cfg, user, (await U.readJsonBody(req)).id);
+  });
+
+  add('POST', '/api/credit/repay', async (ctx, req) => {
+    const user = requireUser(ctx);
+    checkCsrf(req, ctx);
+    const body = await U.readJsonBody(req);
+    return loans.repay(db, cfg, user, { loanId: body.loanId, tx: body.tx });
+  });
+
   add('POST', '/api/token/transfer', async (ctx, req) => {
     const user = requireUser(ctx);
     checkCsrf(req, ctx);
@@ -1174,6 +1203,14 @@ function build(cfg) {
       } catch (e) {
         // Housekeeping must never take the server down with it.
         console.error(`  match sweep failed: ${e.message}`);
+      }
+      try {
+        const due = loans.sweepDefaults(db, cfg);
+        if ((due.seized || due.frozen) && level >= LEVELS.info) {
+          console.log(`  loan sweep: ${due.seized} seized, ${due.frozen} frozen`);
+        }
+      } catch (e) {
+        console.error(`  loan sweep failed: ${e.message}`);
       }
     };
     housekeeping();
