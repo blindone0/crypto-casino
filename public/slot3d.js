@@ -57,6 +57,7 @@ uniform float uDim;
 uniform float uWinV;     // v at the centre of a winning symbol, or -1 for none
 uniform float uRowHalf;  // half a symbol, in v
 uniform float uBlur;     // vertical smear while the drum is turning, in v
+uniform vec2 uTexel;     // one texel of the strip, in uv - for the emboss below
 
 varying vec3 vNormal;
 varying vec2 vUV;
@@ -94,7 +95,45 @@ void main() {
   float spec = pow(max(n.z, 0.0), 48.0) * 0.18;
 
   vec4 tex = strip(vUV);
-  vec3 lit = tex.rgb * (0.34 + 0.78 * d + fill + sheen) + spec;
+
+  // The symbols are printed onto the drum, and until now they were printed FLAT: the
+  // strip is pure albedo, so a gold seven and the wood behind it caught the light
+  // identically and the whole thing read as a sticker on a barrel.
+  //
+  // There is no normal map and there is not going to be one — the artwork is a fixed
+  // asset. But a symbol is a bright shape on a dark field, so the texture's own
+  // luminance IS a height field, near enough: sample the neighbours, take the gradient,
+  // and treat it as a perturbation of the surface normal. Raised edges then catch the
+  // key light on one side and fall into shadow on the other, which is what tells the
+  // eye that something is standing proud of the surface.
+  //
+  // Only the emboss is sampled unblurred. While the drum is turning the symbols are a
+  // smear anyway, and embossing a smear produces crawling noise rather than relief.
+  float hC = dot(texture2D(uTex, vUV).rgb, vec3(0.299, 0.587, 0.114));
+  float hX = dot(texture2D(uTex, vUV + vec2(uTexel.x, 0.0)).rgb, vec3(0.299, 0.587, 0.114));
+  float hY = dot(texture2D(uTex, vUV + vec2(0.0, uTexel.y)).rgb, vec3(0.299, 0.587, 0.114));
+
+  // Fade the relief out as the blur comes in, and with it the crawling.
+  float relief = 0.85 * (1.0 - smoothstep(0.0, 0.004, uBlur));
+  vec3 bumped = normalize(n + vec3((hC - hX) * relief, (hC - hY) * relief, 0.0));
+
+  // How much this texel is actually an edge. Away from one the gradient is ~0 and the
+  // bumped normal equals the flat one, so everything below reduces to what it was.
+  float slope = length(vec2(hC - hX, hC - hY));
+  float edgeAmt = smoothstep(0.02, 0.22, slope) * step(0.0005, relief);
+
+  // The diffuse term is nudged toward the bumped normal ONLY on edges. Applying it
+  // everywhere, which the first version did, lifted the whole barrel — the drum went
+  // from gold to pale cream and the emboss read as a lighting bug rather than as relief.
+  float dB = max(dot(bumped, key), 0.0);
+  float diff = mix(d, dB, 0.55 * edgeAmt);
+
+  // A tight glint along a raised edge, which is most of the difference between printed
+  // and struck. Gated by edgeAmt for the same reason.
+  float edge = pow(max(dot(bumped, normalize(key + vec3(0.0, 0.0, 1.0))), 0.0), 40.0)
+             * 0.40 * edgeAmt;
+
+  vec3 lit = tex.rgb * (0.34 + 0.78 * diff + fill + sheen) + spec + edge;
 
   // How square-on this part of the barrel is. The payline faces the viewer and the rows
   // above and below fall away from it, so letting brightness follow that gives the drum
@@ -286,6 +325,7 @@ export function createReels(host, opts = {}) {
     winV: gl.getUniformLocation(prog, 'uWinV'),
     rowHalf: gl.getUniformLocation(prog, 'uRowHalf'),
     blur: gl.getUniformLocation(prog, 'uBlur'),
+    texel: gl.getUniformLocation(prog, 'uTexel'),
   };
 
   // A drum wide enough that five sit side by side across the window with a small gap, and
@@ -425,6 +465,10 @@ export function createReels(host, opts = {}) {
       // motion and start reading as fog.
       const perFrame = Math.abs(d.vel) * 16 / (Math.PI * 2);
       gl.uniform1f(loc.blur, Math.min(perFrame * 0.6, 0.35 / perDrum));
+      // One texel of the strip, which stripTexture fixes at 256x2048. Set per draw
+      // rather than once because the uniform belongs to the program, and leaving it
+      // at its default (0,0) makes the emboss sample itself three times and vanish.
+      gl.uniform2f(loc.texel, 1 / 256, 1 / 2048);
       gl.uniformMatrix4fv(loc.model, false, modelMatrix(d.x, d.angle, halfW));
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, mesh.count);
     }
